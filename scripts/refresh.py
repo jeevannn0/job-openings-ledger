@@ -727,16 +727,26 @@ def sort_rows(rows: Iterable[Row], config: Config) -> list[Row]:
 
 # --------------------------------------------------------------------------- render
 
+COMPANY_LABELS = {"degraded": "cached data", "failed": "automated check unverified",
+                  "unchecked": "not auto-checked"}
+
+
 def stale_labels(state: State, config: Config) -> dict[str, str]:
+    """Per-company group label, from the same classification and reference time as the health panel.
+
+    Fixed wording only. A LIVE source gets no label; fresh held data is neutral "cached data"; only data
+    older than FRESHNESS_THRESHOLD is called stale. Labels describe this ledger's checks, never the employer.
+    """
     out = {}
-    for c in config.companies:
-        cs = state.companies[c]
-        # A seeded snapshot that no refresh has confirmed yet is labelled like a static source.
-        if cs.status == "static" or (cs.status == "seed" and cs.last_success is None):
-            out[c] = "not auto-checked"
-        elif cs.status == "stale":
-            last = iso_time(cs.last_success)
-            out[c] = f"stale since {label_for(last.astimezone(IST).date())}" if last else "not yet verified"
+    for h in source_health(state, config, health_reference(state)):
+        if h.state == "live":
+            continue
+        if h.state == "stale":
+            out[h.company] = STALE_PREFIX + label_for(h.success_at.astimezone(IST).date())
+        elif h.state == "unknown" and state.companies[h.company].status in ("seed", "static"):
+            out[h.company] = COMPANY_LABELS["unchecked"]      # seed snapshot or static source
+        else:
+            out[h.company] = COMPANY_LABELS["degraded" if h.state == "degraded" else "failed"]
     return out
 
 
@@ -748,6 +758,190 @@ def checked_text(state: State) -> str:
     return f"Checked {when.day} {MON[when.month - 1]} {when:%H:%M} IST"
 
 
+# --------------------------------------------------------------------------- source health
+# The public health panel is a positive-allowlist projection. It reads only CompanyState.status,
+# last_success and last_attempt, plus the count of published rows. detail, screened, removal_hold,
+# listing_total, stale_since and last_discovery_attempt never reach the page.
+
+FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # one refresh cadence plus scheduler slack
+SCHEDULE_CRON = "23 */6 * * *"          # UTC; must match .github/workflows/refresh.yml
+SCHEDULE_UTC_MINUTE = 23
+SCHEDULE_UTC_HOURS = (0, 6, 12, 18)     # 05:53, 11:53, 17:53, 23:53 IST
+HEALTH_STATES = ("live", "degraded", "stale", "failed", "unknown")     # display order
+HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least to most severe
+HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",
+                 "unknown": "UNKNOWN/UNCHECKED"}
+HEALTH_GLYPHS = {"live": "■", "degraded": "▲", "stale": "◷", "failed": "×", "unknown": "◇"}
+ATTEMPT_TEXT = {"accepted": "Accepted", "held": "Latest run held; previous data kept",
+                "first_snapshot": "No successful automated check yet; snapshot shown",
+                "first_empty": "No successful automated check yet", "unrecorded": "Outcome not recorded",
+                "none": "No attempt recorded"}
+LATE_TEXT = " · update not yet published"      # next slot + grace has passed with no newer page
+STALE_PREFIX = "stale since "                  # company label once cached data passes the threshold
+_DATETIME_ATTR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30")
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceHealth:
+    company: str
+    state: str                       # one of HEALTH_STATES
+    published: int                   # rows rendered on the page, never listing_total
+    attempt_at: dt.datetime | None
+    attempt: str                     # key of ATTEMPT_TEXT
+    success_at: dt.datetime | None
+    age: dt.timedelta | None         # reference - success_at, clamped at zero
+
+
+def classify_source(status: str, last_success: str | None, last_attempt: str | None,
+                    reference: dt.datetime | None) -> str:
+    """Health state from persisted status and timestamps; exactly FRESHNESS_THRESHOLD old is fresh."""
+    success, attempt = iso_time(last_success), iso_time(last_attempt)
+    if success is None:
+        return "failed" if attempt is not None and status == "stale" else "unknown"
+    if status not in ("ok", "stale") or reference is None:
+        return "unknown"
+    if reference - success > FRESHNESS_THRESHOLD:     # a future success counts as fresh
+        return "stale"
+    return "live" if status == "ok" else "degraded"
+
+
+def attempt_outcome(status: str, last_success: str | None, last_attempt: str | None, published: int) -> str:
+    """Key of ATTEMPT_TEXT. Only status and timestamps are read; a held run's reason never reaches the page."""
+    if iso_time(last_attempt) is None:
+        return "none"
+    if status == "ok":
+        return "accepted"
+    if status == "stale":
+        if iso_time(last_success):
+            return "held"
+        return "first_snapshot" if published else "first_empty"
+    return "unrecorded"
+
+
+def health_reference(state: State) -> dt.datetime | None:
+    """The run time the page describes: checked_at, else the newest recorded source timestamp."""
+    ref = iso_time(state.checked_at)
+    if ref:
+        return ref
+    times = [t for cs in state.companies.values()
+             for t in (iso_time(cs.last_success), iso_time(cs.last_attempt)) if t]
+    return max(times) if times else None
+
+
+def published_counts(state: State, config: Config) -> dict[str, int]:
+    """Rows the page renders by default (same age rule as render), per company."""
+    counts = {c: 0 for c in config.companies}
+    for r in state.jobs:
+        if max(0, (state.as_of - dt.date.fromisoformat(r.posted_date)).days) <= config.max_age_days:
+            counts[r.company] += 1
+    return counts
+
+
+def source_health(state: State, config: Config, reference: dt.datetime | None) -> list[SourceHealth]:
+    counts = published_counts(state, config)
+    out = []
+    for c in config.companies:
+        cs = state.companies[c]
+        status, success, attempt = cs.status, cs.last_success, cs.last_attempt
+        success_at = iso_time(success)
+        age = max(dt.timedelta(0), reference - success_at) if success_at and reference else None
+        out.append(SourceHealth(c, classify_source(status, success, attempt, reference), counts[c],
+                                iso_time(attempt), attempt_outcome(status, success, attempt, counts[c]),
+                                success_at, age))
+    return out
+
+
+def worst_state(states: Iterable[str]) -> str:
+    states = list(states)
+    return max(states, key=HEALTH_SEVERITY.index) if states else "unknown"
+
+
+def next_scheduled(reference: dt.datetime) -> dt.datetime:
+    """First cron slot strictly after reference, in IST. A schedule, not a guarantee."""
+    u = reference.astimezone(dt.timezone.utc)
+    for offset in (0, 1):
+        day = u.date() + dt.timedelta(days=offset)
+        for hour in SCHEDULE_UTC_HOURS:
+            slot = dt.datetime.combine(day, dt.time(hour, SCHEDULE_UTC_MINUTE), dt.timezone.utc)
+            if slot > u:
+                return slot.astimezone(IST)
+    raise AssertionError("unreachable: a slot exists within one day")
+
+
+def age_text(age: dt.timedelta) -> str:
+    minutes = max(0, int(age.total_seconds() // 60))
+    if minutes < 60:
+        return f"{minutes}m ago"
+    if minutes < 48 * 60:
+        return f"{minutes // 60}h {minutes % 60}m ago"
+    return f"{minutes // 1440}d ago"
+
+
+def ist_text(when: dt.datetime) -> str:
+    when = when.astimezone(IST)
+    return f"{when.day} {MON[when.month - 1]} {when:%H:%M} IST"
+
+
+def time_html(when: dt.datetime, attrs: str = "") -> str:
+    value = when.astimezone(IST).isoformat(timespec="seconds")
+    if not _DATETIME_ATTR.fullmatch(value):
+        raise ValueError("render: invalid health timestamp")
+    return f'<time{attrs} datetime="{value}">{ist_text(when)}</time>'
+
+
+def badge_html(state: str) -> str:
+    return (f'<span class="st st-{state}"><span class="g" aria-hidden="true">{HEALTH_GLYPHS[state]}</span> '
+            f'{HEALTH_LABELS[state]}</span>')
+
+
+def health_html(state: State, config: Config) -> tuple[str, str, str]:
+    """(data-ref attribute, summary line, table rows) for the source-health panel. Fixed wording only."""
+    reference = health_reference(state)
+    sources = source_health(state, config, reference)
+    ref_attr = f' data-ref="{reference.astimezone(IST).isoformat(timespec="seconds")}"' if reference else ""
+    counts = {s: sum(1 for h in sources if h.state == s) for s in HEALTH_STATES}
+    total = sum(h.published for h in sources)
+    parts = ['<span class="hs-t">Source health</span>',
+             f'<span class="hs-w"><span class="hs-wl">Worst</span> {badge_html(worst_state(h.state for h in sources))}</span>',
+             f'<span class="hs-n">{len(sources)} source{"" if len(sources) == 1 else "s"}:</span>']
+    for s in HEALTH_STATES:
+        hidden = "" if counts[s] else " hidden"
+        parts.append(f'<span class="hc" data-s="{s}"{hidden}><b>{counts[s]}</b> '
+                     f'<span class="g" aria-hidden="true">{HEALTH_GLYPHS[s]}</span> {HEALTH_LABELS[s]}</span>')
+    parts.append(f'<span class="hs-r">{total} record{"" if total == 1 else "s"}</span>')
+    # Phones keep hs-t, the worst badge and hs-x; the hs-wl word is visually hidden but still read,
+    # and hs-n, hc, hs-r and hs-c are hidden because nearby equivalents stay: #checked in the header,
+    # #total in the stats, per-row status in the expanded table.
+    checked = iso_time(state.checked_at)
+    parts.append(f'<span class="hs-c">Checked {time_html(checked)}</span>' if checked
+                 else '<span class="hs-c">Auto-check pending</span>')
+    if reference:
+        nxt = time_html(next_scheduled(reference), ' id="h-next"')
+        parts.append(f'<span class="hs-x">Next scheduled {nxt}<span id="h-late"></span></span>')
+    else:
+        slots = [dt.datetime(2000, 1, 1, h, SCHEDULE_UTC_MINUTE, tzinfo=dt.timezone.utc).astimezone(IST)
+                 for h in SCHEDULE_UTC_HOURS]
+        parts.append(f'<span class="hs-x">Next scheduled {", ".join(f"{s:%H:%M}" for s in slots)} IST</span>')
+    rows = []
+    for h in sources:
+        attempt = (f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + ATTEMPT_TEXT[h.attempt]
+        data = (f'{time_html(h.success_at)} <span class="age">{age_text(h.age)}</span>'
+                if h.success_at and h.age is not None else "None yet")
+        rows.append(f'<tr data-h="{h.state}"><th scope="row">{html.escape(h.company)}</th>'
+                    f'<td data-m="Status">{badge_html(h.state)}</td>'
+                    f'<td class="num" data-m="Published">{h.published}</td>'
+                    f'<td data-m="Latest attempt">{attempt}</td>'
+                    f'<td class="h-data" data-m="Last good data">{data}</td></tr>')
+    return ref_attr, "".join(parts), "\n".join(rows)
+
+
+def health_js() -> str:
+    return js_json({"fresh_ms": int(FRESHNESS_THRESHOLD.total_seconds() * 1000),
+                    "grace_ms": int((FRESHNESS_THRESHOLD - REFRESH_CADENCE).total_seconds() * 1000),
+                    "severity": list(HEALTH_SEVERITY), "glyphs": HEALTH_GLYPHS, "labels": HEALTH_LABELS,
+                    "late": LATE_TEXT, "stale": STALE_PREFIX})
+
+
 def render(state: State, template: str, config: Config) -> str:
     for r in state.jobs:
         validate_row(r, config)
@@ -755,6 +949,7 @@ def render(state: State, template: str, config: Config) -> str:
     visible = [r for r in rows if r[5] <= config.max_age_days]
     companies = len({r[0] for r in visible})
     day = long_date(state.as_of)
+    health_ref, health_summary, health_rows = health_html(state, config)
     values = {
         "DAY": html.escape(day),
         "DAY_UPPER": html.escape(day.upper()),
@@ -768,6 +963,13 @@ def render(state: State, template: str, config: Config) -> str:
         "ORDER_JS": js_json(list(config.companies)),
         "STALE_JS": js_json(stale_labels(state, config)),
         "AS_OF_JS": js_json(state.as_of.isoformat()),
+        "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),
+        "EMPTY_COUNT": str(len(state.empty_companies)),
+        "HEALTH_REF": health_ref,
+        "HEALTH_SUMMARY": health_summary,
+        "HEALTH_ROWS": health_rows,
+        "HEALTH_JS": health_js(),
+        "FRESH_LIMIT": html.escape(age_text(FRESHNESS_THRESHOLD).removesuffix(" ago")),
     }
     used: set[str] = set()
 
@@ -2275,16 +2477,13 @@ def run_refresh(state: State, config: Config, excluded: dict, now: dt.datetime,
 
 
 def meaningful(before: State, after: State) -> bool:
-    """True when data or status changed; volatile timestamps within the same IST day are ignored."""
-    def norm(s: State) -> dict:
-        d = json.loads(s.to_json())
-        d.pop("checked_at")
-        for c in d["companies"].values():
-            c.pop("last_attempt")
-            if c["last_success"]:
-                c["last_success"] = c["last_success"][:10]
-        return d
-    return norm(before) != norm(after)
+    """True when anything persisted changed, including checked_at and per-source attempt/success times.
+
+    The health panel classifies from the committed last_success, so every real refresh attempt must be
+    committed: dropping a same-day success would let a later held run load an older success and show
+    STALE where the cached data is still fresh. An offline run changes no timestamps and stays False.
+    """
+    return before.to_json() != after.to_json()
 
 
 def summary_markdown(outcomes: list[Outcome], after: State, changed: bool) -> str:

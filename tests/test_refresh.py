@@ -7,6 +7,7 @@ import datetime as dt
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -144,6 +145,72 @@ def ge_listing(ids, total=None):
 GE_LIST_URL = R.GE_LIST.format(city="Bengaluru", page=1)
 GE_IDS = ["R5055232", "R5055227", "R5056034", "R5055467"]
 
+# One compact breakpoint shared by the script (initial panel state) and the stylesheet (drawer chrome).
+COMPACT_MQ = "(max-width:900px),(max-height:500px)"
+
+
+def style_of(doc: str) -> str:
+    return re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
+
+
+def media_blocks(style: str) -> tuple[str, dict]:
+    """(rules outside any @media, {condition: body}) by brace matching; conditions keep source spelling."""
+    base, blocks, i = [], {}, 0
+    while True:
+        j = style.find("@media", i)
+        if j < 0:
+            base.append(style[i:])
+            return "".join(base), blocks
+        base.append(style[i:j])
+        open_ = style.index("{", j)
+        depth, k = 1, open_ + 1
+        while depth:
+            depth += {"{": 1, "}": -1}.get(style[k], 0)
+            k += 1
+        blocks[style[j + 6:open_]] = style[open_ + 1:k - 1]
+        i = k
+
+
+def css_rules(css: str) -> list:
+    """[(selectors, declarations)] for a flat rule list."""
+    return [([s.strip() for s in sel.split(",")], body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)]
+
+
+def hidden_selectors(css: str) -> set:
+    """Every selector, from any nesting level, given display:none. Selectors are split on commas."""
+    flat = re.sub(r"@media[^{]*\{", "", css)
+    return {s for sels, body in css_rules(flat) if re.search(r"(^|;)display:none", body) for s in sels}
+
+
+def media_matches(condition: str, width: int, height: int) -> bool:
+    """Evaluate the OR-list of (max-|min-)(width|height):Npx features the page uses."""
+    def one(q):
+        feats = re.findall(r"\((min|max)-(width|height):(\d+)px\)", q)
+        assert feats and re.fullmatch(r"(\((min|max)-(width|height):\d+px\)|and|\s)+", q), q
+        return all((width if dim == "width" else height) <= int(n) if op == "max" else
+                   (width if dim == "width" else height) >= int(n) for op, dim, n in feats)
+    return any(one(q.strip()) for q in condition.split(","))
+
+
+def oklch_luminance(value: str) -> float:
+    """WCAG relative luminance of an `oklch(L% C H)` token (OKLab -> linear sRGB, gamut-clipped)."""
+    l_pct, c, h = re.fullmatch(r"oklch\(([\d.]+)% ([\d.]+) ([\d.]+)\)", value).groups()
+    lightness, c, h = float(l_pct) / 100, float(c), math.radians(float(h))
+    a, b = c * math.cos(h), c * math.sin(h)
+    l_ = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (lightness - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    rgb = (4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+           -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+           -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
+    r, g, bl = (min(1.0, max(0.0, v)) for v in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+
+
+def contrast(x: str, y: str) -> float:
+    hi, lo = sorted((oklch_luminance(x), oklch_luminance(y)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
 
 # --------------------------------------------------------------------------- seed, render, template
 
@@ -183,10 +250,23 @@ class SeedAndRenderTests(unittest.TestCase):
             re.search(r'<div class="field"><label for="closing">.*?</select></div>', legacy, re.S).group(0),
             re.search(r"function match\(r\)\{.*?\}return true\}", legacy).group(0),
             re.search(r"daysToClose=s=>[^,]*,fmtClose=[^;]*;", legacy).group(0),
-            re.search(r"<style>.*?</style>", legacy, re.S).group(0),
         ]
         for s in snippets:
             self.assertIn(s, doc)
+        # Focused compact/filter invariants instead of the frozen fixture's whole stylesheet.
+        style = re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
+        mobile = style.split("@media(max-width:660px){", 1)[1]
+        for rule in ("table,thead,tbody,tr,th,td{display:block}",
+                     "td{display:grid;grid-template-columns:5rem minmax(0,1fr)",
+                     "#results summary{grid-template-columns:1rem minmax(0,1fr) auto;gap:.5rem;min-height:2.375rem",
+                     ".stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+                     ".il{display:inline}", "overflow-wrap:anywhere"):
+            self.assertIn(rule, mobile, rule)
+        self.assertIn(".drawer[open]>summary{display:none}", style.split("@media", 1)[0])   # wide: no open chrome
+        self.assertIn('<details class="drawer" id="filter-panel" open>', doc)
+        self.assertIn(f'mq=matchMedia("{COMPACT_MQ}")', doc)
+        self.assertIn("fp.open=hp.open=!mq.matches", doc)
+        self.assertIn("@media(prefers-reduced-motion:reduce)", style)
 
     def test_checked_and_stale_metadata(self):
         config, _e, state, template = env()
@@ -934,17 +1014,66 @@ class IqviaDiscoveryTests(unittest.TestCase):
 # --------------------------------------------------------------------------- misc
 
 class ChangeDetectionTests(unittest.TestCase):
-    def test_meaningful_ignores_volatile_timestamps(self):
+    def test_identical_state_is_not_meaningful(self):
         config, _e, state, _t = env()
-        later = dataclasses.replace(state, checked_at="2026-10-31T21:23+05:30",
-                                    companies={c: dataclasses.replace(s, last_attempt="2026-10-31T21:23+05:30")
-                                               for c, s in state.companies.items()})
-        self.assertFalse(R.meaningful(state, later))
-        changed = dataclasses.replace(later, jobs=later.jobs[1:])
-        self.assertTrue(R.meaningful(state, changed))
-        disc = dataclasses.replace(later, companies={**later.companies, "Siemens": dataclasses.replace(
-            later.companies["Siemens"], last_discovery_attempt="2026-10-31T21:23+05:30")})
-        self.assertTrue(R.meaningful(state, disc))
+        self.assertFalse(R.meaningful(state, R.load_state(json.loads(state.to_json()), config)))
+
+    def test_advancing_run_timestamps_are_meaningful(self):
+        _c, _e, state, _t = env()
+        state.checked_at = "2026-10-31T05:53+05:30"
+        state.companies["Siemens"] = dataclasses.replace(
+            state.companies["Siemens"], status="ok", last_success="2026-10-31T05:53+05:30",
+            last_attempt="2026-10-31T05:53+05:30")
+        when = "2026-10-31T11:53+05:30"        # same IST day as every timestamp above
+
+        def siemens(**kw):
+            return dataclasses.replace(state, companies={
+                **state.companies, "Siemens": dataclasses.replace(state.companies["Siemens"], **kw)})
+        cases = {"checked_at": dataclasses.replace(state, checked_at=when),
+                 "last_attempt": siemens(last_attempt=when),
+                 "last_success": siemens(last_success=when),
+                 "last_discovery_attempt": siemens(last_discovery_attempt=when),
+                 "rows": dataclasses.replace(state, jobs=state.jobs[1:])}
+        for name, after in cases.items():
+            with self.subTest(name):
+                self.assertTrue(R.meaningful(state, after))
+
+    def test_offline_run_is_not_meaningful(self):
+        config, excluded, state, _t = env()
+        state.checked_at = "2026-10-31T05:53+05:30"
+        after, _o = R.run_refresh(state, config, excluded, NOW, None)
+        self.assertEqual(after.checked_at, state.checked_at)
+        self.assertFalse(R.meaningful(state, after))
+
+    def test_same_day_success_is_kept_for_a_later_held_run(self):
+        """Regression: a 11:53 success must be committed so a 17:53 hold reads it, not the 05:53 one."""
+        config, _e, state, _t = env()
+        ist = lambda h, m: dt.datetime(2026, 10, 31, h, m, tzinfo=R.IST)   # noqa: E731
+        state.checked_at = R.stamp(ist(5, 53))
+        state.companies["Siemens"] = dataclasses.replace(
+            state.companies["Siemens"], status="ok", detail="ok",
+            last_success=R.stamp(ist(5, 53)), last_attempt=R.stamp(ist(5, 53)))
+        # 11:53 run succeeds; nothing else changes.
+        midday = dataclasses.replace(state, checked_at=R.stamp(ist(11, 53)), companies={
+            **state.companies, "Siemens": dataclasses.replace(state.companies["Siemens"],
+                                                              last_success=R.stamp(ist(11, 53)),
+                                                              last_attempt=R.stamp(ist(11, 53)))})
+        self.assertTrue(R.meaningful(state, midday))         # so the workflow commits it
+        committed = R.load_state(json.loads(midday.to_json()), config)
+        # 17:53 run is held; apply_result keeps last_success from whatever state was committed.
+        evening = ist(17, 53)
+        rows = rows_of(committed, "Siemens")
+        _r, cs, _x = R.apply_result(rows, committed.companies["Siemens"], R.held("Siemens", "x"), evening)
+        self.assertEqual((cs.status, cs.last_success), ("stale", R.stamp(ist(11, 53))))
+        self.assertEqual(R.classify_source(cs.status, cs.last_success, cs.last_attempt, evening), "degraded")
+        # Had the 11:53 success been dropped, the same hold would read 05:53 and wrongly show STALE.
+        _r, old_cs, _x = R.apply_result(rows, state.companies["Siemens"], R.held("Siemens", "x"), evening)
+        self.assertEqual(R.classify_source(old_cs.status, old_cs.last_success, old_cs.last_attempt, evening),
+                         "stale")
+        held = dataclasses.replace(committed, checked_at=R.stamp(evening),
+                                   companies={**committed.companies, "Siemens": cs})
+        self.assertTrue(R.meaningful(committed, held))
+        self.assertEqual(R.stale_labels(held, config).get("Siemens"), "cached data")
 
 
 class ConfigTests(unittest.TestCase):
@@ -2617,6 +2746,481 @@ class SeedConversionTests(unittest.TestCase):
         state.companies["ZS"] = dataclasses.replace(state.companies["ZS"], status="ok",
                                                     last_success="2026-10-31T18:00+05:30")
         self.assertNotIn('"ZS":', R.render(state, template, config).split("STALE=")[1].split(";")[0])
+
+
+# --------------------------------------------------------------------------- source health panel
+
+REF = dt.datetime(2026, 10, 31, 22, 47, tzinfo=R.IST)
+
+
+def iso(when: dt.datetime) -> str:
+    return when.astimezone(R.IST).isoformat(timespec="seconds")
+
+
+def health_section(doc: str) -> str:
+    return re.search(r'<section class="health".*?</section>', doc, re.S).group(0)
+
+
+class SourceHealthTests(unittest.TestCase):
+    def setUp(self):
+        self.config, _e, self.state, self.template = env()
+        self.state.checked_at = iso(REF)
+
+    def set_company(self, name, **kw):
+        self.state.companies[name] = dataclasses.replace(self.state.companies[name], **kw)
+
+    def all_states_state(self):
+        self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
+        self.set_company("JPMorganChase", status="stale", last_success=iso(REF - dt.timedelta(hours=2)),
+                         last_attempt=iso(REF))
+        self.set_company("GE HealthCare", status="ok", last_success=iso(REF - dt.timedelta(hours=7)),
+                         last_attempt=iso(REF - dt.timedelta(hours=7)))
+        self.set_company("GE Vernova", status="stale", last_success=None, last_attempt=iso(REF))
+        self.set_company("IQVIA", status="seed", last_success=None, last_attempt=None)
+        self.set_company("ZS", status="stale", last_success=iso(REF - dt.timedelta(days=3)), last_attempt=iso(REF))
+
+    def test_classification_states(self):
+        c, ref = R.classify_source, REF
+        fresh, old = iso(ref - dt.timedelta(hours=1)), iso(ref - dt.timedelta(hours=8))
+        self.assertEqual(c("ok", fresh, iso(ref), ref), "live")
+        self.assertEqual(c("stale", fresh, iso(ref), ref), "degraded")
+        self.assertEqual(c("ok", old, old, ref), "stale")
+        self.assertEqual(c("stale", old, iso(ref), ref), "stale")
+        self.assertEqual(c("stale", None, iso(ref), ref), "failed")
+        for status in ("seed", "static", "ok"):
+            self.assertEqual(c(status, None, None, ref), "unknown", status)
+        self.assertEqual(c("seed", fresh, None, ref), "unknown")
+        self.assertEqual(c("static", None, None, None), "unknown")
+        self.assertEqual(c("ok", fresh, fresh, None), "unknown")
+
+    def test_threshold_is_named_and_exact_boundary_is_fresh(self):
+        self.assertEqual(R.FRESHNESS_THRESHOLD, dt.timedelta(hours=6, minutes=30))
+        exact = iso(REF - R.FRESHNESS_THRESHOLD)
+        over = iso(REF - R.FRESHNESS_THRESHOLD - dt.timedelta(seconds=1))
+        self.assertEqual(R.classify_source("ok", exact, exact, REF), "live")
+        self.assertEqual(R.classify_source("stale", exact, iso(REF), REF), "degraded")
+        self.assertEqual(R.classify_source("ok", over, over, REF), "stale")
+        self.assertEqual(R.classify_source("stale", over, iso(REF), REF), "stale")
+
+    def test_future_success_is_clamped(self):
+        future = iso(REF + dt.timedelta(hours=3))
+        self.set_company("Siemens", status="ok", last_success=future, last_attempt=future)
+        h = R.source_health(self.state, self.config, REF)[0]
+        self.assertEqual((h.state, h.age), ("live", dt.timedelta(0)))
+        self.assertEqual(R.age_text(dt.timedelta(minutes=-90)), "0m ago")
+        self.assertIn('<span class="age">0m ago</span>', R.render(self.state, self.template, self.config))
+
+    def test_age_text(self):
+        self.assertEqual(R.age_text(dt.timedelta(minutes=59)), "59m ago")
+        self.assertEqual(R.age_text(dt.timedelta(hours=6, minutes=30)), "6h 30m ago")
+        self.assertEqual(R.age_text(dt.timedelta(hours=47, minutes=59)), "47h 59m ago")
+        self.assertEqual(R.age_text(dt.timedelta(days=3, hours=1)), "3d ago")
+
+    def test_schedule_slots_and_date_boundaries(self):
+        self.assertEqual(R.SCHEDULE_CRON, "23 */6 * * *")
+        workflow = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
+        self.assertIn(f'cron: "{R.SCHEDULE_CRON}"', workflow)
+        self.assertEqual(R.SCHEDULE_UTC_HOURS, tuple(range(0, 24, 6)))
+        ist = lambda *a: dt.datetime(*a, tzinfo=R.IST)   # noqa: E731
+        cases = [
+            (ist(2026, 10, 31, 5, 52), ist(2026, 10, 31, 5, 53)),
+            (ist(2026, 10, 31, 5, 53), ist(2026, 10, 31, 11, 53)),     # strictly after a slot
+            (ist(2026, 10, 31, 11, 53, 1), ist(2026, 10, 31, 17, 53)),
+            (ist(2026, 10, 31, 17, 53), ist(2026, 10, 31, 23, 53)),
+            (ist(2026, 10, 31, 22, 47), ist(2026, 10, 31, 23, 53)),
+            (ist(2026, 10, 31, 23, 53), ist(2026, 11, 1, 5, 53)),       # IST date rolls over
+            (ist(2026, 12, 31, 23, 54), ist(2027, 1, 1, 5, 53)),        # year rolls over
+            (ist(2026, 11, 1, 0, 0), ist(2026, 11, 1, 5, 53)),
+            (dt.datetime(2026, 11, 1, 0, 23, tzinfo=dt.timezone.utc), ist(2026, 11, 1, 11, 53)),
+        ]
+        for ref, expected in cases:
+            with self.subTest(ref):
+                got = R.next_scheduled(ref)
+                self.assertEqual(got, expected)
+                self.assertEqual(got.utcoffset(), dt.timedelta(hours=5, minutes=30))
+        self.assertEqual({f"{R.next_scheduled(ist(2026, 10, 31, h, 0)):%H:%M}" for h in (1, 7, 13, 19)},
+                         {"05:53", "11:53", "17:53", "23:53"})
+
+    def test_next_scheduled_uses_cron_not_last_attempt(self):
+        self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
+        section = health_section(R.render(self.state, self.template, self.config))
+        self.assertIn('Next scheduled <time id="h-next" datetime="2026-10-31T23:53:00+05:30">31 Oct 23:53 IST</time>',
+                      section)
+        self.assertIn('Checked <time datetime="2026-10-31T22:47:00+05:30">31 Oct 22:47 IST</time>', section)
+        self.assertNotIn("04:47", section)          # last_attempt + 6h
+        self.state.checked_at = None
+        for name in self.config.companies:
+            self.set_company(name, last_success=None, last_attempt=None)
+        section = health_section(R.render(self.state, self.template, self.config))
+        self.assertIn("Next scheduled 05:53, 11:53, 17:53, 23:53 IST", section)
+        self.assertIn("Auto-check pending", section)
+
+    def test_published_counts_match_rendered_rows_not_listing_total(self):
+        self.set_company("JPMorganChase", status="ok", listing_total=987654, last_success=iso(REF),
+                         last_attempt=iso(REF))
+        old = dataclasses.replace(rows_of(self.state, "JPMorganChase")[0],
+                                  posted_date=(TODAY - dt.timedelta(days=45)).isoformat())
+        self.state.jobs[self.state.jobs.index(rows_of(self.state, "JPMorganChase")[0])] = old
+        doc = R.render(self.state, self.template, self.config)
+        rows = json.loads(re.search(r"\nconst jobs=(\[\n.*?\n\]);\n", doc, re.S).group(1))
+        visible = [r for r in rows if r[5] <= self.config.max_age_days]
+        section = health_section(doc)
+        for company in self.config.companies:
+            n = sum(1 for r in visible if r[0] == company)
+            self.assertRegex(section, rf'<th scope="row">{re.escape(company)}</th>.*?'
+                                      rf'<td class="num" data-m="Published">{n}</td>')
+        self.assertNotIn("987654", doc)
+        self.assertIn(f'<span class="hs-r">{len(visible)} records</span>', section)
+        self.assertIn(f'<dd id="total">{len(visible)}</dd>', doc)
+        self.assertLess(len(visible), len(rows))
+
+    def test_private_and_unsafe_fields_never_render(self):
+        self.set_company("Siemens", status="stale", detail="zzdetailsentinel source error (KeyError)",
+                         last_success=iso(REF - dt.timedelta(hours=1)), last_attempt=iso(REF),
+                         stale_since="2026-10-29T03:17+05:30", last_discovery_attempt="2026-10-28T04:19+05:30",
+                         listing_total=876543, screened={"999991": "2026-10-30"},
+                         removal_hold={"at": "2026-10-30T09:11+05:30", "ids": ["999992", "999993"]})
+        doc = R.render(self.state, self.template, self.config)
+        for needle in ("zzdetailsentinel", "KeyError", "876543", "999991", "999992", "999993",
+                       "2026-10-29T03:17", "29 Oct 03:17", "2026-10-28T04:19", "28 Oct 04:19",
+                       "2026-10-30T09:11", "30 Oct 09:11", "removal", "screened", "listing_total",
+                       "stale_since", "last_discovery", "excluded_public", "EXCLUDED_PUBLIC_IDS_JSON", "alerts.json"):
+            self.assertNotIn(needle, doc, needle)
+        self.assertEqual([f.name for f in dataclasses.fields(R.SourceHealth)],
+                         ["company", "state", "published", "attempt_at", "attempt", "success_at", "age"])
+        self.assertEqual(set(json.loads(R.health_js())),
+                         {"fresh_ms", "grace_ms", "severity", "glyphs", "labels", "late", "stale"})
+        self.assertIn("Latest run held; previous data kept", health_section(doc))
+
+    def test_semantic_text_and_glyph_markup(self):
+        self.all_states_state()
+        doc = R.render(self.state, self.template, self.config)
+        section = health_section(doc)
+        expected = {"Siemens": "live", "JPMorganChase": "degraded", "GE HealthCare": "stale",
+                    "GE Vernova": "failed", "IQVIA": "unknown", "ZS": "stale"}
+        got = dict((c, s) for s, c in re.findall(r'<tr data-h="([a-z]+)"><th scope="row">([^<]+)</th>', section))
+        self.assertEqual(got, expected)
+        for s, (glyph, label) in {"live": ("■", "LIVE"), "degraded": ("▲", "DEGRADED/CACHED"), "stale": ("◷", "STALE"),
+                                  "failed": ("×", "FAILED"), "unknown": ("◇", "UNKNOWN/UNCHECKED")}.items():
+            self.assertIn(f'<span class="st st-{s}"><span class="g" aria-hidden="true">{glyph}</span> {label}</span>',
+                          section)
+        glyphs = list(re.finditer("[■▲◷×◇]", section))
+        self.assertTrue(glyphs)
+        for m in glyphs:      # every decorative glyph sits alone inside an aria-hidden span
+            self.assertTrue(section[:m.start()].endswith('<span class="g" aria-hidden="true">'))
+            self.assertTrue(section[m.end():].startswith("</span>"))
+        self.assertIn('<span class="hs-w"><span class="hs-wl">Worst</span> <span class="st st-failed">', section)
+        self.assertIn('<span class="hc" data-s="stale"><b>2</b>', section)
+        self.assertIn('<span class="hc" data-s="live"><b>1</b>', section)
+        self.assertRegex(section, r'<th scope="row">GE Vernova</th>.*?<time datetime="[^"]+">[^<]+</time> · '
+                                  r'No successful automated check yet; snapshot shown</td>')
+        self.assertRegex(section, r'<th scope="row">Siemens</th>.*?</time> · Accepted</td>')
+        self.assertRegex(section, r'<th scope="row">JPMorganChase</th>.*?</time> · '
+                                  r'Latest run held; previous data kept</td>')
+        self.assertIn("No attempt recorded", section)
+        self.assertIn("None yet", section)
+        for th in ("Source", "Status", "Published", "Latest attempt", "Last good data"):
+            self.assertIn(f'<th scope="col">{th}</th>', section)
+        self.assertIn("<caption", section)
+        for value in re.findall(r'<time[^>]* datetime="([^"]+)"', section):
+            self.assertRegex(value, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30$")
+            self.assertIsNotNone(dt.datetime.fromisoformat(value))
+        words = re.findall(r"</time> · ([A-Za-z ,;]+)<", section)
+        self.assertEqual(len(words), 5)                      # every recorded attempt, IQVIA has none
+        for word in words:
+            self.assertIn(word, R.ATTEMPT_TEXT.values())
+        for gone in ("Not completed", "overdue"):
+            self.assertNotIn(gone, doc, gone)
+        for gone in ("Completed", "outage", " down", "unavailable"):
+            self.assertNotIn(gone, section.lower() if gone.islower() else section, gone)
+
+    def test_company_labels_match_health_panel(self):
+        self.all_states_state()
+        self.set_company("GE HealthCare", status="static", last_success=None, last_attempt=None)
+        doc = R.render(self.state, self.template, self.config)
+        labels = json.loads(re.search(r",STALE=(\{.*?\}),H=", doc).group(1))
+        self.assertEqual(labels, {
+            "JPMorganChase": "cached data",                    # held 2h ago: fresh, so not "stale"
+            "GE Vernova": "automated check unverified",       # failed: no success yet
+            "IQVIA": "not auto-checked",                       # seed snapshot
+            "GE HealthCare": "not auto-checked",               # static
+            "ZS": "stale since Oct 28",                        # held, data older than 6h30
+        })
+        self.assertEqual(labels, R.stale_labels(self.state, self.config))
+        rows = dict((c, s) for s, c in re.findall(r'<tr data-h="([a-z]+)"><th scope="row">([^<]+)</th>',
+                                                   health_section(doc)))
+        for company, label in labels.items():
+            if label.startswith("stale"):
+                self.assertEqual(rows[company], "stale")
+            else:
+                self.assertNotEqual(rows[company], "stale", company)
+        self.assertNotIn("Siemens", labels)                    # LIVE: no label
+        for word in ("outage", "down", "error", "unavailable", "failed"):
+            self.assertFalse(any(word in v for v in labels.values()), word)
+        self.assertLessEqual(set(labels.values()) - {"stale since Oct 28"}, set(R.COMPANY_LABELS.values()))
+
+    def test_company_label_turns_stale_only_past_threshold(self):
+        exact = REF - R.FRESHNESS_THRESHOLD
+        self.set_company("JPMorganChase", status="stale", last_success=iso(exact), last_attempt=iso(REF))
+        self.assertEqual(R.stale_labels(self.state, self.config)["JPMorganChase"], "cached data")
+        self.set_company("JPMorganChase", last_success=iso(exact - dt.timedelta(minutes=1)))
+        self.assertEqual(R.stale_labels(self.state, self.config)["JPMorganChase"], "stale since Oct 31")
+        # A scheduler gap ages an accepted source too, with the same wording.
+        self.set_company("Siemens", status="ok", last_success=iso(REF - dt.timedelta(hours=7)),
+                         last_attempt=iso(REF - dt.timedelta(hours=7)))
+        self.assertEqual(R.stale_labels(self.state, self.config)["Siemens"], "stale since Oct 31")
+
+    def test_attempt_wording_is_fixed(self):
+        self.assertEqual(R.ATTEMPT_TEXT, {
+            "accepted": "Accepted", "held": "Latest run held; previous data kept",
+            "first_snapshot": "No successful automated check yet; snapshot shown",
+            "first_empty": "No successful automated check yet", "unrecorded": "Outcome not recorded",
+            "none": "No attempt recorded"})
+        t = iso(REF)
+        self.assertEqual(R.attempt_outcome("ok", t, t, 3), "accepted")
+        self.assertEqual(R.attempt_outcome("stale", t, t, 3), "held")
+        self.assertEqual(R.attempt_outcome("stale", t, t, 0), "held")
+        self.assertEqual(R.attempt_outcome("stale", None, t, 3), "first_snapshot")
+        self.assertEqual(R.attempt_outcome("stale", None, t, 0), "first_empty")
+        self.assertEqual(R.attempt_outcome("seed", None, t, 3), "unrecorded")
+        self.assertEqual(R.attempt_outcome("ok", t, None, 3), "none")
+        # A first failure with no published rows, and its reason never reaches the page.
+        self.set_company("ZS", status="stale", detail="zzreason HTTP 503", last_success=None, last_attempt=t)
+        self.state.jobs = [r for r in self.state.jobs if r.company != "ZS"]
+        doc = R.render(self.state, self.template, self.config)
+        self.assertRegex(health_section(doc), r'<th scope="row">ZS</th>.*?</time> · '
+                                              r'No successful automated check yet</td>')
+        self.assertNotIn("zzreason", doc)
+        self.assertNotIn("503", health_section(doc))
+
+    def test_scope_note_contextualises_failed(self):
+        doc = R.render(self.state, self.template, self.config)
+        section = health_section(doc)
+        self.assertIn('<p class="h-scope">Statuses describe this ledger’s automated checks and cached data, '
+                      'not employer site availability. FAILED means no automated check has succeeded yet.</p>',
+                      section)
+        self.assertLess(section.index('class="h-scope"'), section.index("<table"))
+        self.assertEqual(R.HEALTH_LABELS["failed"], "FAILED")
+        self.assertEqual(R.FRESHNESS_THRESHOLD, dt.timedelta(hours=6, minutes=30))
+        self.assertIn("Data counts as fresh for 6h 30m after its last successful check.", section)
+
+    def test_source_order_matches_config(self):
+        section = health_section(R.render(self.state, self.template, self.config))
+        self.assertEqual(re.findall(r'<th scope="row">([^<]+)</th>', section), list(self.config.companies))
+
+    def test_no_terminal_roles_external_assets_or_effects(self):
+        doc = R.render(self.state, self.template, self.config)
+        self.assertEqual(set(re.findall(r'\brole="([^"]+)"', doc)), {"status"})
+        style = re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
+        effects = style.split("@media(prefers-reduced-motion:reduce)")[0]
+        for banned in ("@import", "url(", "@font-face", "gradient", "text-shadow", "box-shadow", "@keyframes",
+                       "animation", "transition", "blink", "filter:", "scanline", "border-radius:."):
+            self.assertNotIn(banned, effects.lower(), banned)
+        self.assertIn("border-radius:0", style)
+        self.assertNotRegex(doc, r"(?i)<link\b|<img\b|<iframe\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
+                                 r"typewriter|setInterval|requestAnimationFrame")
+        self.assertNotRegex(R.read_text(os.path.join(ROOT, R.TEMPLATE_PATH)), r"https?://")
+        body_font = re.search(r"--body:([^;]+);", style).group(1)
+        self.assertTrue(body_font.startswith("system-ui"))
+        self.assertNotIn("mono", body_font.lower())
+
+    def test_compact_mobile_health_panel(self):
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn('<details id="health-panel"><summary>', doc)     # collapsed without script
+        self.assertIn('<details class="drawer" id="filter-panel" open>', doc)
+        # Phones and short landscape viewports start collapsed; the initial state is set once, so a
+        # later resize or rotation never overrides the reader's own open/closed choice.
+        self.assertIn(f'mq=matchMedia("{COMPACT_MQ}")', doc)
+        self.assertIn("fp.open=hp.open=!mq.matches;", doc)
+        script = re.search(r"<script>(.*?)</script>", doc, re.S).group(1)
+        for banned in ("addEventListener(\"change\"", "addEventListener('change'", "\"resize\"", "onresize",
+                       ".onchange", "e.matches"):
+            self.assertNotIn(banned, script, banned)
+        style = re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
+        self.assertRegex(style.split("@media", 1)[0], r"#health-panel>summary\{display:flex;flex-wrap:wrap")
+        mobile = style.split("@media(max-width:660px){", 1)[1]
+        for rule in ("#health-panel>summary{gap:0 .5rem;padding:.25rem .45rem;font-size:.6875rem",
+                     ".h-table,.h-table tbody,.h-table tr,.h-table th,.h-table td{display:block}",
+                     ".h-table tr{display:flex;flex-wrap:wrap", ".h-wrap{overflow:visible",
+                     "line-height:1.3;overflow-wrap:anywhere}"):
+            self.assertIn(rule, mobile, rule)
+        self.assertIn("body{margin:0;min-width:20rem", style)
+        wide = style.split("@media(max-width:660px)", 1)[0]
+        for cls in ("hs-w", "hs-wl", "hs-n", "hc", "hs-r", "hs-c", "intro-copy", "readout"):   # >660px keeps all
+            self.assertNotIn(f".{cls}", hidden_selectors(wide), cls)
+        summary = re.search(r'<details id="health-panel"><summary>(.*?)</summary>', doc, re.S).group(1)
+        classes = re.findall(r'<span class="(hs-[a-z]|hc)"', summary)
+        self.assertEqual(classes, ["hs-t", "hs-w", "hs-n", *["hc"] * 5, "hs-r", "hs-c", "hs-x"])
+        self.assertIn('<span class="hs-c">', summary)
+        self.assertIn('<span class="hs-x">Next scheduled', summary)
+        # The fragments hidden on phones have nearby visible equivalents.
+        self.assertIn('<span class="il" id="checked">', doc)
+        self.assertIn('<dd id="total">', doc)
+        self.assertIn('<section class="intro"><div class="intro-copy"><h2>', doc)
+        self.assertIn('<div class="readout" role="status" aria-live="polite">', doc)
+
+    def test_compact_breakpoint_keeps_closed_filters_reachable(self):
+        # Regression: the script closed the panels at (max-height:500px) while the drawer summary was
+        # only shown at <=660px, so 844x390 and 932x430 had a closed filter panel with no control.
+        doc = R.render(self.state, self.template, self.config)
+        js_mq = re.search(r'mq=matchMedia\("([^"]+)"\)', doc).group(1)
+        self.assertEqual(js_mq, COMPACT_MQ)
+        base, blocks = media_blocks(style_of(doc))
+        self.assertIn(COMPACT_MQ, blocks)                                 # same spelling in CSS and JS
+        compact = dict((tuple(s), b) for s, b in css_rules(blocks[COMPACT_MQ]))
+        self.assertIn("display:flex", compact[(".drawer[open]>summary",)])
+        # Outside the compact query only an *open* drawer hides its summary; a closed one always shows
+        # it, so a reader who resizes after closing the panel still has the control.
+        self.assertRegex(base, r"(^|[}\n])\.drawer>summary\{display:flex;")
+        self.assertIn(".drawer[open]>summary", hidden_selectors(base))
+        drawer_hidden = {s for s in hidden_selectors(style_of(doc)) if s.startswith(".drawer")}
+        self.assertEqual(drawer_hidden, {".drawer[open]>summary", ".drawer>summary::-webkit-details-marker"})
+        for (w, h), closed in {(320, 568): True, (390, 844): True, (402, 874): True, (430, 932): True,
+                               (720, 450): True, (768, 1024): True, (844, 390): True, (932, 430): True,
+                               (900, 1200): True, (901, 501): False, (1440, 900): False}.items():
+            with self.subTest(f"{w}x{h}"):
+                starts_closed = media_matches(js_mq, w, h)
+                self.assertEqual(starts_closed, closed)                   # tablets collapse too
+                shows_open_summary = media_matches(COMPACT_MQ, w, h)
+                self.assertEqual(shows_open_summary, starts_closed)
+        # The panels start open in the markup (no-script) and the script sets only the initial state.
+        self.assertIn('<details class="drawer" id="filter-panel" open>', doc)
+        self.assertIn("fp.open=hp.open=!mq.matches;", doc)
+        self.assertNotIn("mq.addEventListener", doc)
+        self.assertNotIn("addListener", doc)
+        self.assertIn('<summary><span class="fs-label">Filters</span><span id="filter-state">', doc)
+
+    def test_control_borders_use_high_contrast_token(self):
+        style = style_of(R.render(self.state, self.template, self.config))
+        token = dict(re.findall(r"--([a-z0-9]+):(oklch\([^)]*\))", style))
+        for bg in ("n0", "n1", "n2"):                     # control fill, panel/page fill, hover fill
+            self.assertGreaterEqual(contrast(token["ctl"], token[bg]), 3.0, bg)
+        self.assertLess(contrast(token["n3"], token["n0"]), 3.0)          # decorative rules stay quiet
+        base, _blocks = media_blocks(style)
+        rules = dict((tuple(s), b) for s, b in css_rules(base))
+        for sel in ((".field input", ".field select"), (".drawer>summary",), (".health",)):
+            self.assertIn("border:1px solid var(--ctl)", rules[sel], sel)
+        self.assertEqual(len(re.findall(r"var\(--ctl\)", style)), 3)     # controls only, not every rule
+
+    def test_phone_readout_is_visually_hidden_live_region(self):
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn('<div class="readout" role="status" aria-live="polite">', doc)
+        _base, blocks = media_blocks(style_of(doc))
+        phone = dict((tuple(s), b) for s, b in css_rules(blocks["(max-width:660px)"]))
+        clip = phone[(".hs-wl", ".readout")]
+        for decl in ("position:absolute", "width:1px", "height:1px", "overflow:hidden", "clip-path:inset(50%)"):
+            self.assertIn(decl, clip, decl)
+        all_hidden = hidden_selectors(style_of(doc))
+        self.assertNotIn(".readout", all_hidden)                          # stays in the accessibility tree
+        self.assertNotRegex(style_of(doc), r"\.readout[^{}]*\{[^}]*visibility:hidden")
+        self.assertEqual(phone[(".intro",)], "display:block;padding:0;border:0")
+        # The live region keeps updating, and the visible equivalents remain.
+        for snippet in ('document.querySelector("#status-total").textContent=visibleJobs.length',
+                        'document.querySelector("#status-companies").textContent=cc',
+                        'document.querySelector("#status-filter").textContent=f.join(" / ")',
+                        'document.querySelector("#total").textContent=visibleJobs.length',
+                        'document.querySelector("#filter-state").textContent='):
+            self.assertIn(snippet, doc)
+
+    def test_phone_health_summary_is_bounded_for_any_state_mix(self):
+        self.all_states_state()
+        doc = R.render(self.state, self.template, self.config)
+        summary = re.search(r'<details id="health-panel"><summary>(.*?)</summary>', doc, re.S).group(1)
+        self.assertEqual({s for s in ("live", "degraded", "stale", "failed", "unknown")
+                          if f'<span class="hc" data-s="{s}"><b>' in summary},
+                         set(R.HEALTH_STATES))                            # all five coexist
+        self.assertIn('<span class="hs-w"><span class="hs-wl">Worst</span> <span class="st st-failed">'
+                      '<span class="g" aria-hidden="true">×</span> FAILED</span></span>', summary)
+        _base, blocks = media_blocks(style_of(doc))
+        phone_hidden = hidden_selectors(blocks["(max-width:660px)"])
+        for cls in (".hs-n", ".hc", ".hs-r", ".hs-c"):                     # counts, prefix, total, checked
+            self.assertIn(cls, phone_hidden, cls)
+        for cls in (".hs-t", ".hs-w", ".hs-x", ".st", ".hs-wl", "#h-next", "#h-late"):
+            self.assertNotIn(cls, hidden_selectors(style_of(doc)), cls)
+        # With the variable-length fragments gone, the phone summary is three fixed-length parts.
+        visible = re.sub(r'<span class="hc"[^>]*><b>\d+</b> <span class="g"[^>]*>.</span> [A-Z/]+</span>', "",
+                         summary)
+        visible = re.sub(r'<span class="(hs-n|hs-r|hs-c)">.*?</span>', "", visible)
+        visible = re.sub(r'<span class="hs-wl">Worst</span> ', "", visible)
+        text = re.sub(r"<[^>]+>", "", visible)
+        self.assertEqual(text, "Source health× FAILEDNext scheduled 31 Oct 23:53 IST")
+
+    def test_last_good_data_has_visual_separator(self):
+        self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
+        section = health_section(R.render(self.state, self.template, self.config))
+        self.assertRegex(section, r'<td class="h-data" data-m="Last good data"><time datetime="[^"]+">'
+                                  r'[^<]+</time> <span class="age">0m ago</span></td>')
+        rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style_of(R.render(
+            self.state, self.template, self.config)))[0]))
+        self.assertEqual(rules[(".h-data .age:before",)], 'content:"· ";content:"· "/"";color:var(--t2)')
+
+    def test_placeholder_accounting(self):
+        names = set(R.PLACEHOLDER.findall(self.template))
+        self.assertTrue({"SOURCE_COUNT", "EMPTY_COUNT", "HEALTH_REF", "HEALTH_SUMMARY", "HEALTH_ROWS",
+                         "HEALTH_JS", "FRESH_LIMIT"} <= names)
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIsNone(R.PLACEHOLDER.search(doc))
+        for name in sorted(names):
+            with self.subTest(name), self.assertRaises(ValueError):
+                R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
+        self.assertNotIn("Companies checked", doc)
+        self.assertIn('<dt>Automated sources</dt><dd id="sources">6</dd>', doc)
+        self.assertIn(f"Informational: no date-verifiable match ({len(self.state.empty_companies)})", doc)
+        self.assertEqual(len(self.state.empty_companies), 7)
+
+    def test_all_stale_scheduler_silence(self):
+        last = REF - dt.timedelta(hours=20)
+        for name in self.config.companies:
+            self.set_company(name, status="stale", last_success=iso(last), last_attempt=iso(REF))
+        section = health_section(R.render(self.state, self.template, self.config))
+        self.assertEqual(re.findall(r'<tr data-h="([a-z]+)">', section), ["stale"] * 6)
+        self.assertIn('<span class="hs-wl">Worst</span> <span class="st st-stale">', section)
+        self.assertIn('<span class="hc" data-s="stale"><b>6</b>', section)
+        self.assertIn('<span class="hc" data-s="live" hidden><b>0</b>', section)
+        self.assertIn('<span class="age">20h 0m ago</span>', section)
+        self.assertIn('<span id="h-late"></span>', section)
+        # A silent scheduler leaves an old page up: the browser re-ages it and downgrades fresh rows.
+        doc = R.render(self.state, self.template, self.config)
+        h = json.loads(re.search(r",H=(\{.*?\});\n", doc).group(1))
+        self.assertEqual(h["fresh_ms"], 6.5 * 3600 * 1000)
+        self.assertEqual(h["grace_ms"], 30 * 60 * 1000)
+        self.assertEqual(h["severity"], list(R.HEALTH_SEVERITY))
+        for snippet in ('if(!(now>ref))return', 'd>H.fresh_ms&&(tr.dataset.h==="live"||tr.dataset.h==="degraded")',
+                        'badge(tr.querySelector(".st"),"stale")', 'now>Date.parse(nx.dateTime)+H.grace_ms',
+                        'document.querySelector("#h-late").textContent=H.late',
+                        'STALE[tr.querySelector("th").textContent]=`${H.stale}'):
+            self.assertIn(snippet, doc)
+        self.assertEqual(h["late"], " · update not yet published")
+        self.assertEqual(h["stale"], "stale since ")
+        self.assertNotIn("overdue", doc)
+        # Every company label matches its panel row: all six are stale since the same day.
+        self.assertEqual(R.stale_labels(self.state, self.config),
+                         {c: "stale since Oct 31" for c in self.config.companies})
+
+    def test_alert_shape_and_status_unchanged(self):
+        self.assertEqual(R.ALERT_FIELDS, (
+            "schema", "refresh_id", "checked_at", "as_of", "total_jobs", "company_count", "new_count",
+            "new_jobs", "remaining_new_count", "removed_count", "closing_soon_count", "closing_soon",
+            "notification_title", "notification_body", "ledger_url", "source_status"))
+        self.all_states_state()
+        outcome = {"schema": 1, "run_at": iso(REF), "mode": "offline",
+                   "state_sha256": R.sha256_text(self.state.to_json()), "added": [], "removed_count": 0}
+        a = R.build_alert(self.state, outcome, self.config, "https://example-owner.github.io/job-openings-ledger/")
+        self.assertEqual(tuple(a), R.ALERT_FIELDS)
+        self.assertEqual(a["source_status"], {"Siemens": "ok", "JPMorganChase": "stale", "GE HealthCare": "ok",
+                                              "GE Vernova": "stale", "IQVIA": "static", "ZS": "stale"})
+
+    def test_committed_index_health_matches_state(self):
+        config, state, template = R.load_all(ROOT)
+        doc = R.read_text(os.path.join(ROOT, R.INDEX_PATH))
+        self.assertEqual(doc, R.render(state, template, config))
+        section = health_section(doc)
+        counts = R.published_counts(state, config)
+        ref = R.health_reference(state)
+        for h in R.source_health(state, config, ref):
+            self.assertIn(f'<tr data-h="{h.state}"><th scope="row">{h.company}</th>', section)
+            self.assertEqual(h.published, counts[h.company])
+        self.assertIn(f'<span class="hs-r">{sum(counts.values())} records</span>', section)
 
 
 if __name__ == "__main__":
