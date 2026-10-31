@@ -1,0 +1,30 @@
+{
+  "note": "Synthetic public-portal responses for an offline end-to-end dry run. Unlisted requests act as outages.",
+  "responses": [
+    {"method": "GET", "url": "https://jobs.siemens.com/robots.txt", "status": 200, "content_type": "text/plain", "body": "User-agent: *\nDisallow: /admin/\n"},
+    {"method": "GET", "url": "https://jobs.iqvia.com/robots.txt", "status": 200, "content_type": "text/plain", "body": "User-agent: *\nAllow: /\n"},
+    {"method": "GET", "url": "https://iqvia.wd1.myworkdayjobs.com/robots.txt", "status": 404, "body": "not found"},
+    {"method": "GET", "url": "https://careers.gevernova.com/robots.txt", "status": 200, "content_type": "text/plain", "body": "User-agent: *\nDisallow: /admin/\n"},
+
+    {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/?folderRecordsPerPage=6&folderOffset=0&search=Bangalore", "status": 200, "body_file": "siemens_list.html"},
+    {"method": "POST", "url": "https://jobs.siemens.com/en_US/externaljobs/SearchJobs", "status": 200, "body_file": "siemens_list.html"},
+    {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/528001", "status": 200, "body_file": "siemens_detail_new.html"},
+    {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/520000", "status": 200, "body_file": "siemens_detail_old.html"},
+    {"method": "GET", "url_prefix": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/", "status": 200, "body_file": "siemens_detail.html"},
+
+    {"method": "POST", "url": "https://iqvia.wd1.myworkdayjobs.com/wday/cxs/iqvia/IQVIA/jobs", "status": 200, "content_type": "application/json",
+     "body": "{\"total\":4,\"jobPostings\":[{\"title\":\"Assoc Clin DB Validation Mgr\",\"externalPath\":\"/job/Kochi-India/Assoc-Clin-DB-Validation-Mgr_R1553313\",\"postedOn\":\"Posted Yesterday\"},{\"title\":\"Clin Data Spec\",\"externalPath\":\"/job/Kochi-India/Clin-Data-Spec_R1566373\",\"postedOn\":\"Posted 5 Days Ago\"},{\"title\":\"Clin Data Spec\",\"externalPath\":\"/job/Kochi-India/Clin-Data-Spec_R1590001\",\"postedOn\":\"Posted 3 Days Ago\"},{\"title\":\"Clinical Data Coordinator\",\"externalPath\":\"/job/Bangalore-India/Clinical-Data-Coordinator_R1580001\",\"postedOn\":\"Posted Yesterday\"}]}"},
+    {"method": "GET", "url": "https://iqvia.wd1.myworkdayjobs.com/wday/cxs/iqvia/IQVIA/job/Kochi-India/Assoc-Clin-DB-Validation-Mgr_R1553313", "status": 200, "content_type": "application/json",
+     "body": "{\"jobPostingInfo\":{\"jobReqId\":\"R1553313\",\"title\":\"Assoc Clin DB Validation Mgr\",\"posted\":true,\"canApply\":true,\"startDate\":\"2026-10-30\",\"endDate\":\"2026-11-24\",\"location\":\"Kochi, India\"}}"},
+    {"method": "GET", "url": "https://iqvia.wd1.myworkdayjobs.com/wday/cxs/iqvia/IQVIA/job/Kochi-India/Clin-Data-Spec_R1566373", "status": 200, "content_type": "application/json",
+     "body": "{\"jobPostingInfo\":{\"jobReqId\":\"R1566373\",\"title\":\"Clin Data Spec\",\"posted\":true,\"canApply\":true,\"startDate\":\"2026-10-26\",\"endDate\":\"2026-11-03\",\"location\":\"Kochi, India\"}}"},
+    {"method": "GET", "url": "https://iqvia.wd1.myworkdayjobs.com/wday/cxs/iqvia/IQVIA/job/Bangalore-India/Clinical-Data-Coordinator_R1580001", "status": 200, "content_type": "application/json",
+     "body": "{\"jobPostingInfo\":{\"jobReqId\":\"R1580001\",\"title\":\"Clinical Data Coordinator\",\"posted\":true,\"canApply\":true,\"startDate\":\"2026-10-30\",\"endDate\":\"2026-11-16\",\"location\":\"Bangalore, India\",\"jobDescription\":\"<p>At least 1 year of experience in clinical data management.</p>\"}}"},
+    {"method": "GET", "url": "https://jobs.iqvia.com/en/jobs/R1580001-0", "status": 200, "body": "<html><head><title>Clinical Data Coordinator</title></head><body>Job ID R1580001</body></html>"},
+
+    {"method": "GET", "url": "https://careers.gevernova.com/jobs", "status": 200, "body": "<html><head><title>Jobs</title></head><body>Search jobs</body></html>"},
+    {"method": "POST", "url": "https://careers.gevernova.com/api/get-jobs?radius=15&filter%5Bcity%5D%5B0%5D=Bengaluru&enable_kilometers=false&page_size=20&page_number=1", "status": 200, "content_type": "application/json",
+     "body": "{\"totalJob\":5,\"jobs\":[{\"requisitionID\":\"R5055232\",\"title\":\"System Value Optimization Engineer\"},{\"requisitionID\":\"R5055227\",\"title\":\"System Value Optimization Engineer\"},{\"requisitionID\":\"R5056034\",\"title\":\"Piping Design Engineer\"},{\"requisitionID\":\"R5055467\",\"title\":\"Engineer - Turbine Operability\"},{\"requisitionID\":\"R5060001\",\"title\":\"Graduate Engineer\",\"originalURL\":\"graduate-engineer/job/R5060001\",\"description\":\"<p>0-1 years of experience in mechanical design.</p>\",\"locations\":[{\"city\":\"Bengaluru\"}],\"customFields\":[{\"cfKey\":\"cf_posting_start_date\",\"value\":\"2026-10-29\"},{\"cfKey\":\"cf_posting_end_date\",\"value\":\"2026-11-20\"}]}]}"},
+    {"method": "GET", "url": "https://careers.gevernova.com/graduate-engineer/job/R5060001", "status": 200, "body": "<html><head><title>Graduate Engineer</title></head><body>R5060001</body></html>"}
+  ]
+}

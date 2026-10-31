@@ -1,0 +1,96 @@
+name: Refresh job ledger
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"   # UTC; minute 23 avoids the top-of-hour scheduler rush
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: job-ledger-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    # schedule always runs on the default branch (its payload has no repository object);
+    # manual runs are limited to the default branch so state is only ever pushed there.
+    if: github.event_name == 'schedule' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write   # persist state/jobs.json and index.html
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (tag verified with git ls-remote)
+        with:
+          persist-credentials: false
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Verify index.html matches state
+        run: python3 scripts/refresh.py check   # fails loudly if index.html was edited outside the state
+
+      - name: Refresh public sources
+        id: refresh
+        env:
+          # Private exclusions; read by the script only, never echoed. Unset or malformed fails the run.
+          EXCLUDED_PUBLIC_IDS_JSON: ${{ secrets.EXCLUDED_PUBLIC_IDS_JSON }}
+        run: python3 scripts/refresh.py refresh --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Public-boundary scan
+        run: python3 scripts/refresh.py scan
+
+      - name: Build Pages artifact
+        run: |
+          python3 scripts/refresh.py render --out dist/index.html
+          cmp dist/index.html index.html
+
+      - name: Commit refreshed state
+        if: steps.refresh.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AS_OF: ${{ steps.refresh.outputs.as_of }}
+        run: |
+          set -euo pipefail
+          unexpected="$(git status --porcelain --untracked-files=all | grep -v -E '^ M (state/jobs\.json|index\.html)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Refusing to commit: unexpected working-tree changes" >&2
+            exit 1
+          fi
+          if git diff --quiet -- state/jobs.json index.html; then
+            exit 0
+          fi
+          git add -- state/jobs.json index.html
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Refresh job ledger ${AS_OF}"
+          auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          echo "::add-mask::${auth}"
+          # Plain fast-forward push; if the remote advanced the push fails and nothing is forced.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+              push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0 (tag verified with git ls-remote)
+        with:
+          path: dist
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0 (tag verified with git ls-remote)
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1 (tag verified with git ls-remote)

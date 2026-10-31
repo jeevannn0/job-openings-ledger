@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "timezone": "Asia/Kolkata",
+  "filters": {
+    "max_age_days": 30,
+    "max_years": 2,
+    "cities": ["bengaluru", "bangalore", "kochi"]
+  },
+  "hosts": {
+    "jobs.siemens.com": {"fetch": true, "robots": true, "min_delay_s": 2.0},
+    "careers.gevernova.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "jobs.iqvia.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "iqvia.wd1.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "jpmc.fa.oraclecloud.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "gehc.wd5.myworkdayjobs.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "jobs.zs.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
+  },
+  "companies": [
+    {
+      "company": "Siemens",
+      "mode": "siemens_avature_html",
+      "budget_s": 600,
+      "search_text": "Bangalore",
+      "discovery_interval_h": 24,
+      "max_list_pages": 60,
+      "probe_every_pages": 5,
+      "max_new_details": 30
+    },
+    {"company": "JPMorganChase", "mode": "static"},
+    {"company": "GE HealthCare", "mode": "static"},
+    {
+      "company": "GE Vernova",
+      "mode": "gevernova_paradox_api",
+      "budget_s": 180,
+      "city": "Bengaluru",
+      "max_total": 600,
+      "max_new_checks": 25
+    },
+    {
+      "company": "IQVIA",
+      "mode": "iqvia_workday_cxs",
+      "budget_s": 240,
+      "search_terms": ["Bengaluru", "Bangalore", "Kochi"],
+      "max_total": 600,
+      "max_new_details": 40
+    },
+    {"company": "ZS", "mode": "static"}
+  ]
+}

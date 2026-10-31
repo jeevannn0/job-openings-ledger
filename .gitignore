@@ -1,0 +1,7 @@
+dist/
+__pycache__/
+*.pyc
+.refresh-*.tmp
+# Private exclusions: CI uses the EXCLUDED_PUBLIC_IDS_JSON secret; never commit either file.
+config/excluded_public_ids.local.json
+config/excluded_public_ids.json
