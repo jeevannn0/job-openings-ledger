@@ -1,17 +1,24 @@
 {
   "schema": 1,
   "as_of": "2026-10-31",
-  "checked_at": null,
+  "checked_at": "2026-10-31T17:26+05:30",
   "companies": {
     "Siemens": {
-      "status": "seed",
-      "detail": "manual snapshot 2026-10-31",
-      "last_success": null,
-      "last_attempt": null,
+      "status": "ok",
+      "detail": "liveness 23/23; discovery window complete (1 pages)",
+      "last_success": "2026-10-31T17:26+05:30",
+      "last_attempt": "2026-10-31T17:26+05:30",
       "stale_since": null,
       "listing_total": null,
-      "last_discovery_attempt": null,
-      "screened": {}
+      "last_discovery_attempt": "2026-10-31T17:26+05:30",
+      "screened": {
+        "509009": "2026-10-31",
+        "515570": "2026-10-31",
+        "517490": "2026-10-31",
+        "525765": "2026-10-31",
+        "526631": "2026-10-31"
+      },
+      "removal_hold": null
     },
     "JPMorganChase": {
       "status": "static",
@@ -21,7 +28,8 @@
       "stale_since": null,
       "listing_total": null,
       "last_discovery_attempt": null,
-      "screened": {}
+      "screened": {},
+      "removal_hold": null
     },
     "GE HealthCare": {
       "status": "static",
@@ -31,27 +39,40 @@
       "stale_since": null,
       "listing_total": null,
       "last_discovery_attempt": null,
-      "screened": {}
+      "screened": {},
+      "removal_hold": null
     },
     "GE Vernova": {
-      "status": "seed",
-      "detail": "manual snapshot 2026-10-31",
-      "last_success": null,
-      "last_attempt": null,
+      "status": "ok",
+      "detail": "listing 106",
+      "last_success": "2026-10-31T17:26+05:30",
+      "last_attempt": "2026-10-31T17:26+05:30",
       "stale_since": null,
-      "listing_total": null,
+      "listing_total": 106,
       "last_discovery_attempt": null,
-      "screened": {}
+      "screened": {},
+      "removal_hold": null
     },
     "IQVIA": {
-      "status": "seed",
-      "detail": "manual snapshot 2026-10-31",
-      "last_success": null,
-      "last_attempt": null,
+      "status": "ok",
+      "detail": "listing 34 across 3 searches",
+      "last_success": "2026-10-31T17:26+05:30",
+      "last_attempt": "2026-10-31T17:26+05:30",
       "stale_since": null,
-      "listing_total": null,
+      "listing_total": 34,
       "last_discovery_attempt": null,
-      "screened": {}
+      "screened": {
+        "R1536965": "2026-10-31#142549a96a00",
+        "R1554615": "2026-10-31#324bdc3e5237",
+        "R1557356": "2026-10-31#0ee41d96d50d",
+        "R1559849": "2026-10-31#f9257034e07f",
+        "R1565819": "2026-10-31#4c43881df7ca",
+        "R1569005": "2026-10-31#aee84ee69c14",
+        "R1569010": "2026-10-31#39edb634b394",
+        "R1574742": "2026-10-31#a4a5becef1ec",
+        "R1575373": "2026-10-31#cae4c4dde0b6"
+      },
+      "removal_hold": null
     },
     "ZS": {
       "status": "static",
@@ -61,7 +82,8 @@
       "stale_since": null,
       "listing_total": null,
       "last_discovery_attempt": null,
-      "screened": {}
+      "screened": {},
+      "removal_hold": null
     }
   },
   "empty_companies": [
@@ -772,6 +794,36 @@
     },
     {
       "company": "GE Vernova",
+      "job_id": "R5056800",
+      "title": "Product Structuring, Requirements & Interfaces Structure Leader",
+      "experience_text": "No number of years stated — see posting for required experience",
+      "experience_band": "n",
+      "location": "Bengaluru, Belfort, Greenville, and Querétaro",
+      "canonical_url": "https://careers.gevernova.com/product-structuring-requirements-interfaces-structure-leader/job/R5056800",
+      "posted_date": "2026-10-26",
+      "closing_date": null,
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE Vernova",
+      "job_id": "R5052993",
+      "title": "Cyber Security Engineer",
+      "experience_text": "2 years’ experience in project security, preferably in an Operational Technology (OT) environment; 2 to 6 years' experience within the Electrical Industry or in a similar role",
+      "experience_band": "2",
+      "location": "Bengaluru, Noida, and Pallavaram",
+      "canonical_url": "https://careers.gevernova.com/cyber-security-engineer/job/R5052993",
+      "posted_date": "2026-10-26",
+      "closing_date": null,
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE Vernova",
       "job_id": "R5056034",
       "title": "Piping Design Engineer",
       "experience_text": "No number of years stated for India — basic engineering/technology experience",
@@ -779,6 +831,51 @@
       "location": "Bengaluru",
       "canonical_url": "https://careers.gevernova.com/piping-design-engineer/job/R5056034",
       "posted_date": "2026-10-22",
+      "closing_date": null,
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE Vernova",
+      "job_id": "R5055217",
+      "title": "Wind DT Supply Chain Leader",
+      "experience_text": "No number of years stated — see posting for required experience",
+      "experience_band": "n",
+      "location": "Bengaluru",
+      "canonical_url": "https://careers.gevernova.com/wind-dt-supply-chain-leader/job/R5055217",
+      "posted_date": "2026-10-19",
+      "closing_date": null,
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE Vernova",
+      "job_id": "R5054936",
+      "title": "Technical Writer",
+      "experience_text": "2–5 years of experience in technical writing, content writing, documentation support, or related roles",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://careers.gevernova.com/technical-writer/job/R5054936",
+      "posted_date": "2026-10-15",
+      "closing_date": null,
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE Vernova",
+      "job_id": "R5054935",
+      "title": "Technical Writer",
+      "experience_text": "2–5 years of experience in technical writing, content writing, or related documentation roles",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://careers.gevernova.com/technical-writer/job/R5054935",
+      "posted_date": "2026-10-14",
       "closing_date": null,
       "first_seen": "2026-10-31",
       "last_seen": "2026-10-31",
@@ -801,6 +898,21 @@
       "absent_runs": 0
     },
     {
+      "company": "GE Vernova",
+      "job_id": "R5054933",
+      "title": "Quality Assurance Engineer",
+      "experience_text": "2 - 4 years of relevant experience",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://careers.gevernova.com/quality-assurance-engineer/job/R5054933",
+      "posted_date": "2026-10-07",
+      "closing_date": null,
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
       "company": "IQVIA",
       "job_id": "R1553313",
       "title": "Associate Clinical DB Validation Manager",
@@ -809,7 +921,52 @@
       "location": "Kochi",
       "canonical_url": "https://jobs.iqvia.com/en/jobs/R1553313-0",
       "posted_date": "2026-10-30",
-      "closing_date": "2026-11-23",
+      "closing_date": "2026-11-22",
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "IQVIA",
+      "job_id": "R1569129",
+      "title": "Clinical Data Management SAS Programmer",
+      "experience_text": "2 to 10 Years Work location: Any location in India Work Mode: Hybrid Must Have Skills: Data Management SAS, SQL, Macros, Clinical/Pharma/He…",
+      "experience_band": "2",
+      "location": "Bangalore and Kochi",
+      "canonical_url": "https://jobs.iqvia.com/en/jobs/R1569129-0",
+      "posted_date": "2026-10-30",
+      "closing_date": "2026-11-30",
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "IQVIA",
+      "job_id": "R1569125",
+      "title": "Rave Custom Function Programmer",
+      "experience_text": "1 to 10 Years Work location: Any location in India Work Mode: Hybrid Must Have Skills: Rave, study build, migration, edit checks, Custom Fu…",
+      "experience_band": "2",
+      "location": "Bangalore and Kochi",
+      "canonical_url": "https://jobs.iqvia.com/en/jobs/R1569125-0",
+      "posted_date": "2026-10-30",
+      "closing_date": "2026-11-30",
+      "first_seen": "2026-10-31",
+      "last_seen": "2026-10-31",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "IQVIA",
+      "job_id": "R1567860",
+      "title": "Intern",
+      "experience_text": "No number of years stated — see posting for required experience",
+      "experience_band": "n",
+      "location": "Bangalore",
+      "canonical_url": "https://jobs.iqvia.com/en/jobs/R1567860-0",
+      "posted_date": "2026-10-30",
+      "closing_date": "2026-11-02",
       "first_seen": "2026-10-31",
       "last_seen": "2026-10-31",
       "liveness": "live",
@@ -824,7 +981,7 @@
       "location": "Kochi",
       "canonical_url": "https://jobs.iqvia.com/en/jobs/R1566373-0",
       "posted_date": "2026-10-26",
-      "closing_date": "2026-11-02",
+      "closing_date": "2026-11-01",
       "first_seen": "2026-10-31",
       "last_seen": "2026-10-31",
       "liveness": "live",
