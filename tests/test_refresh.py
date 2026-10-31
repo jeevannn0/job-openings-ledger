@@ -79,9 +79,15 @@ def env():
 
 
 def frozen_env():
+    """The reviewed 2026-10-31 state. Its formerly static sources are now live modes, so they load as
+    'seed' (the same conversion applied to the committed state); rows are untouched."""
     config = R.load_config(R.read_json(os.path.join(ROOT, R.CONFIG_PATH)))
     template = R.read_text(os.path.join(ROOT, R.TEMPLATE_PATH))
-    return config, R.load_state(R.read_json(FROZEN_STATE), config), template
+    data = R.read_json(FROZEN_STATE)
+    for name, cs in data["companies"].items():
+        if cs["status"] == "static" and config.sources[name]["mode"] != "static":
+            cs["status"] = "seed"
+    return config, R.load_state(data, config), template
 
 
 def factory_for(config, transport):
@@ -425,6 +431,70 @@ class RemovalTests(unittest.TestCase):
         runs = {r.job_id: r.absent_runs for r in out}
         self.assertEqual(runs, {"R1553313": 1, "R1566373": 0})
 
+    def test_absences_must_come_from_consecutive_healthy_runs(self):
+        _c, _e, state, _t = env()
+        rows, cs = rows_of(state, "IQVIA"), state.companies["IQVIA"]
+        absent = self._complete({"R1553313"}, rows, live={"R1553313"})
+        between = {
+            "partial listing": R.SourceResult("IQVIA", True, "ok", listing_complete=False, live={"R1553313"}),
+            "out of absence scope": self._complete({"R1553313"}, rows, live={"R1553313"}, absence_scope=set()),
+            "failed source": R.held("IQVIA", "workday listing incomplete or unavailable"),
+            "suspicious shrink": self._complete({"R1553313"}, rows, live={"R1553313"}, total=4),
+        }
+        for name, middle in between.items():
+            with self.subTest(name):
+                rows1, cs1, _ = R.apply_result(rows, cs, absent, NOW)
+                self.assertEqual(by_id(rows1)["R1566373"].absent_runs, 1)
+                rows2, cs2, removed = R.apply_result(rows1, cs1, middle, NOW + R.REFRESH_CADENCE)
+                self.assertEqual(removed, [])
+                self.assertEqual([r.job_id for r in rows2], [r.job_id for r in rows])    # nothing deleted
+                self.assertEqual(by_id(rows2)["R1566373"].absent_runs, 0)
+                rows3, _cs3, removed = R.apply_result(rows2, cs2, absent, NOW + 2 * R.REFRESH_CADENCE)
+                self.assertEqual((removed, by_id(rows3)["R1566373"].absent_runs), ([], 1))
+
+    def test_siemens_runs_between_discoveries_keep_the_absence_streak(self):
+        # Discovery (complete listing) runs once a day; the three six-hourly runs in between check
+        # detail pages only and must neither count nor break an absence streak.
+        _c, _e, state, _t = env()
+        rows, cs = rows_of(state, "Siemens")[:4], state.companies["Siemens"]
+        gone = rows[0].job_id
+        others = {r.job_id for r in rows[1:]}
+        discovery = R.SourceResult("Siemens", True, "ok", listing_complete=True, listed=set(others),
+                                   live=set(others), discovery_attempted=True)
+        between = R.SourceResult("Siemens", True, "ok", live=set(others), listing_observed=False)
+        rows1, cs1, _ = R.apply_result(rows, cs, discovery, NOW)
+        self.assertEqual(by_id(rows1)[gone].absent_runs, 1)
+        for k in (1, 2, 3):
+            rows1, cs1, removed = R.apply_result(rows1, cs1, between, NOW + k * R.REFRESH_CADENCE)
+            self.assertEqual((removed, by_id(rows1)[gone].absent_runs), ([], 1))
+        _rows, _cs, removed = R.apply_result(rows1, cs1, discovery, NOW + 4 * R.REFRESH_CADENCE)
+        self.assertEqual(removed, [gone])
+        # A discovery run that fails to complete does break the streak.
+        partial = dataclasses.replace(discovery, listing_complete=False)
+        rows2, cs2, _ = R.apply_result(rows, cs, discovery, NOW)
+        rows2, cs2, _ = R.apply_result(rows2, cs2, partial, NOW + R.REFRESH_CADENCE)
+        self.assertEqual(by_id(rows2)[gone].absent_runs, 0)
+
+    def test_failed_run_keeps_rows_and_their_display_fields(self):
+        _c, _e, state, _t = env()
+        rows = [dataclasses.replace(r, absent_runs=1, liveness="absent") for r in rows_of(state, "IQVIA")]
+        out, cs, removed = R.apply_result(rows, state.companies["IQVIA"], R.held("IQVIA", "down"), NOW)
+        self.assertEqual((removed, cs.status), ([], "stale"))
+        strip = lambda r: dataclasses.replace(r, absent_runs=0, liveness="live")   # noqa: E731
+        self.assertEqual([strip(r) for r in out], [strip(r) for r in rows])
+        self.assertTrue(all((r.absent_runs, r.liveness) == (0, "unconfirmed") for r in out))
+
+    def test_removal_guard_hold_keeps_the_absence_streak(self):
+        _c, _e, state, _t = env()
+        rows = [dataclasses.replace(r, absent_runs=1, liveness="absent") for r in rows_of(state, "Siemens")[:6]]
+        cs = state.companies["Siemens"]
+        res = R.SourceResult("Siemens", True, "ok", listing_complete=True, listed=set(), live=set())
+        out, cs1, removed = R.apply_result(rows, cs, res, NOW)
+        self.assertEqual((removed, cs1.detail), ([], R.REMOVAL_DETAIL))
+        self.assertEqual(out, rows)                       # the confirming run needs these exact rows
+        out2, _cs2, removed = R.apply_result(out, cs1, res, NOW + R.REFRESH_CADENCE)
+        self.assertEqual(sorted(removed), sorted(r.job_id for r in rows))
+
 
 class GuardTests(unittest.TestCase):
     def test_empty_listing_with_rows_is_held(self):
@@ -578,8 +648,8 @@ class HttpTests(unittest.TestCase):
         self.assertIsNone(R.check_url("https://jobs.siemens.com/x", hosts))
         for bad in ("http://jobs.siemens.com/x", "https://jobs.siemens.com.evil.example/x",
                     "https://user" + "@jobs.siemens.com/x", "https://jobs.siemens.com:8443/x",
-                    "https://evil.example/x", "ftp://jobs.siemens.com/x", "https://jobs.zs.com/jobs/1",
-                    "https://jobs.siemens.com/a b"):
+                    "https://evil.example/x", "ftp://jobs.siemens.com/x", "https://careers.gehealthcare.com/x",
+                    "https://incareers-zs.icims.com/jobs/1", "https://jobs.siemens.com/a b"):
             self.assertIsNotNone(R.check_url(bad, hosts), bad)
 
     def test_disallowed_host_makes_no_request(self):
@@ -886,13 +956,41 @@ class ConfigTests(unittest.TestCase):
         config = self.load(lambda d: None)
         self.assertEqual(config.companies, ("Siemens", "JPMorganChase", "GE HealthCare", "GE Vernova", "IQVIA", "ZS"))
         self.assertEqual(config.fetch_hosts, {"jobs.siemens.com", "careers.gevernova.com", "jobs.iqvia.com",
-                                              "iqvia.wd1.myworkdayjobs.com"})
+                                              "iqvia.wd1.myworkdayjobs.com", "jpmc.fa.oraclecloud.com",
+                                              "gehc.wd5.myworkdayjobs.com", "jobs.zs.com"})
+        self.assertEqual({c: config.sources[c]["mode"] for c in config.companies}, {
+            "Siemens": "siemens_avature_html", "JPMorganChase": "jpm_oracle_ce", "GE HealthCare": "gehc_workday_cxs",
+            "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api"})
+        self.assertNotIn("careers.gehealthcare.com", config.link_hosts)     # stale Phenom aliases stay out
+
+    def test_endpoints_stay_on_company_hosts(self):
+        for company, urls in {"JPMorganChase": (R.JPM_SEARCH, R.JPM_DETAIL, R.JPM_FRONT),
+                              "GE HealthCare": (R.GEHC_API, R.GEHC_FRONT),
+                              "ZS": (R.ZS_LIST, R.ZS_FRONT, R.ZS_DETAIL)}.items():
+            for url in urls:
+                self.assertIsNone(R.check_url(url.replace("{", "").replace("}", ""),
+                                              R.COMPANY_SPECS[company].hosts), url)
 
     def test_config_rejects_unsafe_changes(self):
+        def static(name):
+            def mutate(d):
+                for i, e in enumerate(d["companies"]):
+                    if e["company"] == name:
+                        d["companies"][i] = {"company": name, "mode": "static"}
+            return mutate
         mutations = {
             "extra host": lambda d: d["hosts"].__setitem__("evil.example", {"fetch": True, "robots": False,
                                                                             "min_delay_s": 1.0}),
-            "static fetch": lambda d: d["hosts"]["jobs.zs.com"].__setitem__("fetch", True),
+            "static fetch": static("ZS"),            # a static source's host must not stay fetchable
+            "unfetched live source": lambda d: d["hosts"]["jpmc.fa.oraclecloud.com"].__setitem__("fetch", False),
+            "phenom alias host": lambda d: d["hosts"].__setitem__("careers.gehealthcare.com", {
+                "fetch": True, "robots": True, "min_delay_s": 1.0}),
+            "fast zs": lambda d: d["hosts"]["jobs.zs.com"].__setitem__("min_delay_s", 1.0),
+            "zs without robots": lambda d: d["hosts"]["jobs.zs.com"].__setitem__("robots", False),
+            "wrong mode for jpm": lambda d: d["companies"][1].__setitem__("mode", "gehc_workday_cxs"),
+            "jpm search terms": lambda d: d["companies"][1].__setitem__("search_terms", ["Bengaluru"]),
+            "gehc huge total": lambda d: d["companies"][2].__setitem__("max_total", 50000),
+            "zs too many checks": lambda d: d["companies"][5].__setitem__("max_new_checks", 100),
             "fast siemens": lambda d: d["hosts"]["jobs.siemens.com"].__setitem__("min_delay_s", 1.0),
             "bad mode": lambda d: d["companies"][0].__setitem__("mode", "iqvia_workday_cxs"),
             "sub-daily discovery": lambda d: d["companies"][0].__setitem__("discovery_interval_h", 6),
@@ -962,6 +1060,14 @@ class BoundaryScanTests(unittest.TestCase):
         problems = R.scan_repo(root)
         self.assertIn("snapshots/x.csv: file not in allowlist", problems)
         self.assertIn("index.html: does not match render(state/jobs.json)", problems)
+
+    def test_scan_flags_fixture_urls_off_the_allowlist(self):
+        for url in ("https://careers.gehealthcare.com/global/en/job/R4048338", "https://incareers-zs.icims.com/jobs/1"):
+            with self.subTest(url):
+                root = self.copy_repo()
+                with open(os.path.join(root, "tests", "fixtures", "extra.json"), "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"responses": [{"method": "GET", "url": url}]}))
+                self.assertIn("tests/fixtures/extra.json: URL outside link-host allowlist", R.scan_repo(root))
 
     def test_state_rejects_off_allowlist_urls(self):
         config, _e, state, _t = env()
@@ -1312,21 +1418,883 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         after = R.load_all(tmp)[1]
         added = {r.job_id: r for r in after.jobs} .keys() - {r.job_id for r in state.jobs}
-        self.assertEqual(added, {"528001", "R1580001", "R5060001"})
-        new_iq = next(r for r in after.jobs if r.job_id == "R1580001")
-        self.assertEqual(new_iq.closing_date, "2026-11-15")      # Workday endDate 2026-11-16 is exclusive
-        self.assertEqual(next(r for r in after.jobs if r.job_id == "R5060001").closing_date, "2026-11-20")
+        self.assertEqual(added, {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999"})
+        new = {r.job_id: r for r in after.jobs}
+        self.assertEqual(new["R1580001"].closing_date, "2026-11-15")   # Workday endDate 2026-11-16 is exclusive
+        self.assertEqual(new["R5060001"].closing_date, "2026-11-20")
+        self.assertEqual(new["210809001"].closing_date, "2026-11-21")  # Oracle end date: same calendar day
+        self.assertEqual(new["210809001"].location, "Bengaluru and Mumbai")
+        self.assertEqual(new["210809001"].experience_band, "1")        # required section only, not preferred
+        self.assertEqual(new["R4049001"].closing_date, "2026-11-14")   # GE HealthCare Workday: exclusive
+        self.assertEqual(new["R4049001"].location, "Bengaluru")
+        self.assertEqual(new["68999"].location, "Bengaluru and Pune")
+        self.assertEqual(new["68999"].canonical_url, "https://jobs.zs.com/jobs/68999")
         ids = {r.job_id for r in after.jobs}
         self.assertNotIn("500001", ids)                          # excluded ID seen in the Siemens listing
         self.assertNotIn("R1590001", ids)                        # excluded ID seen in the IQVIA listing
+        self.assertNotIn("210809002", ids)                       # senior title with 8+ years
+        self.assertNotIn("R4049002", ids)                        # non-target city: never fetched
         self.assertIn("520000", after.companies["Siemens"].screened)
+        self.assertIn("210809002", after.companies["JPMorganChase"].screened)
+        for company in ("JPMorganChase", "GE HealthCare", "ZS"):   # current rows retained, dates kept
+            self.assertEqual([r.closing_date for r in rows_of(after, company) if r.job_id in
+                              {x.job_id for x in rows_of(state, company)}],
+                             [r.closing_date for r in rows_of(state, company)], company)
         self.assertEqual({c: s.status for c, s in after.companies.items()},
-                         {"Siemens": "ok", "JPMorganChase": "static", "GE HealthCare": "static",
-                          "GE Vernova": "ok", "IQVIA": "ok", "ZS": "static"})
+                         {"Siemens": "ok", "JPMorganChase": "ok", "GE HealthCare": "ok",
+                          "GE Vernova": "ok", "IQVIA": "ok", "ZS": "ok"})
         self.assertEqual(R.read_text(os.path.join(tmp, "index.html")), R.render(after, template, config))
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
         self.assertIn("| Siemens | ok |", out)
+
+
+# --------------------------------------------------------------------------- live adapters: JPMorganChase, GE HealthCare, ZS
+
+def run_source(company, routes, *, state=None, cs=None, excluded=frozenset(), now=NOW, robots=None):
+    """One adapter run plus its merge. Returns (result, rows after, company state after, removed, transport)."""
+    config, _e, seeded, _t = env()
+    state = state or seeded
+    rows = rows_of(state, company)
+    cs = cs or state.companies[company]
+    cfg = config.sources[company]
+    t = FakeTransport(routes, robots=robots)
+    f = R.Fetcher(config, cfg["budget_s"], transport=t, sleep=lambda _s: None)
+    res = R.RUNNERS[cfg["mode"]](cfg, rows, f, now, cs, frozenset(excluded), config)
+    new_rows, new_cs, removed = R.apply_result(rows, cs, res, now)
+    return res, new_rows, new_cs, removed, t
+
+
+def by_id(rows):
+    return {r.job_id: r for r in rows}
+
+
+BLR_FACET = 300000081145775
+JPM_DETAIL_PREFIX = R.JPM_REST + "recruitingCEJobRequisitionDetails?*"
+JPM_EMPTY = jresp({"items": [], "count": 0, "hasMore": False})
+
+
+def jpm_boot(facets=(("Bengaluru, Karnataka, India", BLR_FACET), ("Mumbai, Maharashtra, India", 300000081151360))):
+    return jresp({"items": [{"TotalJobsCount": 7000, "requisitionList": [], "locationsFacet": [
+        {"Id": i, "Name": n, "TotalCount": 1} for n, i in facets]}], "count": 1})
+
+
+def jpm_req(jid, posted="2026-10-30", title="Analyst"):
+    return {"Id": jid, "Title": title, "PostedDate": posted, "PrimaryLocation": "Bengaluru, Karnataka, India",
+            "secondaryLocations": []}
+
+
+def jpm_listing_routes(reqs, total=None, pages=None):
+    """Boot + target-facet pages of 25. `pages` overrides individual page responses by offset."""
+    total = len(reqs) if total is None else total
+    routes = [("GET", R.JPM_SEARCH.format(offset=0, facet=""), jpm_boot())]
+    for off in range(0, max(total, 1), R.JPM_PAGE):
+        body = (pages or {}).get(off) or jresp({"items": [{"TotalJobsCount": total,
+                                                           "requisitionList": reqs[off:off + R.JPM_PAGE]}]})
+        routes.append(("GET", R.JPM_SEARCH.format(offset=off, facet=R.JPM_FACET.format(id=BLR_FACET)), body))
+    return routes
+
+
+def jpm_detail(jid, end=None, required="", title="Analyst", posted="2026-10-30T09:51:54+00:00", secondary=(),
+               desc=None):
+    desc = desc if desc is not None else (
+        f"<p><b>Required qualifications, capabilities, and skills</b></p><ul><li>{required}</li></ul>"
+        "<p><b>Preferred qualifications, capabilities, and skills</b></p><ul><li>6+ years of experience in banking</li></ul>")
+    return jresp({"items": [{"Id": jid, "Title": title, "ExternalPostedStartDate": posted,
+                             "ExternalPostedEndDate": end, "PrimaryLocation": "Bengaluru, Karnataka, India",
+                             "secondaryLocations": [{"Name": s} for s in secondary],
+                             "ExternalDescriptionStr": desc}], "count": 1, "hasMore": False})
+
+
+def jpm_details(overrides=None):
+    overrides = overrides or {}
+
+    def handler(url, _body):
+        jid = re.search(r"Id=%22(\d+)%22", url).group(1)
+        out = overrides.get(jid, jpm_detail(jid))
+        return out(url, _body) if callable(out) else out
+    return ("GET", JPM_DETAIL_PREFIX, handler)
+
+
+class JpmOracleTests(unittest.TestCase):
+    def setUp(self):
+        _c, _e, self.state, _t = env()
+        self.rows = rows_of(self.state, "JPMorganChase")
+        self.ids = [r.job_id for r in self.rows]
+        # 15 current rows plus 20 old postings: two pages of 25; old postings are never detail-checked.
+        self.reqs = [jpm_req(i) for i in self.ids] + [jpm_req(f"2107{i:05d}", posted="2026-09-01") for i in range(20)]
+
+    def test_complete_pagination_liveness_and_inclusive_closing(self):
+        routes = jpm_listing_routes(self.reqs) + [jpm_details({
+            "210804276": jpm_detail("210804276", end="2026-11-04T05:00:00+00:00"),
+            "210804767": jpm_detail("210804767", end="2026-11-27T05:00:00+00:00")})]
+        res, rows, cs, removed, t = run_source("JPMorganChase", routes)
+        self.assertTrue(res.ok and res.listing_complete)
+        self.assertEqual(res.listing_total, 35)
+        self.assertEqual(t.count("offset=25,"), 1)
+        self.assertEqual(res.live, set(self.ids))
+        self.assertEqual(res.closing, {"210804276": "2026-11-04"})       # same calendar day, no shift
+        self.assertEqual(cs.status, "ok")
+        self.assertEqual(removed, [])
+        self.assertEqual([r.job_id for r in rows], self.ids)            # current rows retained in order
+        before = by_id(self.rows)
+        for r in rows:
+            if r.job_id != "210804276":
+                self.assertEqual(r.closing_date, before[r.job_id].closing_date)
+        self.assertEqual(t.count("2107000"), 0)                          # old postings: no detail request
+
+    def test_partial_or_shifting_pagination_holds(self):
+        cases = {
+            "empty second page": {25: jresp({"items": [{"TotalJobsCount": 35, "requisitionList": []}]})},
+            "total changed": {25: jresp({"items": [{"TotalJobsCount": 36, "requisitionList": self.reqs[25:]}]})},
+            "duplicated page": {25: jresp({"items": [{"TotalJobsCount": 35, "requisitionList": self.reqs[:10]}]})},
+            "malformed page": {25: jresp({"items": []})},
+            "throttled page": {25: resp(429, "slow", headers=[("Retry-After", "1")])},
+        }
+        for name, pages in cases.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = run_source(
+                    "JPMorganChase", jpm_listing_routes(self.reqs, pages=pages) + [jpm_details()])
+                self.assertFalse(res.ok)
+                self.assertEqual(cs.status, "stale")
+                self.assertEqual(rows, self.rows)
+                self.assertEqual(removed, [])
+
+    def test_empty_items_is_an_explicit_close(self):
+        listed = [r for r in self.reqs if r["Id"] != "210804276"]
+        routes = jpm_listing_routes(listed) + [jpm_details({"210804276": JPM_EMPTY, "210804767": JPM_EMPTY})]
+        res, rows, cs, removed, _t = run_source("JPMorganChase", routes)
+        self.assertEqual(removed, ["210804276"])                         # unlisted and empty detail
+        kept = by_id(rows)
+        self.assertEqual(kept["210804767"].liveness, "unconfirmed")      # listed but empty: contradiction kept
+        self.assertEqual(len(rows), 14)
+
+    def test_blocked_or_malformed_detail_keeps_rows(self):
+        listed = [r for r in self.reqs if r["Id"] != "210804276"]
+        for name, out in {"403": resp(403, "<html><title>Forbidden</title></html>"),
+                          "429": resp(429, "slow", headers=[("Retry-After", "1")]), "500": resp(500, "x"),
+                          "timeout": TimeoutError("slow"), "html": resp(200, "<html>maintenance</html>"),
+                          "wrong id": jpm_detail("210000001"), "items not list": jresp({"items": {}})}.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = run_source(
+                    "JPMorganChase", jpm_listing_routes(listed) + [jpm_details({"210804276": out})])
+                self.assertTrue(res.ok)
+                self.assertEqual(removed, [])
+                self.assertEqual(by_id(rows)["210804276"].liveness, "unconfirmed")
+                self.assertEqual(by_id(rows)["210804276"].absent_runs, 0)
+        res, rows, cs, removed, _t = run_source(
+            "JPMorganChase", jpm_listing_routes(self.reqs) + [("GET", JPM_DETAIL_PREFIX, resp(503, "down"))])
+        self.assertFalse(res.ok)                                         # every detail blocked: hold
+        self.assertEqual(rows, self.rows)
+
+    def test_additions_use_required_section_window_and_exclusions(self):
+        new = [jpm_req("210809001"), jpm_req("210809002", title="Associate"), jpm_req("210809003"),
+               jpm_req("210809004", posted="2026-09-15")]
+        routes = jpm_listing_routes(self.reqs + new) + [jpm_details({
+            "210809001": jpm_detail("210809001", end="2026-11-21T05:00:00+00:00", required="At least 1 year of experience in operations",
+                                    secondary=["Mumbai, Maharashtra, India"]),
+            "210809002": jpm_detail("210809002", required="Minimum 5 years of experience in risk"),
+        })]
+        res, rows, cs, removed, t = run_source("JPMorganChase", routes, excluded={"210809003"})
+        added = by_id(res.added)
+        self.assertEqual(set(added), {"210809001"})
+        row = added["210809001"]
+        self.assertEqual((row.closing_date, row.location, row.experience_band, row.posted_date),
+                         ("2026-11-21", "Bengaluru and Mumbai", "1", "2026-10-30"))
+        self.assertEqual(row.canonical_url, R.JPM_FRONT.format(id="210809001"))
+        self.assertIn("210809002", cs.screened)                          # 5 years: screened, not added
+        self.assertEqual(t.count("210809003"), 0)                        # private exclusion: never fetched
+        self.assertEqual(t.count("210809004"), 0)                        # outside the 30-day window
+        _r, _rows, _cs, _rm, t2 = run_source("JPMorganChase", routes, cs=cs)
+        self.assertEqual(t2.count("210809002"), 0)                       # screened record is not re-fetched
+
+    def test_every_target_city_facet_is_paginated_and_deduplicated(self):
+        bangalore = 300000099999999
+        boot = jpm_boot(facets=(("Bengaluru, Karnataka, India", BLR_FACET), ("Bangalore, Karnataka, India", bangalore),
+                                ("Karnataka, India", 300000081134215)))
+        second = [jpm_req("210804767"), jpm_req("210809011")]          # one role in both facets
+        routes = [("GET", R.JPM_SEARCH.format(offset=0, facet=""), boot)] + jpm_listing_routes(self.reqs)[1:] + [
+            ("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
+             jresp({"items": [{"TotalJobsCount": 2, "requisitionList": second}]})), jpm_details()]
+        res, rows, cs, removed, t = run_source("JPMorganChase", routes)
+        self.assertTrue(res.ok)
+        self.assertEqual(len(res.listed), 36)
+        self.assertEqual(t.count("selectedLocationsFacet=300000081134215"), 0)   # state facet is not a city
+        self.assertIn("210809011", by_id(res.added))
+        failing = routes[:-2] + [("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
+                                  resp(503, "down")), jpm_details()]
+        res, rows, cs, removed, _t = run_source("JPMorganChase", failing)
+        self.assertFalse(res.ok)                                          # one target facet failing holds all
+        self.assertEqual(rows, self.rows)
+
+    def test_required_section_parsing(self):
+        pref = "<p><b>Preferred qualifications, capabilities, and skills</b></p><ul><li>6+ years of experience in banking</li></ul>"
+        cases = {   # description -> (qualifies, band)
+            "inline heading, 3+ years": (
+                "<p>Required qualifications, capabilities, and skills: 3+ years of experience in operations</p>" + pref,
+                (False, None)),
+            "inline heading, no cue": (
+                "<p><b>Required qualifications, capabilities and skills -</b> 3+ years in finance</p>" + pref,
+                (False, None)),
+            "heading then list, 1 year": (
+                "<p><b>Required qualifications, capabilities, and skills</b></p><ul><li>1 year in trade support</li></ul>" + pref,
+                (True, "1")),
+            "years only in summary": (
+                "<p>As an analyst you bring 3+ years of experience in reconciliations.</p>"
+                "<p><b>Required qualifications, capabilities, and skills</b></p><ul><li>Bachelor's degree</li></ul>" + pref,
+                (False, None)),
+            "years only in preferred": (
+                "<p><b>Required qualifications, capabilities, and skills</b></p><ul><li>Experience with Excel</li></ul>" + pref,
+                (True, "n")),
+            "preferred before required": (
+                pref + "<p><b>Required qualifications, capabilities, and skills</b></p><ul><li>1 year of experience</li></ul>",
+                (True, "1")),
+            "no headings": ("<p>3-5 years of experience in operations.</p>", (False, None)),
+            "no closing heading: About-us years need a cue": (
+                "<p><b>Required qualifications, capabilities, and skills</b></p><ul><li>1 year of experience</li></ul>"
+                "<p>About us: we are a global firm with offices in many countries and a long history of "
+                "serving clients for over 25 years.</p>", (True, "1")),
+        }
+        config = env()[0]
+        for name, (desc, (want_ok, want_band)) in cases.items():
+            with self.subTest(name):
+                info = json.loads(jpm_detail("210809050", desc=desc)[2])["items"][0]
+                text, cue = R._jpm_requirements(info)
+                self.assertNotIn("banking", text)                         # preferred section never assessed
+                ok, band, _s = R.qualifies("Analyst", text, TODAY, ["Bengaluru"], TODAY, config, require_cue=cue)
+                self.assertEqual(ok, want_ok)
+                if want_ok:
+                    self.assertEqual(band, want_band)
+        # End to end: the inline-heading 3+ years role is screened, never shown as "no number of years".
+        new = [jpm_req("210809051"), jpm_req("210809052")]
+        routes = jpm_listing_routes(self.reqs + new) + [jpm_details({
+            "210809051": jpm_detail("210809051", desc=cases["inline heading, 3+ years"][0]),
+            "210809052": jpm_detail("210809052", desc=cases["years only in preferred"][0])})]
+        res, _rows, cs, _rm, _t = run_source("JPMorganChase", routes)
+        self.assertEqual([r.job_id for r in res.added], ["210809052"])
+        self.assertTrue(res.added[0].experience_text.startswith("No number of years stated"))
+        self.assertIn("210809051", cs.screened)
+
+    def test_listing_total_counts_overlapping_facets_once(self):
+        bangalore = 300000099999999
+        boot = jpm_boot(facets=(("Bengaluru, Karnataka, India", BLR_FACET), ("Bangalore, Karnataka, India", bangalore)))
+        overlap = self.reqs[:3]                                         # three roles listed under both facets
+        routes = [("GET", R.JPM_SEARCH.format(offset=0, facet=""), boot)] + jpm_listing_routes(self.reqs)[1:] + [
+            ("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
+             jresp({"items": [{"TotalJobsCount": 3, "requisitionList": overlap}]})), jpm_details()]
+        res, _rows, cs, _rm, t = run_source("JPMorganChase", routes)
+        self.assertTrue(res.ok)
+        self.assertEqual((res.listing_total, cs.listing_total, res.detail), (35, 35, "listing 35"))
+        self.assertEqual(t.count(f"selectedLocationsFacet={bangalore}"), 1)   # each facet still fetched in full
+        # A previous unique total of 35 with the same overlap is not a shrink on the next run.
+        _r, _rows, cs2, _rm, _t = run_source("JPMorganChase", routes, cs=cs, now=NOW + R.REFRESH_CADENCE)
+        self.assertEqual(cs2.status, "ok")
+        short = routes[:-2] + [("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
+                                jresp({"items": [{"TotalJobsCount": 4, "requisitionList": overlap}]})), jpm_details()]
+        res, _rows, _cs, _rm, _t = run_source("JPMorganChase", short)
+        self.assertFalse(res.ok)                                        # an incomplete facet still holds
+        self.assertEqual(res.detail, "partial pagination")
+
+    def test_invalid_qualifying_row_is_counted_not_screened(self):
+        new = [jpm_req("210809061"), jpm_req("210809062")]
+        routes = jpm_listing_routes(self.reqs + new) + [jpm_details({
+            "210809061": jpm_detail("210809061", title="Analyst, write to hr" + "@example.org"),   # split: repo scan
+            "210809062": jpm_detail("210809062", required="5+ years of experience in risk")})]
+        res, _rows, cs, _rm, _t = run_source("JPMorganChase", routes)
+        self.assertEqual(res.added, [])
+        self.assertEqual(res.counts["invalid_rows"], 1)
+        self.assertNotIn("210809061", cs.screened)                        # retried on a later run
+        self.assertIn("210809062", cs.screened)                           # definitive non-qualifying
+        self.assertEqual(cs.detail, "listing 37; 1 invalid row held")
+        self.assertNotIn("example.org", cs.detail)
+
+    def test_empty_items_without_count_is_not_a_close(self):
+        listed = [r for r in self.reqs if r["Id"] != "210804276"]
+        routes = jpm_listing_routes(listed) + [jpm_details({"210804276": jresp({"items": []})})]
+        _res, rows, _cs, removed, _t = run_source("JPMorganChase", routes)
+        self.assertEqual(removed, [])
+        self.assertEqual(by_id(rows)["210804276"].liveness, "unconfirmed")
+
+    def test_outages_and_missing_target_facet_hold(self):
+        for name, routes in {
+            "search 503": [("GET", R.JPM_SEARCH.format(offset=0, facet=""), resp(503, "down"))],
+            "challenge": [("GET", "https://jpmc.fa.oraclecloud.com/*", resp(200, "<html><title>Just a moment...</title></html>"))],
+            "no facets": [("GET", R.JPM_SEARCH.format(offset=0, facet=""), jresp({"items": [{"TotalJobsCount": 1, "requisitionList": []}]}))],
+            "no target city": [("GET", R.JPM_SEARCH.format(offset=0, facet=""), jpm_boot(facets=(("Mumbai, Maharashtra, India", 1),)))],
+            "over max_total": jpm_listing_routes(self.reqs, total=601),
+        }.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = run_source("JPMorganChase", routes)
+                self.assertEqual(cs.status, "stale")
+                self.assertEqual(rows, self.rows)
+                self.assertEqual(removed, [])
+        state = dataclasses.replace(self.state, jobs=[r for r in self.state.jobs if r.company != "JPMorganChase"])
+        res, _rows, _cs, _rm, _t = run_source("JPMorganChase", [
+            ("GET", R.JPM_SEARCH.format(offset=0, facet=""), jpm_boot(facets=(("Mumbai, Maharashtra, India", 1),)))],
+            state=state)
+        self.assertEqual((res.ok, res.detail), (False, "target location facet missing"))   # even with no rows
+
+
+def gehc_post(jid, path, loc="Bengaluru", posted="Posted Yesterday", title="Graduate Engineer Trainee"):
+    return {"title": title, "externalPath": path, "locationsText": loc, "postedOn": posted}
+
+
+def gehc_list_route(posts, total=None, pages=None):
+    total = len(posts) if total is None else total
+
+    def handler(_url, body):
+        offset = json.loads(body)["offset"]
+        if pages and offset in pages:
+            return pages[offset]
+        return jresp({"total": total if offset == 0 else 0, "jobPostings": posts[offset:offset + R.WD_PAGE]})
+    return ("POST", R.GEHC_API + "/jobs", handler)
+
+
+def gehc_detail(jid, **kw):
+    info = {"jobReqId": jid, "title": "Graduate Engineer Trainee", "posted": True, "canApply": True,
+            "startDate": "2026-10-30", "location": "Bengaluru"}
+    info.update(kw)
+    return jresp({"jobPostingInfo": info})
+
+
+def gehc_details(overrides=None):
+    overrides = overrides or {}
+
+    def handler(url, _body):
+        jid = re.search(r"_(R\d+)(?:-\d+)?$", url).group(1)
+        return overrides.get(jid, gehc_detail(jid))
+    return ("GET", R.GEHC_API + "/job/*", handler)
+
+
+class GehcWorkdayTests(unittest.TestCase):
+    def setUp(self):
+        _c, _e, self.state, _t = env()
+        self.rows = rows_of(self.state, "GE HealthCare")
+        self.paths = {r.job_id: r.canonical_url[len(R.GEHC_FRONT):] for r in self.rows}
+        self.posts = [gehc_post(j, p) for j, p in self.paths.items()] + [
+            gehc_post(f"R40{i:05d}", f"/job/Chicago/Engineer_R40{i:05d}", loc="Chicago") for i in range(40)]
+
+    def test_complete_global_pagination_liveness_and_exclusive_closing(self):
+        routes = [gehc_list_route(self.posts), gehc_details({"R4048338": gehc_detail("R4048338", endDate="2026-11-10")})]
+        res, rows, cs, removed, t = run_source("GE HealthCare", routes)
+        self.assertTrue(res.ok and res.listing_complete)
+        self.assertEqual(sum(1 for m, u in t.calls if m == "POST"), 3)     # 45 postings: 3 pages of 20
+        self.assertEqual(res.live, set(self.paths))
+        self.assertEqual(res.closing, {"R4048338": "2026-11-09"})          # exclusive endDate: previous day
+        self.assertEqual([r.job_id for r in rows], list(self.paths))
+        self.assertEqual({r.job_id: r.canonical_url for r in rows}, {r.job_id: r.canonical_url for r in self.rows})
+        self.assertEqual(t.count("Chicago"), 0)                            # non-target postings: no details
+
+    def test_partial_or_malformed_listing_holds(self):
+        cases = {
+            "empty page": {20: jresp({"total": 0, "jobPostings": []})},
+            "duplicated page": {20: jresp({"total": 0, "jobPostings": self.posts[:20]})},
+            "maintenance": {20: resp(200, "<html><title>Workday</title>down for maintenance</html>")},
+            "blocked": {20: resp(403, "<html><title>Access Denied</title></html>")},
+            "over max_total": {0: jresp({"total": 2001, "jobPostings": self.posts[:20]})},
+        }
+        for name, pages in cases.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = run_source("GE HealthCare", [gehc_list_route(self.posts, pages=pages),
+                                                                          gehc_details()])
+                self.assertFalse(res.ok)
+                self.assertEqual(cs.status, "stale")
+                self.assertEqual(rows, self.rows)
+
+    def unlisted(self, *ids):
+        return [p for p in self.posts if not any(i in p["externalPath"] for i in ids)]
+
+    def test_410_or_false_flags_plus_listing_absence_remove(self):
+        # 410 removes even while listed; false flags remove only when the complete listing lacks the ID.
+        routes = [gehc_list_route(self.unlisted("R4048338")), gehc_details({
+            "R4048338": gehc_detail("R4048338", posted=False), "R4048320": resp(410, "gone")})]
+        res, rows, cs, removed, _t = run_source("GE HealthCare", routes)
+        self.assertEqual(sorted(removed), ["R4048320", "R4048338"])
+        self.assertEqual(set(by_id(rows)), {"R4046068", "R4047718", "R4047774"})
+        routes = [gehc_list_route(self.unlisted("R4046068")),
+                  gehc_details({"R4046068": gehc_detail("R4046068", canApply=False)})]
+        _res, rows, _cs, removed, _t = run_source("GE HealthCare", routes)
+        self.assertEqual(removed, ["R4046068"])
+
+    def test_false_flags_while_listed_are_unconfirmed_not_removed(self):
+        for name, kw in {"posted false": {"posted": False}, "canApply false": {"canApply": False},
+                         "both false": {"posted": False, "canApply": False}}.items():
+            with self.subTest(name):
+                routes = [gehc_list_route(self.posts), gehc_details({"R4048338": gehc_detail("R4048338", **kw)})]
+                res, rows, cs, removed, _t = run_source("GE HealthCare", routes)
+                self.assertEqual(removed, [])
+                self.assertEqual(res.counts["contradictory"], 1)
+                self.assertNotIn("R4048338", res.live | res.closed)
+                row = by_id(rows)["R4048338"]
+                self.assertEqual((row.liveness, row.absent_runs), ("unconfirmed", 0))
+                self.assertEqual(cs.status, "ok")
+        # The same contradiction on the next run still never removes; delisting plus false flags does.
+        routes = [gehc_list_route(self.posts), gehc_details({"R4048338": gehc_detail("R4048338", posted=False)})]
+        _res, rows, cs, _rm, _t = run_source("GE HealthCare", routes)
+        state = dataclasses.replace(self.state, jobs=[r for r in self.state.jobs if r.company != "GE HealthCare"] + rows,
+                                    companies={**self.state.companies, "GE HealthCare": cs})
+        _res, rows2, _cs, removed, _t = run_source("GE HealthCare", routes, state=state, now=NOW + R.REFRESH_CADENCE)
+        self.assertEqual((removed, by_id(rows2)["R4048338"].liveness), ([], "unconfirmed"))
+        delisted = [gehc_list_route(self.unlisted("R4048338")), routes[1]]
+        _res, _rows3, _cs, removed, _t = run_source("GE HealthCare", delisted, state=state, now=NOW + R.REFRESH_CADENCE)
+        self.assertEqual(removed, ["R4048338"])
+
+    def test_mass_close_is_held_by_the_removal_guard(self):
+        chicago = [p for p in self.posts if "Chicago" in p["externalPath"]]
+        routes = [gehc_list_route(chicago), gehc_details({j: gehc_detail(j, posted=False) for j in self.paths})]
+        res, rows, cs, removed, _t = run_source("GE HealthCare", routes)
+        self.assertEqual(cs.detail, R.REMOVAL_DETAIL)
+        self.assertEqual(rows, self.rows)
+
+    def test_unclear_detail_never_removes(self):
+        unlisted = [p for p in self.posts if "R4048338" not in p["externalPath"]]
+        for name, out in {"maintenance": resp(200, "<html>down for maintenance</html>"), "500": resp(500, "x"),
+                          "non-json": resp(200, "plain", "text/plain"), "flags missing": gehc_detail(
+                              "R4048338", posted=None, canApply=None)}.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = run_source("GE HealthCare", [gehc_list_route(unlisted), gehc_details(
+                    {"R4048338": out})])
+                self.assertEqual(removed, [])
+                self.assertEqual(by_id(rows)["R4048338"].liveness, "unconfirmed")
+                self.assertEqual(by_id(rows)["R4048338"].absent_runs, 0)
+
+    def test_404_and_two_complete_absences_remove(self):
+        unlisted = [p for p in self.posts if "R4048338" not in p["externalPath"]]
+        routes = [gehc_list_route(unlisted), gehc_details({"R4048338": resp(404, "{}", "application/json")})]
+        _res, rows, cs, removed, _t = run_source("GE HealthCare", routes)
+        self.assertEqual((by_id(rows)["R4048338"].absent_runs, removed), (1, []))
+        state = dataclasses.replace(self.state, jobs=[r for r in self.state.jobs if r.company != "GE HealthCare"] + rows,
+                                    companies={**self.state.companies, "GE HealthCare": cs})
+        _res, rows, _cs, removed, _t = run_source("GE HealthCare", routes, state=state,
+                                                  now=NOW + R.REFRESH_CADENCE)
+        self.assertEqual(removed, ["R4048338"])
+
+    def test_additions_target_and_multi_location_with_exclusions(self):
+        new = [gehc_post("R4049001", "/job/IND19-01-Bengaluru-EPIP-122-Phase-II/Trainee_R4049001",
+                         loc="IND19-01-Bengaluru-EPIP 122 (Phase II)"),
+               gehc_post("R4049002", "/job/Pune/Engineer_R4049002", loc="2 Locations"),
+               gehc_post("R4049003", "/job/Bengaluru/Engineer_R4049003"),
+               gehc_post("R4049004", "/job/Bengaluru/Lead-Engineer_R4049004", title="Lead Engineer"),
+               gehc_post("R4049005", "/job/Bengaluru/Old_R4049005", posted="Posted 30+ Days Ago")]
+        routes = [gehc_list_route(self.posts + new), gehc_details({
+            "R4049001": gehc_detail("R4049001", endDate="2026-11-15", location="IND19-01-Bengaluru-EPIP 122 (Phase II)",
+                                    jobDescription="<p>0-1 years of experience in service.</p>"),
+            "R4049002": gehc_detail("R4049002", location="Pune", additionalLocations=["Bengaluru"],
+                                    jobDescription="<p>1 year of relevant experience.</p>"),
+            "R4049004": gehc_detail("R4049004", title="Lead Engineer",
+                                    jobDescription="<p>8+ years of engineering experience.</p>")})]
+        res, rows, cs, removed, t = run_source("GE HealthCare", routes, excluded={"R4049003"})
+        added = by_id(res.added)
+        self.assertEqual(set(added), {"R4049001", "R4049002"})
+        self.assertEqual((added["R4049001"].closing_date, added["R4049001"].location), ("2026-11-14", "Bengaluru"))
+        self.assertEqual(added["R4049002"].location, "Bengaluru and Pune")
+        self.assertEqual(added["R4049001"].canonical_url,
+                         R.GEHC_FRONT + "/job/IND19-01-Bengaluru-EPIP-122-Phase-II/Trainee_R4049001")
+        self.assertIn("R4049004", cs.screened)
+        self.assertEqual(t.count("R4049003"), 0)                           # excluded: never fetched
+        self.assertEqual(t.count("R4049005"), 0)                           # 30+ days: never fetched
+        self.assertEqual(t.count("Chicago"), 0)
+
+    def test_site_code_locations_show_clean_city_names(self):
+        config = env()[0]
+        self.assertEqual(R._gehc_place("IND19-01-Bengaluru-EPIP 122 (Phase II)", config), "Bengaluru")
+        self.assertEqual(R._gehc_place("IND23-01-Pune-Hinjewadi Phase 1", config), "Pune")
+        self.assertEqual(R._gehc_place("IND07-02-New Delhi", config), "New Delhi")
+        self.assertEqual(R._gehc_place("IND23-01", config), "")              # bare code: dropped
+        self.assertEqual(R._gehc_place("IND23-01-Navi Mumbai (Ghansoli)", config), "Navi Mumbai")
+        self.assertEqual(R._gehc_place("Chicago, Illinois", config), "Chicago")
+        new = [gehc_post("R4049011", "/job/IND36-01-Bengaluru-Kalyani-Platina-Magnolia/Engineer_R4049011",
+                         loc="3 Locations")]
+        routes = [gehc_list_route(self.posts + new), gehc_details({"R4049011": gehc_detail(
+            "R4049011", location="IND36-01-Bengaluru-Kalyani Platina Magnolia",
+            additionalLocations=["IND23-01-Pune-Hinjewadi Phase 1", "IND19-01-Bengaluru-EPIP 122 (Phase II)",
+                                 "IND44-02"],
+            jobDescription="<p>1 year of relevant experience.</p>")})]
+        res, _rows, _cs, _rm, _t = run_source("GE HealthCare", routes)
+        row = by_id(res.added)["R4049011"]
+        self.assertEqual(row.location, "Bengaluru and Pune")
+        self.assertNotRegex(row.location, r"[A-Z]{3}\d")
+
+    def test_invalid_qualifying_row_is_counted_not_screened(self):
+        new = [gehc_post("R4049021", "/job/Bengaluru/Eng.ineer_R4049021"),           # URL shape the row rejects
+               gehc_post("R4049022", "/job/Bengaluru/Engineer_R4049022"),            # forbidden text in title
+               gehc_post("R4049023", "/job/Bengaluru/Engineer_R4049023")]            # 6 years: not qualifying
+        routes = [gehc_list_route(self.posts + new), gehc_details({
+            "R4049022": gehc_detail("R4049022", title="Engineer, write to hr" + "@example.org"),   # split: repo scan
+            "R4049023": gehc_detail("R4049023", jobDescription="<p>6+ years of experience.</p>")})]
+        res, _rows, cs, _rm, _t = run_source("GE HealthCare", routes)
+        self.assertEqual(res.added, [])
+        self.assertEqual(res.counts["invalid_rows"], 2)
+        self.assertNotIn("R4049021", cs.screened)
+        self.assertNotIn("R4049022", cs.screened)
+        self.assertIn("R4049023", cs.screened)                             # definitive non-qualifying
+        self.assertTrue(cs.detail.endswith("; 2 invalid rows held"), cs.detail)
+        self.assertNotIn("example.org", cs.detail + json.dumps(res.counts))
+        _r, _rows, _cs, _rm, t2 = run_source("GE HealthCare", routes, cs=cs)
+        self.assertEqual((t2.count("R4049021"), t2.count("R4049023")), (1, 0))   # invalid row retried
+
+    def test_ambiguous_run_resets_the_absence_streak(self):
+        unlisted = self.unlisted("R4048338")
+        gone = [gehc_list_route(unlisted), gehc_details({"R4048338": resp(404, "{}", "application/json")})]
+        unclear = [gehc_list_route(unlisted), gehc_details({"R4048338": resp(200, "plain", "text/plain")})]
+        failed = [gehc_list_route(self.posts, pages={0: resp(503, "down")}), gehc_details()]
+        for name, middle in {"unclear detail": unclear, "failed listing": failed}.items():
+            with self.subTest(name):
+                state, now = self.state, NOW
+                for routes in (gone, middle, gone):
+                    _res, rows, cs, removed, _t = run_source("GE HealthCare", routes, state=state, now=now)
+                    self.assertEqual(removed, [])
+                    state = dataclasses.replace(state, jobs=[r for r in state.jobs if r.company != "GE HealthCare"]
+                                                + rows, companies={**state.companies, "GE HealthCare": cs})
+                    now += R.REFRESH_CADENCE
+                self.assertEqual(by_id(rows)["R4048338"].absent_runs, 1)      # streak restarted after the gap
+                _res, _rows, _cs, removed, _t = run_source("GE HealthCare", gone, state=state, now=now)
+                self.assertEqual(removed, ["R4048338"])                      # two consecutive healthy absences
+
+
+def zs_job(rid, city="Bengaluru", posted="2026-10-30T04:41:00+0000", open_=True, quals="", slug=None, extra=()):
+    return {"slug": slug or rid, "req_id": rid, "title": "Business Technology Associate", "city": city,
+            "country": "India", "additional_locations": [{"city": c, "country": "India"} for c in extra],
+            "posted_date": posted, "searchable": open_, "applyable": open_, "qualifications": quals,
+            "meta_data": {"canonical_url": f"https://jobs.zs.com/jobs/{slug or rid}?lang=en-us"}}
+
+
+def zs_list_route(jobs, total=None, pages=None):
+    total = len(jobs) if total is None else total
+
+    def handler(url, _body):
+        page = int(re.search(r"page=(\d+)", url).group(1))
+        if pages and page in pages:
+            return pages[page]
+        chunk = jobs[(page - 1) * R.ZS_PAGE: page * R.ZS_PAGE]
+        return resp(200, json.dumps({"totalCount": total, "count": total, "jobs": [{"data": d} for d in chunk]}),
+                    "application/json; charset=utf-8")
+    return ("GET", "https://jobs.zs.com/api/jobs?page=*", handler)
+
+
+def zs_page(jid):
+    return resp(200, f"<html><head><title>Job</title></head><body>Job {jid}</body></html>")
+
+
+ZS_404 = resp(404, "<html><head><title>Not found</title></head><body>/jobs/24123</body></html>")
+
+
+class ZsJibeTests(unittest.TestCase):
+    def setUp(self):
+        _c, _e, self.state, _t = env()
+        self.rows = rows_of(self.state, "ZS")
+        self.others = [zs_job(str(60000 + i), city="Pune", posted="2026-09-01T00:00:00+0000") for i in range(24)]
+
+    def run_zs(self, jobs, *extra, **kw):
+        return run_source("ZS", [zs_list_route(jobs, **{k: v for k, v in kw.items() if k in ("total", "pages")}),
+                                 *extra], **{k: v for k, v in kw.items() if k in ("state", "cs", "excluded", "now")})
+
+    def test_complete_pagination_keeps_24123_live_without_detail(self):
+        jobs = self.others[:12] + [zs_job("24123", posted="2026-10-29T04:41:00+0000")] + self.others[12:]
+        res, rows, cs, removed, t = self.run_zs(jobs)
+        self.assertTrue(res.ok and res.listing_complete)
+        self.assertEqual(t.count("/api/jobs?page="), 3)                   # 25 jobs, 10 per page
+        self.assertEqual(res.live, {"24123"})
+        self.assertEqual(rows[0].to_dict() | {"last_seen": "2026-10-31"}, self.rows[0].to_dict())
+        self.assertEqual(t.count("/jobs/24123"), 0)
+
+    def test_partial_shifting_or_blocked_listing_holds(self):
+        jobs = self.others[:12] + [zs_job("24123")] + self.others[12:]
+        cases = {
+            "total changed": {"pages": {2: resp(200, json.dumps({"totalCount": 26, "jobs": [{"data": d} for d in jobs[10:20]]}),
+                                                "application/json")}},
+            "empty page": {"pages": {3: resp(200, json.dumps({"totalCount": 25, "jobs": []}), "application/json")}},
+            "duplicate page": {"pages": {3: resp(200, json.dumps({"totalCount": 25, "jobs": [{"data": d} for d in jobs[:5]]}),
+                                                 "application/json")}},
+            "403 edge block": {"pages": {1: resp(403, "<html><title>Access Denied</title></html>")}},
+            "challenge": {"pages": {1: resp(200, "<html><title>Just a moment...</title></html>")}},
+        }
+        for name, kw in cases.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = self.run_zs(jobs, **kw)
+                self.assertFalse(res.ok)
+                self.assertEqual(cs.status, "stale")
+                self.assertEqual(rows, self.rows)
+
+    def test_missing_detail_plus_two_absences_remove(self):
+        routes_detail = ("GET", "https://jobs.zs.com/jobs/24123*", ZS_404)
+        _res, rows, cs, removed, _t = self.run_zs(self.others, routes_detail)
+        self.assertEqual((rows[0].absent_runs, rows[0].liveness, removed), (1, "absent", []))
+        state = dataclasses.replace(self.state, jobs=[r for r in self.state.jobs if r.company != "ZS"] + rows,
+                                    companies={**self.state.companies, "ZS": cs})
+        _res, rows, _cs, removed, _t = self.run_zs(self.others, routes_detail, state=state, now=NOW + R.REFRESH_CADENCE)
+        self.assertEqual(removed, ["24123"])
+
+    def test_absent_but_live_or_blocked_detail_keeps_row(self):
+        # A live-looking page is not live evidence without the listing: kept, unconfirmed, never counted.
+        res, rows, cs, removed, _t = self.run_zs(self.others, ("GET", "https://jobs.zs.com/jobs/24123*", zs_page("24123")))
+        self.assertEqual((rows[0].liveness, rows[0].absent_runs, removed), ("unconfirmed", 0, []))
+        self.assertNotIn("24123", res.live)
+        for name, out in {"403": resp(403, "<html><title>Access Denied</title></html>"),
+                          "challenge": resp(200, "<html><title>Just a moment...</title></html>"),
+                          "timeout": TimeoutError("slow")}.items():
+            with self.subTest(name):
+                res, rows, cs, removed, _t = self.run_zs(self.others, ("GET", "https://jobs.zs.com/jobs/24123*", out))
+                self.assertFalse(res.ok)
+                self.assertEqual(rows, self.rows)
+        not_open = self.others + [zs_job("24123", open_=False)]
+        res, rows, cs, removed, _t = self.run_zs(not_open, ("GET", "https://jobs.zs.com/jobs/24123*", zs_page("24123")))
+        self.assertEqual((rows[0].liveness, removed), ("unconfirmed", []))   # listed but not applyable
+        # Present in the listing (not applyable) with a 404 page: not an absence, so never counted.
+        res, rows, cs, removed, _t = self.run_zs(not_open, ("GET", "https://jobs.zs.com/jobs/24123*", ZS_404))
+        self.assertEqual((rows[0].liveness, rows[0].absent_runs, removed), ("unconfirmed", 0, []))
+
+    def chain(self, details, jobs=None):
+        """Consecutive ZS runs, one cadence apart, each with its own 24123 job-page response."""
+        state, now, removed_all, rows = self.state, NOW, [], self.rows
+        for out in details:
+            _res, rows, cs, removed, _t = self.run_zs(self.others if jobs is None else jobs,
+                                                      ("GET", "https://jobs.zs.com/jobs/24123*", out),
+                                                      state=state, now=now)
+            removed_all += removed
+            state = dataclasses.replace(state, jobs=[r for r in state.jobs if r.company != "ZS"] + rows,
+                                        companies={**state.companies, "ZS": cs})
+            now += R.REFRESH_CADENCE
+        return rows, removed_all
+
+    SHELLS = {
+        "closed phrase": "<html><head><title>Job</title></head><body>This job is no longer available 24123</body></html>",
+        "shell with i18n strings": ('<html><head><title>Careers</title><link rel="canonical" '
+                                    'href="https://jobs.zs.com/jobs/24123"></head><body><div id="root"></div>'
+                                    '<script>var t={"gone":"This job is no longer available"}</script></body></html>'),
+        "url echo only": '<html><head><title>Careers</title></head><body>Loading /jobs/24123?lang=en-us</body></html>',
+        "generic shell": '<html><head><title>Careers</title></head><body><div id="root"></div></body></html>',
+    }
+
+    def test_closed_looking_or_shell_pages_never_count_or_remove(self):
+        for name, body in self.SHELLS.items():
+            with self.subTest(name):
+                rows, removed = self.chain([resp(200, body)] * 3)
+                self.assertEqual(removed, [])
+                self.assertEqual((rows[0].liveness, rows[0].absent_runs), ("unconfirmed", 0))
+
+    def test_exact_gone_needs_two_consecutive_complete_absences(self):
+        gone410 = resp(410, "<html><head><title>Gone</title></head><body>gone</body></html>")
+        self.assertEqual(self.chain([gone410, gone410])[1], ["24123"])
+        self.assertEqual(self.chain([ZS_404, gone410])[1], ["24123"])
+        for name, body in self.SHELLS.items():          # a page in between resets the streak
+            with self.subTest(name):
+                rows, removed = self.chain([ZS_404, resp(200, body), ZS_404])
+                self.assertEqual((removed, rows[0].absent_runs), ([], 1))
+        # A blocked run in between holds the source and also resets the streak, keeping the row.
+        rows, removed = self.chain([ZS_404, resp(403, "<html><title>Access Denied</title></html>"), ZS_404])
+        self.assertEqual((removed, rows[0].absent_runs), ([], 1))
+        # Listed again (even unapplyable) between two 404s: not consecutive absences.
+        state_rows, removed = self.chain([ZS_404])
+        self.assertEqual(state_rows[0].absent_runs, 1)
+        rows, removed = self.chain([ZS_404, ZS_404], jobs=self.others + [zs_job("24123", open_=False)])
+        self.assertEqual((removed, rows[0].absent_runs), ([], 0))
+
+    def test_candidate_with_closed_looking_page_is_neither_added_nor_screened(self):
+        quals = "<p>0-2 years of relevant work experience.</p>"
+        jobs = [zs_job("24123"), zs_job("68990", quals=quals)]
+        for name, body in self.SHELLS.items():           # closed phrase, ID only in a link/script/URL echo
+            with self.subTest(name):
+                shell = resp(200, body.replace("24123", "68990"))
+                res, _rows, cs, _rm, _t = self.run_zs(jobs, ("GET", "https://jobs.zs.com/jobs/68990*", shell))
+                self.assertEqual((res.added, cs.screened), ([], {}))
+        res, _rows, cs, _rm, _t = self.run_zs(jobs, ("GET", "https://jobs.zs.com/jobs/68990*", ZS_404))
+        self.assertEqual(res.added, [])
+        self.assertIn("68990", cs.screened)              # exact 404: verified gone
+
+    def test_additions_are_open_target_verified_and_not_excluded(self):
+        quals = "<p>What you'll bring: 0-2 years of relevant work experience in analytics.</p>"
+        new = [zs_job("68999", quals=quals, extra=["Pune"]), zs_job("68998", quals=quals),
+               zs_job("68997", quals=quals, open_=False), zs_job("68996", city="Pune", quals=quals),
+               zs_job("68995", quals=quals, slug="other-slug"), zs_job("68994", quals="<p>5+ years of experience</p>"),
+               zs_job("68993", quals=quals)]
+        routes = [("GET", "https://jobs.zs.com/jobs/68999?lang=en-us", zs_page("68999")),
+                  ("GET", "https://jobs.zs.com/jobs/68998?lang=en-us", ZS_404)]
+        res, rows, cs, removed, t = self.run_zs([zs_job("24123")] + new, *routes, excluded={"68993"})
+        self.assertEqual([r.job_id for r in res.added], ["68999"])
+        row = res.added[0]
+        self.assertEqual((row.location, row.canonical_url, row.closing_date, row.experience_band),
+                         ("Bengaluru and Pune", "https://jobs.zs.com/jobs/68999", None, "2"))
+        self.assertEqual(t.count("68993"), 0)
+        self.assertEqual(t.count("/jobs/68997"), 0)
+        self.assertEqual(t.count("/jobs/68996"), 0)
+        self.assertEqual(t.count("/jobs/68994"), 0)
+        self.assertIn("68998", cs.screened)                              # verified gone: not re-checked
+        _r, _rows, _cs, _rm, t2 = self.run_zs([zs_job("24123")] + new, *routes, excluded={"68993"}, cs=cs)
+        self.assertEqual(t2.count("/jobs/68998"), 0)
+
+    def test_budget_covers_a_full_listing_at_the_crawl_delay(self):
+        config, _e, state, _t = env()
+        cfg = config.sources["ZS"]
+        self.assertGreaterEqual(cfg["budget_s"], 60)
+        self.assertLessEqual(source_minimum("ZS", config, state), cfg["budget_s"])
+
+    def test_zs_requests_respect_crawl_delay(self):
+        config, _e, _s, _t = env()
+        self.assertGreaterEqual(config.hosts["jobs.zs.com"].min_delay_s, 5.0)
+        self.assertTrue(config.hosts["jobs.zs.com"].robots)
+        now = [0.0]
+        sleeps = []
+
+        def sleep(s):
+            sleeps.append(s)
+            now[0] += s
+        t = FakeTransport([zs_list_route(self.others)], robots=resp(200, "User-agent: *\nAllow: /\n", "text/plain"))
+        f = R.Fetcher(config, 300, transport=t, sleep=sleep, clock=lambda: now[0], rand=lambda: 0.0)
+        self.assertIsInstance(R._zs_listing(config.sources["ZS"], f), tuple)
+        self.assertEqual(len(sleeps), 3)                                 # robots + 3 pages: 3 waits
+        self.assertTrue(all(s >= 5.0 for s in sleeps))
+
+
+LATENCY_S = 0.5      # assumed server time per request, on top of the enforced per-host delay
+
+
+def _per_request(config, host):
+    return config.hosts[host].min_delay_s * 1.25 + LATENCY_S      # 25% maximum jitter
+
+
+def source_minimum(company, config, state):
+    """Seconds a source needs for a full run at its configured caps: robots.txt, every listing page
+    up to max_total, one detail per current row, and every new-detail check. It is a lower bound for
+    budget_s; a run cut short by its deadline is partial and keeps last-known-good rows."""
+    cfg, rows = config.sources[company], len(rows_of(state, company))
+
+    def pages(total, size):
+        return -(-total // size)
+    if company == "Siemens":
+        n = (1 + rows + 2 + cfg["max_list_pages"] + cfg["max_list_pages"] // cfg["probe_every_pages"] + 1
+             + cfg["max_new_details"])
+        return n * _per_request(config, "jobs.siemens.com")
+    if company == "JPMorganChase":       # boot search plus two target-city facets (Bengaluru, Bangalore)
+        n = 1 + 1 + 2 * pages(cfg["max_total"], R.JPM_PAGE) + rows + cfg["max_new_details"]
+        return n * _per_request(config, "jpmc.fa.oraclecloud.com")
+    if company == "GE HealthCare":
+        n = 1 + pages(cfg["max_total"], R.WD_PAGE) + rows + cfg["max_new_details"]
+        return n * _per_request(config, "gehc.wd5.myworkdayjobs.com")
+    if company == "GE Vernova":
+        n = 1 + 1 + pages(cfg["max_total"], R.GE_PAGE) + rows + cfg["max_new_checks"]
+        return n * _per_request(config, "careers.gevernova.com")
+    if company == "IQVIA":               # listing + ID search per row on Workday; page checks on the front site
+        n = 2 + len(cfg["search_terms"]) * pages(cfg["max_total"], R.WD_PAGE) + 2 * rows + 2 * cfg["max_new_details"]
+        return n * _per_request(config, "iqvia.wd1.myworkdayjobs.com")
+    if company == "ZS":
+        n = 1 + pages(cfg["max_total"], R.ZS_PAGE) + rows + cfg["max_new_checks"]
+        return n * _per_request(config, "jobs.zs.com")
+    raise AssertionError(company)
+
+
+class AdapterIsolationTests(unittest.TestCase):
+    def test_one_failing_adapter_does_not_affect_the_others(self):
+        config, excluded, state, _t = env()
+        gehc_rows = rows_of(state, "GE HealthCare")
+        posts = [gehc_post(r.job_id, r.canonical_url[len(R.GEHC_FRONT):]) for r in gehc_rows]
+        t = FakeTransport([
+            ("GET", "https://jpmc.fa.oraclecloud.com/*", resp(503, "down")),
+            gehc_list_route(posts), gehc_details(),
+            zs_list_route([zs_job("24123")]),
+        ])
+        after, outcomes = R.run_refresh(state, config, excluded, NOW, factory_for(config, t))
+        status = {c: s.status for c, s in after.companies.items()}
+        self.assertEqual((status["JPMorganChase"], status["GE HealthCare"], status["ZS"]), ("stale", "ok", "ok"))
+        self.assertEqual(rows_of(after, "JPMorganChase"), rows_of(state, "JPMorganChase"))
+        self.assertEqual(len(rows_of(after, "GE HealthCare")), 5)
+        self.assertEqual(rows_of(after, "ZS")[0].liveness, "live")
+
+    def test_adapter_exception_is_contained(self):
+        config, excluded, state, _t = env()
+        original = R.RUNNERS["zs_jibe_api"]
+        R.RUNNERS["zs_jibe_api"] = lambda *a: (_ for _ in ()).throw(KeyError("boom"))
+        try:
+            after, _o = R.run_refresh(state, config, excluded, NOW, factory_for(config, FakeTransport(
+                [zs_list_route([zs_job("24123")])])))
+        finally:
+            R.RUNNERS["zs_jibe_api"] = original
+        self.assertEqual(after.companies["ZS"].detail, "source error (KeyError)")
+        self.assertEqual(rows_of(after, "ZS"), rows_of(state, "ZS"))
+
+    def test_run_budget_caps_sources_and_holds_late_ones(self):
+        config, excluded, state, _t = env()
+        self.assertEqual(R.source_budget({"budget_s": 600}, 1200, 150), 600)
+        self.assertEqual(R.source_budget({"budget_s": 600}, 650, 210), 650 - 210)
+        self.assertEqual(R.source_floor(config.sources["ZS"]), 60)      # mode floor, not the 30s default
+        self.assertEqual(R.source_floor(config.sources["JPMorganChase"]), 30)
+        budgets = {}
+
+        def factory(company, cfg):
+            budgets[company] = cfg["budget_s"]
+            return R.Fetcher(config, cfg["budget_s"], transport=FakeTransport(), sleep=lambda _s: None)
+        ticks = iter([0.0, 0.0] + [R.RUN_BUDGET_S - 10] * 50)        # time jumps after the first source
+        after, _o = R.run_refresh(state, config, excluded, NOW, factory, clock=lambda: next(ticks))
+        self.assertEqual(list(budgets), ["Siemens"])
+        self.assertEqual(budgets["Siemens"], config.sources["Siemens"]["budget_s"])
+        for c in ("JPMorganChase", "GE HealthCare", "GE Vernova", "IQVIA", "ZS"):
+            self.assertEqual(after.companies[c].detail, "run time budget exhausted", c)
+            self.assertEqual(rows_of(after, c), rows_of(state, c))
+
+    def test_configured_budgets_fit_the_run_budget_and_workflow_timeout(self):
+        config, _e, state, _t = env()
+        timeout = int(re.search(r"timeout-minutes: (\d+)", R.read_text(
+            os.path.join(ROOT, ".github", "workflows", "refresh.yml"))).group(1))
+        self.assertLessEqual(R.RUN_BUDGET_S, (timeout - 4) * 60)
+        live = [c for c in config.companies if config.sources[c]["mode"] != "static"]
+        self.assertLessEqual(sum(config.sources[c]["budget_s"] for c in live), R.RUN_BUDGET_S)
+        for c in live:
+            with self.subTest(c):
+                self.assertLessEqual(source_minimum(c, config, state), config.sources[c]["budget_s"])
+        # With every source spending its whole budget, each still starts with its full allowance.
+        left = R.RUN_BUDGET_S
+        for i, c in enumerate(live):
+            reserve = sum(R.source_floor(config.sources[x]) for x in live[i + 1:])
+            self.assertEqual(R.source_budget(config.sources[c], left, reserve), config.sources[c]["budget_s"])
+            left -= config.sources[c]["budget_s"]
+
+    def test_late_source_below_its_own_floor_is_held(self):
+        config, excluded, state, _t = env()
+        started = []
+
+        def factory(company, cfg):
+            started.append(company)
+            return R.Fetcher(config, cfg["budget_s"], transport=FakeTransport(), sleep=lambda _s: None)
+        # 45s left when ZS starts: above the 30s default floor, below the ZS crawl-delay floor of 60s.
+        ticks = iter([0.0] * 6 + [R.RUN_BUDGET_S - 45] * 50)     # run deadline + five sources, then ZS
+        clock = lambda: next(ticks)   # noqa: E731
+        after, _o = R.run_refresh(state, config, excluded, NOW, factory, clock=clock)
+        self.assertNotIn("ZS", started)
+        self.assertEqual(after.companies["ZS"].detail, "run time budget exhausted")
+        self.assertEqual(rows_of(after, "ZS"), rows_of(state, "ZS"))
+
+    def test_config_rejects_oversubscribed_budgets(self):
+        data = R.read_json(os.path.join(ROOT, R.CONFIG_PATH))
+        data["companies"][1]["budget_s"] += 30
+        with self.assertRaises(R.ConfigError) as ctx:
+            R.load_config(data)
+        self.assertIn("sum", str(ctx.exception))
+        data = R.read_json(os.path.join(ROOT, R.CONFIG_PATH))
+        data["companies"][5]["budget_s"] = 45                       # below the ZS crawl-delay floor
+        with self.assertRaises(R.ConfigError):
+            R.load_config(data)
+
+
+class SeedConversionTests(unittest.TestCase):
+    def test_converted_sources_keep_rows_dates_and_page(self):
+        config, state, template = R.load_all(ROOT)
+        for c in ("JPMorganChase", "GE HealthCare", "ZS"):
+            self.assertIn(state.companies[c].status, ("seed", "ok", "stale"), c)
+        doc = R.render(state, template, config)
+        if all(state.companies[c].status == "seed" for c in ("JPMorganChase", "GE HealthCare", "ZS")):
+            # Until their first real refresh the page shows them exactly as before.
+            for c in ("JPMorganChase", "GE HealthCare", "ZS"):
+                self.assertIn(f'"{c}":"not auto-checked"', doc)
+        _fc, frozen, _ft = frozen_env()
+        self.assertEqual({c: s.status for c, s in frozen.companies.items()
+                          if c in ("JPMorganChase", "GE HealthCare", "ZS")},
+                         {"JPMorganChase": "seed", "GE HealthCare": "seed", "ZS": "seed"})
+
+    def test_first_successful_refresh_clears_the_label(self):
+        config, _e, state, template = env()
+        state.companies["ZS"] = dataclasses.replace(state.companies["ZS"], status="ok",
+                                                    last_success="2026-10-31T18:00+05:30")
+        self.assertNotIn('"ZS":', R.render(state, template, config).split("STALE=")[1].split(";")[0])
 
 
 if __name__ == "__main__":

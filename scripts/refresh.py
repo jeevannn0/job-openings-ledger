@@ -11,11 +11,18 @@ Safety rules the code enforces:
   is honoured where configured.
 * A failed, blocked, partial, or ambiguous source keeps that company's
   last-known-good rows. Rows are removed only on an explicit closed signal
-  (HTTP 410, a "no longer available"/"filled" page, a closed Workday flag),
-  a passed closing date, the 30-day age-out, or two authoritative absences
-  from a complete listing. Search absence alone never removes a row at once.
-  A run that would remove most of a company's rows is held, and the removal is applied only
-  when a second complete healthy run at least one cadence later sees the same removal.
+  (HTTP 410, a "no longer available"/"filled" page where the adapter trusts one,
+  a closed Workday flag (GE HealthCare also needs the job absent from its complete listing),
+  an empty Oracle detail for an unlisted job), a passed closing date, the 30-day
+  age-out, or two absences from complete listings in consecutive healthy runs
+  (some adapters also require exact 404/410 evidence each time). A failed run, or an
+  ambiguous observation in a run that reads a listing, resets the absence streak; a run that looks at no listing
+  (Siemens between daily discoveries) and a removal-guard hold leave it unchanged. Search absence alone never
+  removes a row at once. A run that would remove most of a company's rows is held,
+  and the removal is applied only when a second complete healthy run at least one
+  cadence later sees the same removal.
+* Source budgets must sum to at most RUN_BUDGET_S, so every source gets its own
+  budget inside the workflow timeout.
 * Reports contain counts, public job IDs, and reason codes only; fetched
   payloads are never logged.
 * Private exclusions come from the EXCLUDED_PUBLIC_IDS_JSON environment
@@ -120,11 +127,11 @@ COMPANY_SPECS = {
     "IQVIA": _spec(r"https://jobs\.iqvia\.com/en/jobs/(R\d{6,8})-0",
                    {"iqvia_workday_cxs"}, {"jobs.iqvia.com", "iqvia.wd1.myworkdayjobs.com"}),
     "JPMorganChase": _spec(r"https://jpmc\.fa\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/(\d{6,12})",
-                           (), {"jpmc.fa.oraclecloud.com"}),
+                           {"jpm_oracle_ce"}, {"jpmc.fa.oraclecloud.com"}),
     "GE HealthCare": _spec(r"https://gehc\.wd5\.myworkdayjobs\.com/GEHC_ExternalSite/job/[A-Za-z0-9-]+/"
                            r"[A-Za-z0-9-]+_(R\d{6,8})(?:-\d{1,3})?",
-                           (), {"gehc.wd5.myworkdayjobs.com"}),
-    "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", (), {"jobs.zs.com"}),
+                           {"gehc_workday_cxs"}, {"gehc.wd5.myworkdayjobs.com"}),
+    "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", {"zs_jibe_api"}, {"jobs.zs.com"}),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -159,6 +166,47 @@ GE_LIST = (GE_BASE + "/api/get-jobs?radius=15&filter%5Bcity%5D%5B0%5D={city}"
 GE_LIST_BODY = {"disable_switch_search_mode": False, "site_available_languages": ["de", "fr", "en", "en-us"]}
 GE_PATH = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/job/(R\d{6,8})")
 GE_PAGE = 20
+
+# Oracle Recruiting Candidate Experience (public, unauthenticated REST). Keyword search matches text,
+# not location, so target roles are found through the LOCATIONS facet: an unfiltered search names the
+# facet IDs, then each target-city facet is paginated in full (TotalJobsCount sits in items[0]).
+JPM_REST = "https://jpmc.fa.oraclecloud.com/hcmRestApi/resources/latest/"
+JPM_SEARCH = (JPM_REST + "recruitingCEJobRequisitions?onlyData=true"
+              "&expand=requisitionList.secondaryLocations,locationsFacet"
+              "&finder=findReqs;siteNumber=CX_1001,facetsList=LOCATIONS,limit=25,offset={offset},"
+              "sortBy=POSTING_DATES_DESC{facet}")
+JPM_FACET = ",selectedLocationsFacet={id}"
+JPM_DETAIL = (JPM_REST + "recruitingCEJobRequisitionDetails?expand=all&onlyData=true"
+              "&finder=ById;Id=%22{id}%22,siteNumber=CX_1001")
+JPM_FRONT = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/{id}"
+JPM_PAGE = 25
+# Section headings such as "Required qualifications, capabilities, and skills:" may be followed by the
+# requirements on the same line or on the next lines; the heading words themselves are not content.
+JPM_REQUIRED_HEAD = re.compile(r"required qualifications(?:\s*(?:,|&|\band\b|\bcapabilities\b|\bskills\b))*\s*[:\-–—]?",
+                               re.I)
+JPM_PREFERRED_HEAD = re.compile(r"preferred qualifications", re.I)
+
+GEHC_FRONT = "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite"
+GEHC_API = "https://gehc.wd5.myworkdayjobs.com/wday/cxs/gehc/GEHC_ExternalSite"
+WD_MULTI = re.compile(r"\d{1,3} Locations?", re.I)     # Workday listing text for multi-location postings
+# Workday site names: '<country code><site>-<building>-<City>[-<campus>]', e.g. 'IND19-01-Bengaluru-EPIP 122'.
+WD_SITE_CODE = re.compile(r"[A-Z]{2,4}\d{1,3}\b")
+WD_SITE = re.compile(r"[A-Z]{2,4}\d{1,3}(?:-\d{1,3})*-([A-Za-z][^-]*?)(?:\s*-.*)?")
+
+# Jibe: the India listing is 10 per page with totalCount on every page; /api/jobs/{id} does not exist,
+# so the exact detail check is the public job page (404 when the posting is gone).
+ZS_LIST = ("https://jobs.zs.com/api/jobs?page={page}&location=India&sortBy=relevance"
+           "&descending=false&internal=false")
+ZS_FRONT = "https://jobs.zs.com/jobs/{id}"
+ZS_DETAIL = ZS_FRONT + "?lang=en-us"
+ZS_PAGE = 10
+ZS_MIN_DELAY_S = 5.0       # jobs.zs.com robots.txt: crawl-delay: 5
+
+# Wall-clock cap for one whole refresh run, so the six sources together stay well inside the
+# workflow's 25-minute job timeout. load_config rejects source budgets that sum to more than this.
+# A source that would start with less than the floor is held.
+RUN_BUDGET_S = 1200.0
+MIN_SOURCE_BUDGET_S = 30.0  # default floor; source_floor() uses each mode's own schema minimum
 
 # --------------------------------------------------------------------------- public boundary
 # Character classes keep this file from matching itself during the scan.
@@ -375,6 +423,11 @@ _TUNABLES = {
                           "max_new_details": (0, 60)},
     "gevernova_paradox_api": {"budget_s": (30, 600), "city": "term", "max_total": (20, 1000),
                               "max_new_checks": (0, 40)},
+    "jpm_oracle_ce": {"budget_s": (30, 600), "max_total": (25, 1000), "max_new_details": (0, 40)},
+    "gehc_workday_cxs": {"budget_s": (30, 600), "max_total": (20, 3000), "max_new_details": (0, 60)},
+    # ZS: robots.txt crawl-delay 5s means even robots + one listing page + one job page take > 15s
+    # (with jitter); 60s is the floor that still covers a small listing.
+    "zs_jibe_api": {"budget_s": (60, 600), "max_total": (10, 500), "max_new_checks": (0, 20)},
     "static": {},
 }
 SIEMENS_MIN_DELAY_S = 2.0
@@ -443,6 +496,12 @@ def load_config(data: dict) -> Config:
            "config: fetch must be true exactly for hosts of non-static sources")
     if "jobs.siemens.com" in needed_fetch:
         _check(hosts["jobs.siemens.com"].min_delay_s >= SIEMENS_MIN_DELAY_S, "config: Siemens delay must be >= 2s")
+    if "jobs.zs.com" in needed_fetch:
+        _check(hosts["jobs.zs.com"].min_delay_s >= ZS_MIN_DELAY_S and hosts["jobs.zs.com"].robots,
+               "config: ZS needs robots and a delay >= 5s (robots.txt crawl-delay)")
+    # Budgets must not oversubscribe the run, or late sources would always be cut short.
+    _check(sum(s["budget_s"] for s in sources.values() if s["mode"] != "static") <= RUN_BUDGET_S,
+           "config: source budgets must sum to at most the run budget")
     return Config(f["max_age_days"], float(f["max_years"]), tuple(f["cities"]), hosts, tuple(companies), sources)
 
 
@@ -670,7 +729,8 @@ def stale_labels(state: State, config: Config) -> dict[str, str]:
     out = {}
     for c in config.companies:
         cs = state.companies[c]
-        if cs.status == "static":
+        # A seeded snapshot that no refresh has confirmed yet is labelled like a static source.
+        if cs.status == "static" or (cs.status == "seed" and cs.last_success is None):
             out[c] = "not auto-checked"
         elif cs.status == "stale":
             last = iso_time(cs.last_success)
@@ -1080,15 +1140,17 @@ def _to_num(token: str) -> float:
     return float(_WORD_NUM[token]) if token in _WORD_NUM else float(token)
 
 
-def assess_experience(text: str, max_years: float) -> tuple[bool, str, str, float | None]:
-    """(qualifies, band, summary, max_years_found). Years count only near an experience cue."""
+def assess_experience(text: str, max_years: float, require_cue: bool = True,
+                      ) -> tuple[bool, str, str, float | None]:
+    """(qualifies, band, summary, max_years_found). Years count only near an experience cue, unless
+    require_cue is False (the text is already a required-qualifications section)."""
     flat = re.sub(r"\s+", " ", text or "")
     mins: list[float] = []
     uppers: list[float] = []
     snippets: list[str] = []
     for m in YEARS_RE.finditer(flat):
         window = flat[max(0, m.start() - 60): m.end() + 60]
-        if not EXPERIENCE_CUE.search(window):
+        if require_cue and not EXPERIENCE_CUE.search(window):
             continue
         lo = _to_num(m.group(1))
         hi = _to_num(m.group(2)) if m.group(2) else lo
@@ -1108,12 +1170,12 @@ def assess_experience(text: str, max_years: float) -> tuple[bool, str, str, floa
 
 
 def qualifies(title: str, description: str, posted: dt.date | None, places: Iterable[str],
-              today: dt.date, config: Config) -> tuple[bool, str, str]:
+              today: dt.date, config: Config, require_cue: bool = True) -> tuple[bool, str, str]:
     if posted is None or not 0 <= (today - posted).days <= config.max_age_days:
         return False, "", ""
     if not any(city in p.lower() for p in places for city in config.cities):
         return False, "", ""
-    ok, band, summary, found = assess_experience(description, config.max_years)
+    ok, band, summary, found = assess_experience(description, config.max_years, require_cue)
     if not ok:
         return False, "", ""
     if SENIOR_TITLE.search(title) and (found is None or found > config.max_years):
@@ -1153,6 +1215,9 @@ class SourceResult:
     listing_complete: bool = False
     listed: set = dataclasses.field(default_factory=set)
     absence_scope: set | None = None     # IDs the complete listing must contain; None = every row
+    # False when this run did not look at a listing at all (Siemens between daily discoveries): such a
+    # run neither counts nor breaks an absence streak for rows it has no evidence about.
+    listing_observed: bool = True
     listing_total: int | None = None
     added: list = dataclasses.field(default_factory=list)
     discovery_attempted: bool = False
@@ -1253,14 +1318,14 @@ def refresh_siemens(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.dateti
         st = siemens_detail(fetcher, r.job_id, cache).state
         streak = streak + 1 if st == "blocked" else (0 if st in ("live", "closed") else streak)
         states[r.job_id] = st
-    res = SourceResult("Siemens", True, "")
+    res = SourceResult("Siemens", True, "", listing_observed=False)
     res.live = {k for k, v in states.items() if v == "live"}
     res.closed = {k for k, v in states.items() if v == "closed"}
     notes = [f"liveness {len(res.live) + len(res.closed)}/{len(rows)}"]
 
     last = iso_time(cs.last_discovery_attempt)
     if last is None or now - last >= dt.timedelta(hours=cfg["discovery_interval_h"]):
-        res.discovery_attempted = True
+        res.discovery_attempted = res.listing_observed = True
         disc = siemens_discover(cfg, fetcher, today, config, cache)
         notes.append("discovery " + disc.detail)
         existing = {r.job_id for r in rows}
@@ -1295,18 +1360,18 @@ def refresh_siemens(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.dateti
     return res
 
 
-def _wd_page(fetcher: Fetcher, term: str, offset: int) -> dict | None:
+def _wd_page(fetcher: Fetcher, term: str, offset: int, api: str = IQVIA_API) -> dict | None:
     body = json.dumps({"appliedFacets": {}, "limit": WD_PAGE, "offset": offset, "searchText": term}).encode()
-    data = fetcher.request(IQVIA_API + "/jobs", "POST", body=body,
+    data = fetcher.request(api + "/jobs", "POST", body=body,
                            headers={"Content-Type": "application/json"}, accept="json").json_obj()
     if not isinstance(data, dict) or not isinstance(data.get("jobPostings"), list):
         return None
     return data
 
 
-def _wd_search(fetcher: Fetcher, term: str, max_total: int) -> tuple[list, int] | None:
-    """All postings for a search term, or None when the listing is incomplete or malformed."""
-    first = _wd_page(fetcher, term, 0)
+def _wd_search(fetcher: Fetcher, term: str, max_total: int, api: str = IQVIA_API) -> tuple[list, int] | None:
+    """All postings for a search term ("" = the whole site), or None when incomplete or malformed."""
+    first = _wd_page(fetcher, term, 0, api)
     if first is None:
         return None
     total = first.get("total")     # reliable on the first page only
@@ -1315,7 +1380,7 @@ def _wd_search(fetcher: Fetcher, term: str, max_total: int) -> tuple[list, int] 
     posts = list(first["jobPostings"])
     offset = WD_PAGE
     while offset < total:
-        page = _wd_page(fetcher, term, offset)
+        page = _wd_page(fetcher, term, offset, api)
         if page is None or not page["jobPostings"]:
             return None             # a throttled page looks like end-of-list: treat as partial
         posts += page["jobPostings"]
@@ -1535,10 +1600,493 @@ def refresh_ge(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, c
     return res
 
 
+def _count(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def _fingerprint(*fields: object) -> str:
+    key = [str(f or "") for f in fields]
+    return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+
+
+def _is_blocked(resp: Resp) -> bool:
+    return resp.error in BLOCKING_ERRORS or resp.status in (403, 429) or (resp.status or 0) >= 500
+
+
+def _recent(posted: dt.date | None, today: dt.date, config: Config) -> bool:
+    return posted is not None and 0 <= (today - posted).days <= config.max_age_days
+
+
+def _unscreened(jid: str, fp: str, cs: CompanyState) -> bool:
+    prior = screened_parts(cs.screened.get(jid))
+    return not (prior and prior[1] in (None, fp))
+
+
+def _with_invalid(detail: str, invalid: int) -> str:
+    """Report qualifying roles that failed row validation as a count only (never their content)."""
+    return f"{detail}; {invalid} invalid row{'' if invalid == 1 else 's'} held" if invalid else detail
+
+
+# -- JPMorganChase: Oracle Recruiting Candidate Experience
+
+def _jpm_search(fetcher: Fetcher, facet_id: int | None, offset: int) -> dict | None:
+    """items[0] of one search page, or None when unavailable or malformed."""
+    facet = JPM_FACET.format(id=facet_id) if facet_id is not None else ""
+    data = fetcher.request(JPM_SEARCH.format(offset=offset, facet=facet), accept="json").json_obj()
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+        return None
+    page = items[0]
+    if not _count(page.get("TotalJobsCount")) or not isinstance(page.get("requisitionList"), list):
+        return None
+    return page
+
+
+def _jpm_facets(page: dict, config: Config) -> list[int] | None:
+    """Location-facet IDs whose city (first part of 'Bengaluru, Karnataka, India') is a target city."""
+    facets = page.get("locationsFacet")
+    if not isinstance(facets, list):
+        return None
+    ids = {f["Id"] for f in facets if isinstance(f, dict) and _count(f.get("Id")) and isinstance(f.get("Name"), str)
+           and f["Name"].split(",")[0].strip().lower() in config.cities}
+    return sorted(ids)
+
+
+def _jpm_listing(cfg: dict, fetcher: Fetcher, config: Config) -> tuple[dict, int] | str:
+    boot = _jpm_search(fetcher, None, 0)
+    if boot is None:
+        return "search unavailable or malformed"
+    facet_ids = _jpm_facets(boot, config)
+    if facet_ids is None:
+        return "location facets missing"
+    if not facet_ids:                  # a truncated facet list looks the same as "no target roles"
+        return "target location facet missing"
+    listing: dict[str, dict] = {}
+    for fid in facet_ids:
+        first = _jpm_search(fetcher, fid, 0)
+        if first is None:
+            return "listing unavailable or malformed"
+        total = first["TotalJobsCount"]
+        if total > cfg["max_total"]:
+            return "listing total invalid"
+        reqs = list(first["requisitionList"])
+        offset = JPM_PAGE
+        while offset < total:
+            page = _jpm_search(fetcher, fid, offset)
+            if page is None or not page["requisitionList"] or page["TotalJobsCount"] != total:
+                return "partial pagination"
+            reqs += page["requisitionList"]
+            offset += JPM_PAGE
+        found = {r["Id"]: r for r in reqs if isinstance(r, dict) and isinstance(r.get("Id"), str)
+                 and JOB_ID_RE["JPMorganChase"].fullmatch(r["Id"])}
+        if len(found) < total:          # unique IDs: a shifted page cannot hide a skipped role
+            return "partial pagination"
+        for jid, r in found.items():
+            listing.setdefault(jid, r)
+    # Each facet was proven complete above; a role in several target-city facets counts once, so the
+    # shrink guard compares unique listings run to run.
+    return listing, len(listing)
+
+
+def _jpm_detail(fetcher: Fetcher, jid: str) -> tuple[str, dict | None]:
+    """'live' (exact ID returned), 'closed' (empty items), 'blocked', or 'unknown' (malformed)."""
+    resp = fetcher.request(JPM_DETAIL.format(id=jid), accept="json")
+    if _is_blocked(resp):
+        return "blocked", None
+    data = resp.json_obj()
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return "unknown", None
+    if not items:
+        return ("closed", None) if data.get("count") == 0 else ("unknown", None)
+    info = items[0]
+    if len(items) != 1 or not isinstance(info, dict) or info.get("Id") != jid:
+        return "unknown", None
+    return "live", info
+
+
+def _jpm_places(rec: dict) -> list[str]:
+    places = [str(rec.get("PrimaryLocation") or "")]
+    places += [str(s.get("Name") or "") for s in rec.get("secondaryLocations") or [] if isinstance(s, dict)]
+    return [p for p in places if p]
+
+
+def _drop_preferred(text: str) -> str:
+    """Text without its 'Preferred qualifications' sections (each runs to the next required heading)."""
+    out, pos = [], 0
+    for m in JPM_PREFERRED_HEAD.finditer(text):
+        if m.start() < pos:
+            continue
+        out.append(text[pos:m.start()])
+        nxt = JPM_REQUIRED_HEAD.search(text, m.end())
+        pos = nxt.start() if nxt else len(text)
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _jpm_requirements(info: dict) -> tuple[str, bool]:
+    """(text to assess, whether a year count needs an experience cue nearby).
+
+    The 'Required qualifications' section is used on its own when it states a year count; when a
+    preferred heading closes it, any count there is a requirement, so no cue is needed. When the
+    section is missing or names no years, the
+    whole posting except its preferred sections is assessed, so a "3+ years" stated elsewhere is never
+    reported as "no number of years". Preferred qualifications never raise the requirement.
+    """
+    text = strip_html(str(info.get("ExternalDescriptionStr") or ""))
+    extra = strip_html(str(info.get("ExternalQualificationsStr") or ""))
+    head = JPM_REQUIRED_HEAD.search(text)
+    if head:
+        end = JPM_PREFERRED_HEAD.search(text, head.end())
+        section = text[head.end(): end.start() if end else len(text)].strip()
+        if YEARS_RE.search(section):
+            # Without a closing heading the section may run into "About us" text, so keep the cue.
+            return section, end is None
+    return (_drop_preferred(text) + "\n" + _drop_preferred(extra)).strip(), True
+
+
+def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                excluded: frozenset, config: Config) -> SourceResult:
+    today = now.astimezone(IST).date()
+    got = _jpm_listing(cfg, fetcher, config)
+    if isinstance(got, str):
+        return held("JPMorganChase", got)
+    listing, total = got
+    # Rows leave only on an exact-detail "closed" answer (or deadline/age-out), never on absence.
+    res = SourceResult("JPMorganChase", True, f"listing {total}", listing_complete=True, listing_total=total,
+                       listed=set(listing), absence_scope=set())
+    states: dict[str, str] = {}
+    streak = 0
+    for r in rows:
+        if streak >= BLOCK_TRIP:
+            states[r.job_id] = "skipped"
+            if r.job_id in listing:
+                res.live.add(r.job_id)               # detail not tried, but listed in the complete listing
+            continue
+        st, info = _jpm_detail(fetcher, r.job_id)
+        streak = streak + 1 if st == "blocked" else 0
+        states[r.job_id] = st
+        if st == "live" and info is not None:
+            res.live.add(r.job_id)
+            end = generic_closing(info.get("ExternalPostedEndDate"))   # inclusive calendar date
+            if end and end != r.closing_date:
+                res.closing[r.job_id] = end
+        elif st == "closed" and r.job_id not in listing:
+            res.closed.add(r.job_id)
+        elif st != "closed" and r.job_id in listing:
+            res.live.add(r.job_id)                   # listed in the complete target-city listing
+    if rows and not any(v in ("live", "closed") for v in states.values()):
+        return held("JPMorganChase", "detail endpoint unavailable")
+    existing = {r.job_id for r in rows}
+    fresh: list[tuple[dt.date, str, str]] = []
+    for jid, rec in listing.items():
+        posted = parse_any_date(rec.get("PostedDate"))
+        if jid in existing or jid in excluded or not _recent(posted, today, config):
+            continue
+        fp = _fingerprint(rec.get("Title"), rec.get("PrimaryLocation"), rec.get("PostedDate"))
+        if _unscreened(jid, fp, cs):
+            fresh.append((posted, jid, fp))
+    fresh.sort(reverse=True)                         # newest posting first
+    checked = invalid = 0
+    for posted, jid, fp in fresh[:cfg["max_new_details"]]:
+        checked += 1
+        mark = screened_entry(today, fp)
+        st, info = _jpm_detail(fetcher, jid)
+        if st == "blocked":
+            break
+        if st == "closed":
+            res.screened[jid] = mark
+            continue
+        if st != "live" or info is None:
+            continue                                 # malformed: retried on a later run
+        places = _jpm_places(info) or _jpm_places(listing[jid])
+        posted = parse_any_date(info.get("ExternalPostedStartDate")) or posted
+        title = clean_text(info.get("Title") or listing[jid].get("Title"), 160)
+        text, cue = _jpm_requirements(info)
+        ok, band, exp = qualifies(title, text, posted, places, today, config, require_cue=cue)
+        if not ok:
+            res.screened[jid] = mark                 # definitive: does not qualify
+            continue
+        row = make_row("JPMorganChase", jid, title, exp, join_places(target_places(places, config)),
+                       JPM_FRONT.format(id=jid), band, generic_closing(info.get("ExternalPostedEndDate")),
+                       posted, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            invalid += 1                             # qualifies but fails row validation: retried, not screened
+    res.counts = {"listed": len(listing), "live": len(res.live), "closed": len(res.closed),
+                  "new_checked": checked, "unscreened": len(fresh), "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
+# -- GE HealthCare: Workday CXS, whole-site listing filtered to target cities locally
+
+def _gehc_detail(fetcher: Fetcher, path: str, jid: str) -> tuple[str, dict | None]:
+    """'live' needs posted and canApply both true; 410 is 'gone'; explicit false is 'closed' (with the
+    record); 404 is 'missing'; throttling, outages, maintenance and non-JSON pages are 'blocked';
+    anything else is 'unknown'."""
+    resp = fetcher.request(GEHC_API + path, accept="json")
+    if resp.status == 410:
+        return "gone", None
+    if _is_blocked(resp):
+        return "blocked", None
+    if resp.status == 404 and not resp.error:
+        return "missing", None
+    data = resp.json_obj()
+    if data is None:
+        return ("blocked", None) if resp.status == 200 else ("unknown", None)
+    info = data.get("jobPostingInfo") if isinstance(data, dict) else None
+    if not isinstance(info, dict) or info.get("jobReqId") != jid:
+        return "unknown", None
+    if info.get("posted") is False or info.get("canApply") is False:
+        return "closed", info
+    if info.get("posted") is True and info.get("canApply") is True:
+        return "live", info
+    return "unknown", info
+
+
+def _gehc_place(place: str, config: Config) -> str:
+    """Workday site names like 'IND19-01-Bengaluru-EPIP 122 (Phase II)' are shown as their city.
+
+    Target cities map to the configured name; other site codes ('IND23-01-Pune-Hinjewadi') keep only
+    the city segment. A value that is still a bare site code is dropped ('' is skipped by join_places).
+    """
+    low = place.lower()
+    for city in config.cities:
+        if city in low:
+            return city.capitalize()
+    m = WD_SITE.fullmatch(place.strip())
+    city = re.sub(r"\s*\(.*", "", m.group(1)).strip() if m else place.split(",")[0].strip()
+    return "" if WD_SITE_CODE.match(city) else city
+
+
+def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                 excluded: frozenset, config: Config) -> SourceResult:
+    today = now.astimezone(IST).date()
+    found = _wd_search(fetcher, "", cfg["max_total"], GEHC_API)
+    if found is None:
+        return held("GE HealthCare", "workday listing incomplete or unavailable")
+    posts, total = found
+    listing: dict[str, dict] = {}
+    paths: dict[str, str] = {}
+    for p in posts:
+        ident = _wd_id(p)
+        if ident:
+            listing.setdefault(ident[0], p)
+            paths.setdefault(*ident)
+    res = SourceResult("GE HealthCare", True, f"listing {total}", listing_complete=True, listing_total=total,
+                       listed=set(paths), absence_scope=set())
+    states: dict[str, str] = {}
+    streak = contradictory = 0
+    for r in rows:
+        if streak >= BLOCK_TRIP:
+            states[r.job_id] = "skipped"
+            if r.job_id in paths:
+                res.live.add(r.job_id)        # detail not tried, but listed in the complete listing
+            continue
+        path = paths.get(r.job_id) or r.canonical_url[len(GEHC_FRONT):]
+        st, info = _gehc_detail(fetcher, path, r.job_id)
+        streak = streak + 1 if st == "blocked" else 0
+        states[r.job_id] = st
+        if st == "gone" or (st == "closed" and r.job_id not in paths):
+            res.closed.add(r.job_id)          # 410, or explicit false flags and absent from the listing
+        elif st == "closed":
+            contradictory += 1                # false flags but still in the complete listing: unconfirmed
+        elif st == "live" and info is not None:
+            res.live.add(r.job_id)
+            end = workday_closing(info.get("endDate"))       # Workday endDate is exclusive
+            if end and end != r.closing_date:
+                res.closing[r.job_id] = end
+        elif r.job_id in paths:
+            res.live.add(r.job_id)
+        elif st == "missing":
+            res.absence_scope.add(r.job_id)   # exact 404 and absent from the complete listing
+    if rows and not any(v in ("live", "closed", "gone", "missing") for v in states.values()):
+        return held("GE HealthCare", "detail endpoint unavailable")
+    existing = {r.job_id for r in rows}
+    fresh: list[tuple[bool, str, str]] = []
+    for jid, p in listing.items():
+        if jid in existing or jid in excluded or "30+" in str(p.get("postedOn", "")):
+            continue
+        loc = str(p.get("locationsText") or "")
+        direct = any(c in loc.lower() for c in config.cities)
+        if not direct and not WD_MULTI.fullmatch(loc.strip()):
+            continue                          # single non-target location
+        fp = _wd_fingerprint(p)
+        if _unscreened(jid, fp, cs):
+            fresh.append((direct, jid, fp))
+    fresh.sort(reverse=True)                  # target-city postings first, then newest ID
+    checked = invalid = 0
+    for _direct, jid, fp in fresh[:cfg["max_new_details"]]:
+        checked += 1
+        mark = screened_entry(today, fp)
+        st, info = _gehc_detail(fetcher, paths[jid], jid)
+        if st == "blocked":
+            break
+        if st in ("closed", "gone", "missing"):
+            res.screened[jid] = mark
+            continue
+        if st != "live" or info is None:
+            continue
+        places = [str(info.get("location") or "")] + [str(x) for x in info.get("additionalLocations") or []]
+        title = clean_text(info.get("title"), 160)
+        posted = parse_any_date(info.get("startDate"))
+        ok, band, exp = qualifies(title, strip_html(str(info.get("jobDescription") or "")), posted, places,
+                                  today, config)
+        if not ok:
+            res.screened[jid] = mark
+            continue
+        shown = [_gehc_place(p, config) for p in target_places(places, config)]
+        row = make_row("GE HealthCare", jid, title, exp, join_places(shown), GEHC_FRONT + paths[jid], band,
+                       workday_closing(info.get("endDate")), posted, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            # Qualifies but cannot form a valid row (e.g. an unexpected URL shape or forbidden text): not
+            # screened, so a later code fix picks it up instead of it being hidden for SCREENED_TTL_DAYS.
+            invalid += 1
+    res.counts = {"listed": len(listing), "live": len(res.live), "closed": len(res.closed),
+                  "contradictory": contradictory, "new_checked": checked, "unscreened": len(fresh),
+                  "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
+# -- ZS: Jibe public listing API
+
+def _zs_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
+    jobs: dict[str, dict] = {}
+    unique: set[str] = set()
+    received, total, page = 0, None, 1
+    max_pages = cfg["max_total"] // ZS_PAGE + 1
+    while page <= max_pages:
+        data = fetcher.request(ZS_LIST.format(page=page), accept="json").json_obj()
+        if not isinstance(data, dict) or not isinstance(data.get("jobs"), list):
+            return "listing unavailable or malformed"
+        count = data.get("totalCount")
+        if not _count(count) or count > cfg["max_total"]:
+            return "listing total invalid"
+        if total is None:
+            total = count
+        elif count != total:
+            return "listing changed during pagination"
+        if not data["jobs"] and received < total:
+            return "partial pagination"
+        for j in data["jobs"]:
+            d = j.get("data") if isinstance(j, dict) else None
+            rid = d.get("req_id") if isinstance(d, dict) else None
+            unique.add(str(rid))
+            if isinstance(rid, str) and JOB_ID_RE["ZS"].fullmatch(rid):
+                jobs.setdefault(rid, d)
+        received += len(data["jobs"])
+        if page * ZS_PAGE >= total:
+            break
+        page += 1
+    else:
+        return "page cap reached"
+    if len(unique) < (total or 0):
+        return "partial pagination"
+    return jobs, total or 0
+
+
+def _zs_open(d: dict) -> bool:
+    return d.get("searchable") is True and d.get("applyable") is True
+
+
+def _zs_detail(fetcher: Fetcher, jid: str) -> str:
+    """'gone' (exact 404 or 410 job page), 'blocked' (outage, throttle, challenge), 'live' (a 200 page
+    whose visible text names the ID, with no closed phrase), or 'unknown'. A closed-looking 200 page
+    is 'unknown': Jibe can serve one shell page for every path, so its text is not exact evidence.
+    Only new candidates use 'live'; an existing row is live only while the listing shows it open."""
+    resp = fetcher.request(ZS_DETAIL.format(id=jid))
+    if resp.status == 404 and not resp.error and "html" in resp.ctype.lower() and not is_challenge(resp) \
+            and not is_maintenance(resp):
+        return "gone"
+    st = classify_page(resp, jid)
+    if st == "closed":
+        return "gone" if resp.status == 410 else "unknown"
+    if st == "live":
+        # The ID must be visible page text, not only a canonical link, script data or an echoed
+        # '/jobs/<id>' path, which a generic shell page also contains.
+        visible = strip_html(resp.text())
+        if not re.search(rf"(?<![\w/=]){re.escape(jid)}(?!\w)", visible):
+            return "unknown"
+    return st
+
+
+def _zs_places(d: dict) -> list[str]:
+    def place(x: dict) -> str:
+        return ", ".join(str(x.get(k)) for k in ("city", "country") if x.get(k))
+    places = [place(d)] + [place(x) for x in d.get("additional_locations") or [] if isinstance(x, dict)]
+    return [p for p in places if p]
+
+
+def refresh_zs(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+               excluded: frozenset, config: Config) -> SourceResult:
+    today = now.astimezone(IST).date()
+    got = _zs_listing(cfg, fetcher)
+    if isinstance(got, str):
+        return held("ZS", got)
+    listing, total = got
+    open_ids = {k for k, d in listing.items() if _zs_open(d)}
+    # Removal needs an exact 404/410 job page AND two consecutive complete listings without the ID, so
+    # one page never removes a row, and a closed-looking 200 page never counts at all.
+    res = SourceResult("ZS", True, f"listing {total}", listing_complete=True, listing_total=total,
+                       listed=set(listing), absence_scope=set())
+    for r in rows:
+        if r.job_id in open_ids:
+            res.live.add(r.job_id)               # present, searchable and applyable: the only live evidence
+            continue
+        st = _zs_detail(fetcher, r.job_id)
+        if st == "blocked":
+            return held("ZS", "detail page blocked")   # 403/challenge/edge block: keep every row
+        if st == "gone" and r.job_id not in listing:
+            res.absence_scope.add(r.job_id)      # exact 404/410 and unlisted: counts toward removal
+        # Any 200 page (live-looking, closed-looking, a generic shell or one that echoes the URL) is
+        # ambiguous without the listing, so the row is kept as unconfirmed and its absence streak resets.
+    existing = {r.job_id for r in rows}
+    candidates: list[tuple[Row, str]] = []
+    for rid, d in sorted(listing.items(), key=lambda kv: (str(kv[1].get("posted_date")), kv[0]), reverse=True):
+        if rid in existing or rid in excluded or rid not in open_ids or d.get("slug") != rid:
+            continue
+        fp = _fingerprint(d.get("title"), d.get("posted_date"), d.get("update_date"))
+        if not _unscreened(rid, fp, cs):
+            continue
+        meta = d.get("meta_data")
+        canon = meta.get("canonical_url") if isinstance(meta, dict) else None
+        if canon is not None and str(canon).split("?")[0] != ZS_FRONT.format(id=rid):
+            continue
+        places = _zs_places(d)
+        posted = parse_any_date(d.get("posted_date"))
+        title = clean_text(d.get("title"), 160)
+        text = strip_html(str(d.get("qualifications") or "")) or strip_html(str(d.get("description") or ""))
+        ok, band, exp = qualifies(title, text, posted, places, today, config)
+        row = make_row("ZS", rid, title, exp, join_places(target_places(places, config)), ZS_FRONT.format(id=rid),
+                       band, None, posted, today, config) if ok else None
+        if row:
+            candidates.append((row, fp))
+    for row, fp in candidates[:cfg["max_new_checks"]]:
+        st = _zs_detail(fetcher, row.job_id)      # exact job page must confirm a new row
+        if st == "blocked":
+            break
+        if st == "live":
+            res.added.append(row)
+        elif st == "gone":
+            res.screened[row.job_id] = screened_entry(today, fp)
+        # a closed-looking or unclear 200 page: neither added nor screened; retried on a later run
+    res.counts = {"listed": len(listing), "open": len(open_ids), "live": len(res.live),
+                  "candidates": len(candidates)}
+    return res
+
+
 RUNNERS = {
     "siemens_avature_html": refresh_siemens,
     "iqvia_workday_cxs": refresh_iqvia,
     "gevernova_paradox_api": refresh_ge,
+    "jpm_oracle_ce": refresh_jpm,
+    "gehc_workday_cxs": refresh_gehc,
+    "zs_jibe_api": refresh_zs,
 }
 
 
@@ -1608,8 +2156,12 @@ def apply_result(rows: list[Row], cs: CompanyState, res: SourceResult, now: dt.d
                     removed.append(r.job_id)
                     continue
                 r = dataclasses.replace(r, liveness="absent", absent_runs=r.absent_runs + 1)
+            elif not res.listing_observed:
+                pass                     # no listing this run and no row evidence: streak unchanged
             else:
-                r = dataclasses.replace(r, liveness="unconfirmed")
+                # Ambiguous, blocked, out of scope or a partial listing: no evidence either way, so
+                # the row stays and any earlier absence no longer counts toward removal.
+                r = dataclasses.replace(r, liveness="unconfirmed", absent_runs=0)
             out.append(r)
         if len(removed) >= REMOVAL_GUARD_MIN and len(removed) * 2 > len(rows):
             verdict = removal_verdict(cs.removal_hold, removed, rows, res, now)
@@ -1622,7 +2174,12 @@ def apply_result(rows: list[Row], cs: CompanyState, res: SourceResult, now: dt.d
     if not res.ok:
         new_cs.status, new_cs.detail = "stale", clean_text(res.detail, 120)
         new_cs.stale_since = cs.stale_since if cs.status == "stale" and cs.stale_since else when
-        return list(rows), new_cs, []
+        if res.detail == REMOVAL_DETAIL:
+            return list(rows), new_cs, []      # the guard re-checks these exact rows one cadence later
+        # A failed run keeps every row (last known good) but breaks any absence streak: the two
+        # absences that remove a row must come from consecutive healthy complete runs.
+        return [dataclasses.replace(r, absent_runs=0, liveness="unconfirmed") if r.absent_runs else r
+                for r in rows], new_cs, []
     seen = {r.job_id for r in out}
     for r in sorted(res.added, key=lambda r: r.job_id, reverse=True):
         if r.job_id not in seen:
@@ -1656,10 +2213,23 @@ def finalize(rows: list[Row], today: dt.date, config: Config, excluded: dict) ->
 FetcherFactory = Callable[[str, dict], Fetcher]
 
 
+def source_floor(cfg: dict) -> float:
+    """The smallest budget_s the config schema allows for this source's mode."""
+    return float(_TUNABLES[cfg["mode"]].get("budget_s", (MIN_SOURCE_BUDGET_S,))[0])
+
+
+def source_budget(cfg: dict, run_left: float, reserve_s: float) -> float:
+    """A source's own budget, capped so later sources keep reserve_s (the sum of their floors)."""
+    return max(0.0, min(float(cfg["budget_s"]), run_left - reserve_s))
+
+
 def run_refresh(state: State, config: Config, excluded: dict, now: dt.datetime,
-                factory: FetcherFactory | None) -> tuple[State, list[Outcome]]:
+                factory: FetcherFactory | None, clock: Callable[[], float] = time.monotonic,
+                ) -> tuple[State, list[Outcome]]:
     """factory=None: offline (no network); only dates, ages and deterministic pruning change."""
     today = now.astimezone(IST).date()
+    run_deadline = clock() + RUN_BUDGET_S
+    live_sources = [c for c in config.companies if config.sources[c]["mode"] != "static"]
     companies = {c: dataclasses.replace(s, screened=dict(s.screened)) for c, s in state.companies.items()}
     all_rows: list[Row] = []
     outcomes: list[Outcome] = []
@@ -1674,9 +2244,14 @@ def run_refresh(state: State, config: Config, excluded: dict, now: dt.datetime,
             outcomes.append(Outcome(company, kind, cs.detail, len(rows), len(rows), [], []))
             all_rows += rows
             continue
+        later = live_sources[live_sources.index(company) + 1:]
+        budget = source_budget(cfg, run_deadline - clock(), sum(source_floor(config.sources[c]) for c in later))
         try:
-            res = RUNNERS[cfg["mode"]](cfg, rows, factory(company, cfg), now, cs,
-                                       excluded.get(company, frozenset()), config)
+            if budget < source_floor(cfg):     # e.g. ZS cannot finish its listing at the crawl delay
+                res = held(company, "run time budget exhausted")
+            else:
+                res = RUNNERS[cfg["mode"]](cfg, rows, factory(company, {**cfg, "budget_s": budget}), now, cs,
+                                           excluded.get(company, frozenset()), config)
         except Exception as exc:  # noqa: BLE001 - one source must never break the others
             res = held(company, f"source error ({type(exc).__name__})")
         new_rows, companies[company], removed = apply_result(rows, cs, res, now)
@@ -1752,6 +2327,9 @@ class FixtureTransport:
                 continue
             tail = urllib.parse.urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]
             text = text.replace("{tail}", html.escape(tail))
+            # {jid}: the job ID a request asks about (Oracle finder Id, else a trailing [R]digits path ID).
+            m = re.search(r"Id=%22(\d{1,12})%22", url) or re.search(r"(R?\d{3,12})(?:-\d{1,3})?$", tail)
+            text = text.replace("{jid}", m.group(1) if m else "")
             return status, [("Content-Type", ctype), *extra], text.encode("utf-8")
         self.misses.append(f"{method} {url}")
         raise ConnectionError("no fixture")
@@ -1864,7 +2442,9 @@ def scan_repo(root: str) -> list[str]:
         expected = render(state, template, config)
         if read_text(os.path.join(root, INDEX_PATH)) != expected:
             problems.append("index.html: does not match render(state/jobs.json)")
-        for rel in (INDEX_PATH, STATE_PATH):
+        # Published files and fixture request specs may only name allowlisted company hosts.
+        fixtures = [f for f in _repo_files(root) if ALLOWED_FIXTURE.fullmatch(f) and f.endswith(".json")]
+        for rel in (INDEX_PATH, STATE_PATH, *fixtures):
             for url in re.findall(r"https?://[^\s\"'<>)\\]+", read_text(os.path.join(root, rel))):
                 if check_url(url, config.link_hosts):
                     problems.append(f"{rel}: URL outside link-host allowlist")
