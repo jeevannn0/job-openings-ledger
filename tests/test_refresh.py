@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -1447,6 +1448,327 @@ class DryRunTests(unittest.TestCase):
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
         self.assertIn("| Siemens | ok |", out)
+
+
+# --------------------------------------------------------------------------- phone alerts (dist/alerts.json)
+
+LEDGER = "https://example-owner.github.io/job-openings-ledger/"   # synthetic owner; CI derives the real one
+FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999"}
+
+
+def outcome_for(state, added=(), removed=0, run_at="2026-10-31T18:00+05:30", mode="fixtures"):
+    return {"schema": 1, "run_at": run_at, "mode": mode, "state_sha256": R.sha256_text(state.to_json()),
+            "added": [list(k) for k in added], "removed_count": removed}
+
+
+def alert_for(state, config, **kw):
+    return R.build_alert(state, R.load_outcome(outcome_for(state, **kw), config), config, LEDGER)
+
+
+def with_closing(state, dates):
+    """State whose rows have the given closing dates (by index); every other row has none."""
+    jobs = [dataclasses.replace(r, closing_date=dates.get(i)) for i, r in enumerate(state.jobs)]
+    return dataclasses.replace(state, jobs=jobs)
+
+
+class AlertTests(unittest.TestCase):
+    def setUp(self):
+        self.config, self.excluded, self.state, self.template = env()
+
+    def day(self, n):
+        return (self.state.as_of + dt.timedelta(days=n)).isoformat()
+
+    def cli_run(self, root, now="2026-10-31T18:00+05:30", fixtures=True):
+        outcome = os.path.join(root, "tmp", "outcome.json")
+        argv = ["--root", root, "refresh", "--now", now, "--outcome", outcome]
+        argv += ["--fixtures", os.path.join(FIXTURES, "dry_run.json")] if fixtures else ["--offline"]
+        code, out, err = run_main(argv, json.dumps(TEST_EXCLUDED))
+        self.assertEqual(code, 0, err)
+        dist = os.path.join(root, "dist")
+        self.assertEqual(run_main(["--root", root, "render", "--out", os.path.join(dist, "index.html")], None)[0], 0)
+        code, aout, aerr = run_main(["--root", root, "alert", "--outcome", outcome,
+                                     "--out", os.path.join(dist, "alerts.json"), "--ledger-url", LEDGER], None)
+        self.assertEqual(code, 0, aerr)
+        with open(os.path.join(dist, "alerts.json"), encoding="utf-8") as fh:
+            text = fh.read()
+        return text, json.loads(text), out + err + aout + aerr, outcome
+
+    # ---- payload contents
+
+    def test_no_new_jobs_payload_still_has_a_fresh_refresh_id(self):
+        after, outcomes = R.run_refresh(self.state, self.config, self.excluded, NOW, None)
+        o1 = R.run_outcome(after, outcomes, NOW, "offline", self.excluded)
+        self.assertEqual(o1["added"], [])
+        a = R.build_alert(after, R.load_outcome(o1, self.config), self.config, LEDGER)
+        self.assertEqual((a["new_count"], a["new_jobs"], a["remaining_new_count"]), (0, [], 0))
+        self.assertEqual(a["notification_title"], "No new job openings")
+        self.assertTrue(a["notification_body"].startswith("No new openings. "))
+        self.assertEqual(a["removed_count"], sum(len(o.removed) for o in outcomes))
+        self.assertEqual((a["checked_at"], a["as_of"]), ("2026-10-31T18:00+05:30", "2026-10-31"))
+        self.assertTrue(a["refresh_id"].startswith("2026-10-31T18:00+05:30#"))
+        later = NOW + dt.timedelta(hours=6)
+        after2, outcomes2 = R.run_refresh(after, self.config, self.excluded, later, None)
+        a2 = R.build_alert(after2, R.load_outcome(R.run_outcome(after2, outcomes2, later, "offline", self.excluded),
+                                                  self.config), self.config, LEDGER)
+        self.assertEqual(a2["new_count"], 0)
+        self.assertNotEqual(a2["refresh_id"], a["refresh_id"])     # the phone sees each completed check
+
+    def test_payload_shape_and_totals_match_the_page(self):
+        a = alert_for(self.state, self.config)
+        self.assertEqual(tuple(a), R.ALERT_FIELDS)
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn(f'<dd id="total">{a["total_jobs"]}</dd>', doc)
+        self.assertIn(f'<dd id="companies">{a["company_count"]}</dd>', doc)
+        self.assertEqual(a["total_jobs"], len(self.state.jobs))
+        self.assertEqual(a["company_count"], len({r.company for r in self.state.jobs}))
+        self.assertEqual(a["ledger_url"], LEDGER)
+        self.assertEqual(list(a["source_status"]), list(self.config.companies))
+        self.assertTrue(set(a["source_status"].values()) <= {"ok", "stale", "static"})
+
+    def test_additions_come_from_the_refresh_outcome(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        text, a, logs, _o = self.cli_run(root)
+        after = R.load_all(root)[1]
+        rows = {r.job_id: r for r in after.jobs}
+        self.assertEqual(a["new_count"], len(FIXTURE_ADDED))
+        self.assertEqual({j["job_id"] for j in a["new_jobs"]}, FIXTURE_ADDED)
+        for j in a["new_jobs"]:
+            r = rows[j["job_id"]]
+            self.assertEqual(j, {"company": r.company, "job_id": r.job_id, "title": r.title,
+                                 "canonical_url": r.canonical_url})
+        self.assertEqual(a["notification_title"], "6 new job openings")
+        self.assertTrue(a["notification_body"].startswith("New: Siemens 1, JPMorganChase 1, GE HealthCare 1, "))
+        self.assertNotIn("mode", a)                                           # run mode stays internal
+        for title in {j["title"] for j in a["new_jobs"]}:
+            self.assertNotIn(title, logs)                                     # logs carry IDs and counts only
+
+    def test_row_found_and_pruned_in_the_same_run_is_neither_added_nor_removed(self):
+        zs = rows_of(self.state, "ZS")
+        expired = dataclasses.replace(zs[0], job_id="68997", canonical_url="https://jobs.zs.com/jobs/68997",
+                                      closing_date=(TODAY - dt.timedelta(days=1)).isoformat())
+        fresh = dataclasses.replace(zs[0], job_id="68996", canonical_url="https://jobs.zs.com/jobs/68996")
+        live = {r.job_id for r in zs}
+
+        def runner(cfg, rows, fetcher, now, cs, excluded, config):
+            return R.SourceResult("ZS", True, "listing", live=live, listing_complete=True, listed=live,
+                                  listing_total=len(live) + 2, added=[expired, fresh])
+        only_zs = lambda _c, _cfg: None   # noqa: E731 - the patched runner never fetches
+        with mock.patch.dict(R.RUNNERS, {"zs_jibe_api": runner}), \
+                mock.patch.dict(self.config.sources, {c: {**s, "mode": "static"} for c, s in
+                                                      self.config.sources.items() if c != "ZS"}):
+            after, outcomes = R.run_refresh(self.state, self.config, self.excluded, NOW, only_zs)
+        o = next(o for o in outcomes if o.company == "ZS")
+        self.assertEqual((o.added, o.removed, o.after), (["68996"], [], len(zs) + 1))
+        self.assertNotIn("68997", {r.job_id for r in after.jobs})
+        outcome = R.run_outcome(after, outcomes, NOW, "fixtures", self.excluded)
+        self.assertEqual((outcome["added"], outcome["removed_count"]), ([["ZS", "68996"]], 0))
+
+    def test_offline_run_adds_nothing(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        _t, a, _l, _o = self.cli_run(root, fixtures=False)
+        self.assertEqual((a["new_count"], a["new_jobs"]), (0, []))
+        bad = outcome_for(self.state, added=[("ZS", "24123")], mode="offline")
+        with self.assertRaises(ValueError):
+            R.load_outcome(bad, self.config)
+
+    def test_more_than_eight_new_jobs_are_truncated(self):
+        keys = [(r.company, r.job_id) for r in self.state.jobs[:11]]
+        a = alert_for(self.state, self.config, added=keys)
+        self.assertEqual((a["new_count"], len(a["new_jobs"]), a["remaining_new_count"]), (11, 8, 3))
+        self.assertEqual([(j["company"], j["job_id"]) for j in a["new_jobs"]], keys[:8])   # page order
+        self.assertEqual(a["notification_title"], "11 new job openings")
+
+    def test_closing_soon_window_and_order(self):
+        state = with_closing(self.state, {0: self.day(7), 1: self.day(0), 2: self.day(8), 3: self.day(-1),
+                                          4: self.day(3), 5: self.day(3)})
+        a = alert_for(state, self.config)
+        self.assertEqual(a["closing_soon_count"], 4)                 # today, +3, +3, +7; not +8, not passed
+        self.assertEqual([c["closing_date"] for c in a["closing_soon"]],
+                         [self.day(0), self.day(3), self.day(3), self.day(7)])
+        self.assertEqual([c["job_id"] for c in a["closing_soon"]],
+                         [state.jobs[i].job_id for i in (1, 4, 5, 0)])
+        self.assertIn("4 closing within 7 days.", a["notification_body"])
+        # Same rule as the page's "closing within 7 days" filter.
+        doc = R.render(state, self.template, self.config)
+        rows = json.loads(re.search(r"\nconst jobs=(\[\n.*?\n\]);\n", doc, re.S).group(1))
+        self.assertEqual(sorted(closing_filter(rows, "7")), sorted(c["job_id"] for c in a["closing_soon"]))
+
+    def test_closing_soon_is_capped_at_five_and_passed_dates_are_excluded(self):
+        state = with_closing(self.state, {i: self.day(i % 4) for i in range(7)} | {7: self.day(-2), 8: self.day(-1)})
+        a = alert_for(state, self.config)
+        self.assertEqual((a["closing_soon_count"], len(a["closing_soon"])), (7, 5))
+        self.assertTrue(all(c["closing_date"] >= self.day(0) for c in a["closing_soon"]))
+        dates = [c["closing_date"] for c in a["closing_soon"]]
+        self.assertEqual(dates, sorted(dates))
+        self.assertEqual(alert_for(with_closing(self.state, {0: self.day(-1)}), self.config)["closing_soon_count"], 0)
+
+    def test_notification_body_length_and_plain_text(self):
+        everyone = [(r.company, r.job_id) for r in self.state.jobs]
+        a = alert_for(with_closing(self.state, {i: self.day(1) for i in range(20)}), self.config, added=everyone)
+        self.assertLessEqual(len(a["notification_body"]), R.ALERT_BODY_MAX)
+        self.assertNotRegex(a["notification_title"] + a["notification_body"], r"[<>&\n]")
+        long_names = [("Company " + "x" * 90, 1), ("Company " + "y" * 90, 2), ("Company " + "z" * 90, 3)]
+        title, body = R.notification_text(long_names, 12, 999, 6)
+        self.assertEqual(title, "6 new job openings")
+        self.assertEqual(body, "New: 6. 12 closing within 7 days. 999 jobs across 6 companies.")
+        self.assertEqual(R.notification_text([("ZS", 1)], 1, 1, 1),
+                         ("1 new job opening", "New: ZS 1. 1 closing within 7 days. 1 job across 1 company."))
+
+    # ---- safety
+
+    def test_markup_in_titles_is_escaped(self):
+        evil = "</script><img src=x onerror=alert(1)> & \u2028Analyst"
+        jobs = [dataclasses.replace(self.state.jobs[0], title=evil), *self.state.jobs[1:]]
+        state = dataclasses.replace(self.state, jobs=jobs)
+        a = alert_for(state, self.config, added=[(jobs[0].company, jobs[0].job_id)])
+        text = R.alert_json(a)
+        self.assertNotIn("<", text)
+        self.assertNotIn(">", text)
+        self.assertNotIn("&", text)
+        self.assertNotIn("\u2028", text)
+        self.assertTrue(text.isascii())
+        self.assertEqual(json.loads(text)["new_jobs"][0]["title"], evil)         # escaping is lossless
+
+    def test_unsafe_titles_are_rejected(self):
+        for title in ("Analyst\x07", "Analyst\nTwo", "Mid" + "way Analyst", "Analyst " + "x" + "@" + "example.com"):
+            with self.subTest(repr(title[:8])):
+                jobs = [dataclasses.replace(self.state.jobs[0], title=title), *self.state.jobs[1:]]
+                with self.assertRaises(ValueError):
+                    alert_for(dataclasses.replace(self.state, jobs=jobs), self.config,
+                              added=[(jobs[0].company, jobs[0].job_id)])
+
+    def test_public_boundary_checks_on_the_payload(self):
+        a = alert_for(self.state, self.config)
+        self.assertEqual(R.find_forbidden(R.alert_json(a).replace(LEDGER, "")), [])
+        for key, value in (("notification_body", "Ask " + "x" + "@" + "example.com"),
+                           ("notification_body", "Open " + "a" + "toz"),
+                           ("notification_body", "<b>3 new</b>"),
+                           ("notification_title", "x" * 61),
+                           ("notification_body", "x" * 241),
+                           ("ledger_url", "https://evil.example/job-openings-ledger/"),
+                           ("ledger_url", LEDGER + "?next=https://evil.example/"),
+                           ("ledger_url", "http://example-owner.github.io/job-openings-ledger/")):
+            with self.subTest(key=key, value=value[:12]):
+                bad = json.loads(json.dumps(a))
+                bad[key] = value
+                with self.assertRaises(ValueError):
+                    R.validate_alert(bad, self.config)
+        bad = json.loads(json.dumps(a))
+        bad["source_status"]["ZS"] = "source error (Timeout)"                 # status words only, no raw detail
+        with self.assertRaises(ValueError):
+            R.validate_alert(bad, self.config)
+        bad = json.loads(json.dumps(a))
+        bad["closing_soon"] = [{"company": "ZS", "job_id": "1", "title": "x", "closing_date": self.day(1),
+                                "canonical_url": "https://evil.example/jobs/1"}]
+        bad["closing_soon_count"] = 1
+        with self.assertRaises(ValueError):
+            R.validate_alert(bad, self.config)
+        # The Pages owner may contain a scanner term; only the strictly shaped ledger_url is exempt.
+        owner_url = "https://" + "jeev" + "annn0.github.io/job-openings-ledger/"
+        self.assertEqual(R.build_alert(self.state, R.load_outcome(outcome_for(self.state), self.config),
+                                       self.config, owner_url)["ledger_url"], owner_url)
+
+    def test_private_exclusions_never_reach_outcome_or_alert(self):
+        hidden = R.Row(company="IQVIA", job_id="R1590001", title="Clin Data Spec", experience_text="Not stated",
+                       experience_band="n", location="Kochi", canonical_url="https://jobs.iqvia.com/en/jobs/R1590001-0",
+                       posted_date="2026-10-28", closing_date=self.day(2), first_seen="2026-10-31",
+                       last_seen="2026-10-31")
+        state = dataclasses.replace(self.state, jobs=R.sort_rows([*self.state.jobs, hidden], self.config))
+        root = temp_repo(self, state, self.template, self.config)
+        text, a, logs, outcome = self.cli_run(root)
+        published = [text, logs, R.read_text(outcome)]
+        for jid in ("R1590001", "500001"):
+            for doc in published:
+                self.assertNotIn(jid, doc)
+        plain = self.cli_run(temp_repo(self, self.state, self.template, self.config))[1]
+        self.assertEqual(a["removed_count"], plain["removed_count"])   # an exclusion is not reported as a removal
+        self.assertEqual(a["new_count"], plain["new_count"])
+        after, outcomes = R.run_refresh(self.state, self.config, self.excluded, NOW, None)
+        outcomes[0].added.append("500001")
+        with self.assertRaises(ValueError):
+            R.run_outcome(after, outcomes, NOW, "offline", self.excluded)
+
+    def test_deterministic_for_fixed_time_and_outcomes(self):
+        texts = []
+        for _ in range(2):
+            root = temp_repo(self, self.state, self.template, self.config)
+            texts.append(self.cli_run(root)[0])
+        self.assertEqual(texts[0], texts[1])
+        self.assertEqual(R.alert_json(alert_for(self.state, self.config)), R.alert_json(alert_for(self.state, self.config)))
+
+    def test_artifact_contains_index_and_alerts_only(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        self.cli_run(root)
+        dist = os.path.join(root, "dist")
+        self.assertEqual(sorted(os.listdir(dist)), ["alerts.json", "index.html"])
+        self.assertEqual(R.read_text(os.path.join(dist, "index.html")), R.read_text(os.path.join(root, "index.html")))
+        self.assertIn("dist/", R.read_text(os.path.join(ROOT, ".gitignore")).splitlines())
+        self.assertNotIn("alerts.json", " ".join(R.ALLOWED_FILES))
+
+    # ---- failure never publishes a success payload
+
+    def test_failed_refresh_writes_no_outcome_and_alert_fails(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        outcome, out = os.path.join(root, "tmp", "outcome.json"), os.path.join(root, "dist", "alerts.json")
+        code, _o, _e = run_main(["--root", root, "refresh", "--offline", "--outcome", outcome], "{bad")
+        self.assertEqual(code, 2)
+        self.assertFalse(os.path.exists(outcome))
+        code, _o, err = run_main(["--root", root, "alert", "--outcome", outcome, "--out", out,
+                                  "--ledger-url", LEDGER], None)
+        self.assertEqual(code, 2, err)
+        self.assertFalse(os.path.exists(out))
+
+    def test_stale_or_tampered_outcome_is_rejected(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        _t, _a, _l, outcome = self.cli_run(root)
+        saved = R.read_text(outcome)
+        # A later run that did not record an outcome leaves the earlier outcome stale.
+        code, _o, err = run_main(["--root", root, "refresh", "--offline", "--now", "2026-11-01T00:00+05:30"],
+                                 json.dumps(TEST_EXCLUDED))
+        self.assertEqual(code, 0, err)
+        out = os.path.join(root, "dist", "stale.json")
+        code, _o, err = run_main(["--root", root, "alert", "--outcome", outcome, "--out", out,
+                                  "--ledger-url", LEDGER], None)
+        self.assertEqual(code, 2)
+        self.assertIn("does not match state", err)
+        self.assertFalse(os.path.exists(out))
+        data = json.loads(saved)
+        for key, value in (("added", [["ZS", "99999"], ["ZS", "99999"]]), ("removed_count", -1),
+                           ("mode", "partial"), ("state_sha256", "0" * 63), ("extra", 1)):
+            with self.subTest(key):
+                with self.assertRaises(ValueError):
+                    R.load_outcome({**data, key: value}, self.config)
+        missing = outcome_for(self.state, added=[("ZS", "99999")])          # not in the published state
+        with self.assertRaises(ValueError):
+            R.build_alert(self.state, R.load_outcome(missing, self.config), self.config, LEDGER)
+
+    def test_outcome_cannot_be_combined_with_dry_run(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        outcome = os.path.join(root, "tmp", "outcome.json")
+        code, _o, err = run_main(["--root", root, "refresh", "--offline", "--dry-run", "--outcome", outcome],
+                                 json.dumps(TEST_EXCLUDED))
+        self.assertEqual(code, 2)
+        self.assertIn("--dry-run", err)
+        self.assertFalse(os.path.exists(outcome))
+
+    def test_workflow_builds_alert_after_refresh_and_never_commits_it(self):
+        text = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
+        refresh = re.search(r"^  refresh:\n(.*?)(?=^  [a-z]+:\n)", text, re.S | re.M).group(1)
+        order = ["refresh.py refresh", '--outcome "$RUNNER_TEMP/refresh-outcome.json"', "refresh.py scan",
+                 "render --out dist/index.html", "cmp dist/index.html index.html",
+                 'alert --outcome "$RUNNER_TEMP/refresh-outcome.json" --out dist/alerts.json',
+                 'test "$(ls -A dist | tr', "git add -- state/jobs.json index.html", "upload-pages-artifact"]
+        positions = [refresh.index(s) for s in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('--ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"',
+                      refresh)
+        build = re.search(r"- name: Build Pages artifact\n(.*?)(?=\n      - name:)", refresh, re.S).group(1)
+        self.assertIn("set -euo pipefail", build)
+        self.assertIn("path: dist", refresh)
+        self.assertEqual(text.count("alerts.json"), 2)                        # built and listed; never staged
+        self.assertNotIn("alerts.json", re.search(r"git add[^\n]*", refresh).group(0))
+        self.assertNotRegex(text, r"continue-on-error|always\(\)|failure\(\)")
+        self.assertEqual(text.count("refresh-outcome.json"), 2)
 
 
 # --------------------------------------------------------------------------- live adapters: JPMorganChase, GE HealthCare, ZS

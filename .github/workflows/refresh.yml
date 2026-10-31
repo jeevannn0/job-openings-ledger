@@ -37,15 +37,23 @@ jobs:
         env:
           # Private exclusions; read by the script only, never echoed. Unset or malformed fails the run.
           EXCLUDED_PUBLIC_IDS_JSON: ${{ secrets.EXCLUDED_PUBLIC_IDS_JSON }}
-        run: python3 scripts/refresh.py refresh --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+        # The run outcome (public job keys and counts) goes to the runner temp dir, outside the repo and the artifact.
+        run: >-
+          python3 scripts/refresh.py refresh --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          --outcome "$RUNNER_TEMP/refresh-outcome.json"
 
       - name: Public-boundary scan
         run: python3 scripts/refresh.py scan
 
       - name: Build Pages artifact
         run: |
+          set -euo pipefail
           python3 scripts/refresh.py render --out dist/index.html
           cmp dist/index.html index.html
+          # Phone alert for this run; fails (and so blocks the deploy) if the outcome does not match the state.
+          python3 scripts/refresh.py alert --outcome "$RUNNER_TEMP/refresh-outcome.json" --out dist/alerts.json \
+            --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+          test "$(ls -A dist | tr '\n' ' ')" = "alerts.json index.html "
 
       - name: Commit refreshed state
         if: steps.refresh.outputs.changed == 'true'

@@ -32,7 +32,9 @@ Safety rules the code enforces:
 Usage (run from anywhere; paths resolve against the repository root):
   python scripts/refresh.py refresh [--now ISO] [--offline] [--dry-run]
                                     [--fixtures FILE] [--github-output FILE] [--summary FILE]
+                                    [--outcome FILE]
   python scripts/refresh.py render [--out PATH]
+  python scripts/refresh.py alert --outcome FILE --out PATH --ledger-url URL
   python scripts/refresh.py check
   python scripts/refresh.py scan [ROOT]
   python scripts/refresh.py seed --from-html PATH --as-of YYYY-MM-DD
@@ -2263,11 +2265,11 @@ def run_refresh(state: State, config: Config, excluded: dict, now: dt.datetime,
     for company, jid, why in dropped:
         for o in outcomes:
             if o.company == company:
-                if why != "excluded":      # private exclusions are never named in reports
-                    o.removed.append(f"{jid} ({why})")
                 o.after -= 1
-                if jid in o.added:
+                if jid in o.added:         # found and pruned in the same run: never published
                     o.added.remove(jid)
+                elif why != "excluded":    # private exclusions are never named in reports
+                    o.removed.append(f"{jid} ({why})")
     checked = state.checked_at if factory is None else stamp(now)
     return State(today, checked, companies, list(state.empty_companies), final), outcomes
 
@@ -2296,6 +2298,202 @@ def summary_markdown(outcomes: list[Outcome], after: State, changed: bool) -> st
     lines += ["", f"Rows: {len(after.jobs)} · as of {after.as_of.isoformat()} · "
               f"meaningful change: {'yes' if changed else 'no'}", ""]
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- phone alerts
+# dist/alerts.json is a small public payload that the iPhone Shortcuts app polls after each refresh.
+# `refresh --outcome FILE` persists this run's additions and removal count outside the repository
+# (the workflow uses $RUNNER_TEMP), bound by SHA-256 to the state the run wrote; `alert` turns that
+# outcome plus the state into the payload. A failed run writes no outcome, and a stale or mismatched
+# outcome is rejected, so the deploy can never carry a payload for a run that did not complete.
+
+OUTCOME_FIELDS = ("schema", "run_at", "mode", "state_sha256", "added", "removed_count")
+OUTCOME_MODES = ("live", "fixtures", "offline")
+MAX_OUTCOME_BYTES = 262_144
+MAX_OUTCOME_ADDED = 5000
+ALERT_MAX_NEW = 8
+ALERT_MAX_CLOSING = 5
+ALERT_CLOSING_DAYS = 7          # same window as the page's "closing within 7 days" filter
+ALERT_BODY_MAX = 240
+ALERT_TITLE_MAX = 60
+ALERT_FIELDS = ("schema", "refresh_id", "checked_at", "as_of", "total_jobs", "company_count", "new_count",
+                "new_jobs", "remaining_new_count", "removed_count", "closing_soon_count", "closing_soon",
+                "notification_title", "notification_body", "ledger_url", "source_status")
+ALERT_SOURCE_STATUSES = ("ok", "stale", "static")
+# This repository's GitHub Pages URL. The workflow derives the owner from GITHUB_REPOSITORY, so the
+# owner name is never written to a tracked file; the strict shape keeps the value from carrying anything else.
+LEDGER_URL_RE = re.compile(r"https://[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\.github\.io/job-openings-ledger/")
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def run_outcome(after: State, outcomes: list[Outcome], now: dt.datetime, mode: str, excluded: dict) -> dict:
+    """Public outcome of one completed run: added job keys and a removal count, never private IDs."""
+    added = [[o.company, jid] for o in outcomes for jid in o.added]
+    if any(jid in excluded.get(c, ()) for c, jid in added):
+        raise ValueError("outcome: an excluded job was recorded as added")
+    return {"schema": 1, "run_at": stamp(now), "mode": mode, "state_sha256": sha256_text(after.to_json()),
+            "added": added, "removed_count": sum(len(o.removed) for o in outcomes)}
+
+
+def outcome_json(outcome: dict) -> str:
+    return json.dumps(outcome, ensure_ascii=True, indent=2) + "\n"
+
+
+def load_outcome(data: object, config: Config) -> dict:
+    """Validate a persisted run outcome. Errors name the field only, never its content."""
+    if not isinstance(data, dict) or set(data) != set(OUTCOME_FIELDS) or type(data["schema"]) is not int \
+            or data["schema"] != 1:
+        raise ValueError("outcome: schema")
+    if iso_time(data["run_at"]) is None:
+        raise ValueError("outcome: run_at")
+    if data["mode"] not in OUTCOME_MODES:
+        raise ValueError("outcome: mode")
+    if not isinstance(data["state_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", data["state_sha256"]):
+        raise ValueError("outcome: state_sha256")
+    added = data["added"]
+    if not isinstance(added, list) or len(added) > MAX_OUTCOME_ADDED or not all(
+            isinstance(k, list) and len(k) == 2 and k[0] in config.companies and isinstance(k[1], str)
+            and JOB_ID_RE[k[0]].fullmatch(k[1]) for k in added):
+        raise ValueError("outcome: added")
+    if len({tuple(k) for k in added}) != len(added):
+        raise ValueError("outcome: duplicate added jobs")
+    if data["mode"] == "offline" and added:
+        raise ValueError("outcome: an offline run cannot add jobs")
+    n = data["removed_count"]
+    if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+        raise ValueError("outcome: removed_count")
+    return {k: data[k] for k in OUTCOME_FIELDS}
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def notification_text(new_by_company: list[tuple[str, int]], closing_count: int, total: int,
+                      companies: int) -> tuple[str, str]:
+    """Plain-text popup title and body (at most ALERT_BODY_MAX characters, no markup)."""
+    new_count = sum(n for _c, n in new_by_company)
+    title = _plural(new_count, "new job opening") if new_count else "No new job openings"
+    tail = (f"{closing_count} closing within {ALERT_CLOSING_DAYS} days. {_plural(total, 'job')} across "
+            f"{companies} {'company' if companies == 1 else 'companies'}.")
+    if new_count:
+        detail = "New: " + ", ".join(f"{c} {n}" for c, n in new_by_company) + ". "
+        body = detail + tail
+        if len(body) > ALERT_BODY_MAX:
+            body = f"New: {new_count}. " + tail
+    else:
+        body = "No new openings. " + tail
+    return title, clean_text(body, ALERT_BODY_MAX)
+
+
+def _alert_strings(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield k
+            yield from _alert_strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _alert_strings(v)
+
+
+def alert_json(payload: dict) -> str:
+    """ASCII JSON with '<', '>' and '&' escaped, so no reader can see markup or a script terminator."""
+    out = json.dumps(payload, ensure_ascii=True, indent=2)
+    return out.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "\n"
+
+
+def validate_alert(payload: dict, config: Config) -> None:
+    if not isinstance(payload, dict) or tuple(payload) != ALERT_FIELDS or type(payload["schema"]) is not int \
+            or payload["schema"] != 1:
+        raise ValueError("alert: schema")
+    if not LEDGER_URL_RE.fullmatch(payload["ledger_url"]):
+        raise ValueError("alert: ledger_url must be this repository's GitHub Pages URL")
+    for key in ("total_jobs", "company_count", "new_count", "remaining_new_count", "removed_count",
+                "closing_soon_count"):
+        v = payload[key]
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            raise ValueError(f"alert: {key}")
+    if len(payload["new_jobs"]) > ALERT_MAX_NEW or len(payload["closing_soon"]) > ALERT_MAX_CLOSING:
+        raise ValueError("alert: too many records")
+    if payload["new_count"] != len(payload["new_jobs"]) + payload["remaining_new_count"]:
+        raise ValueError("alert: new_count")
+    for rec in payload["new_jobs"] + payload["closing_soon"]:
+        if check_url(rec["canonical_url"], config.link_hosts):
+            raise ValueError("alert: URL outside link-host allowlist")
+    if set(payload["source_status"]) != set(config.companies) or \
+            not set(payload["source_status"].values()) <= set(ALERT_SOURCE_STATUSES):
+        raise ValueError("alert: source_status")
+    title, body = payload["notification_title"], payload["notification_body"]
+    if len(title) > ALERT_TITLE_MAX or len(body) > ALERT_BODY_MAX or re.search(r"[<>&]", title + body):
+        raise ValueError("alert: notification text")
+    # Any C0 control (including tab and newlines) or DEL; U+2028/9 are escaped by alert_json.
+    if any(re.search(r"[\x00-\x1f\x7f]", s) for s in _alert_strings(payload)):
+        raise ValueError("alert: control characters")
+    doc = alert_json(payload)
+    if "</script" in doc.lower() or "<" in doc:
+        raise ValueError("alert: markup in serialized payload")
+    # The validated Pages URL is the site's own public address; everything else must pass the boundary scan.
+    hits = find_forbidden(json.dumps(payload, ensure_ascii=False).replace(payload["ledger_url"], ""))
+    if hits:
+        raise ValueError("alert: forbidden content: " + ", ".join(hits))
+
+
+def build_alert(state: State, outcome: dict, config: Config, ledger_url: str) -> dict:
+    """The phone payload for one completed run. Deterministic for a given state and outcome."""
+    as_of = state.as_of
+    for r in state.jobs:
+        validate_row(r, config)
+    visible = [r for r in state.jobs if (as_of - dt.date.fromisoformat(r.posted_date)).days <= config.max_age_days]
+    keys = {tuple(k) for k in outcome["added"]}
+    if keys - {(r.company, r.job_id) for r in visible}:
+        raise ValueError("alert: outcome names jobs that are not in the published state")
+    new_rows = [r for r in visible if (r.company, r.job_id) in keys]          # page order
+    closing = sorted(((dt.date.fromisoformat(r.closing_date), i, r) for i, r in enumerate(visible)
+                      if r.closing_date and 0 <= (dt.date.fromisoformat(r.closing_date) - as_of).days
+                      <= ALERT_CLOSING_DAYS), key=lambda t: (t[0], t[1]))
+    companies = len({r.company for r in visible})
+    new_by_company = [(c, n) for c in config.companies if (n := sum(1 for r in new_rows if r.company == c))]
+    title, body = notification_text(new_by_company, len(closing), len(visible), companies)
+    status = {}
+    for c in config.companies:
+        cs = state.companies[c]
+        if cs.status in ("ok", "stale", "static"):
+            status[c] = cs.status
+        else:                       # an unconfirmed seed: labelled like a static source on the page
+            status[c] = "static" if cs.last_success is None else "stale"
+
+    def job(r: Row, with_closing: bool = False) -> dict:
+        d = {"company": r.company, "job_id": r.job_id, "title": r.title}
+        if with_closing:
+            d["closing_date"] = r.closing_date
+        d["canonical_url"] = r.canonical_url
+        return d
+
+    payload = {
+        "schema": 1,
+        "refresh_id": f"{outcome['run_at']}#{sha256_text(outcome_json(outcome))[:12]}",
+        "checked_at": iso_time(outcome["run_at"]).astimezone(IST).isoformat(timespec="minutes"),
+        "as_of": as_of.isoformat(),
+        "total_jobs": len(visible),
+        "company_count": companies,
+        "new_count": len(new_rows),
+        "new_jobs": [job(r) for r in new_rows[:ALERT_MAX_NEW]],
+        "remaining_new_count": max(0, len(new_rows) - ALERT_MAX_NEW),
+        "removed_count": outcome["removed_count"],
+        "closing_soon_count": len(closing),
+        "closing_soon": [job(r, True) for _d, _i, r in closing[:ALERT_MAX_CLOSING]],
+        "notification_title": title,
+        "notification_body": body,
+        "ledger_url": ledger_url,
+        "source_status": status,
+    }
+    validate_alert(payload, config)
+    return payload
 
 
 # --------------------------------------------------------------------------- fixtures transport
@@ -2464,6 +2662,8 @@ def _now(arg: str | None) -> dt.datetime:
 
 
 def cmd_refresh(args, root: str) -> int:
+    if args.outcome and args.dry_run:
+        raise ValueError("--outcome records a run that writes state; it cannot be combined with --dry-run")
     config, before, template = load_all(root)
     excluded = read_excluded(root, config)
     now = _now(args.now)
@@ -2483,9 +2683,15 @@ def cmd_refresh(args, root: str) -> int:
     report = summary_markdown(outcomes, after, changed)
     if fixture and fixture.misses:
         report += f"\nFixture misses (treated as outages): {len(fixture.misses)}\n"
+    outcome = None
+    if args.outcome:
+        mode = "offline" if args.offline else "fixtures" if args.fixtures else "live"
+        outcome = outcome_json(run_outcome(after, outcomes, now, mode, excluded))
     if not args.dry_run:
         write_atomic(os.path.join(root, STATE_PATH), after.to_json())
         write_atomic(os.path.join(root, INDEX_PATH), doc)
+    if outcome is not None:          # written last: it exists only once the state it describes does
+        write_atomic(args.outcome, outcome)
     if args.github_output:
         with open(args.github_output, "a", encoding="utf-8") as fh:
             fh.write(f"changed={'true' if changed and not args.dry_run else 'false'}\n"
@@ -2501,6 +2707,26 @@ def cmd_render(args, root: str) -> int:
     config, state, template = load_all(root)
     write_atomic(os.path.join(root, args.out) if not os.path.isabs(args.out) else args.out,
                  render(state, template, config))
+    return 0
+
+
+def cmd_alert(args, root: str) -> int:
+    config, state, _template = load_all(root)
+    with open(args.outcome, "rb") as fh:
+        raw = fh.read(MAX_OUTCOME_BYTES + 1)
+    if len(raw) > MAX_OUTCOME_BYTES:
+        raise ValueError("outcome: file is too large")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        raise ValueError("outcome: not valid JSON") from None
+    outcome = load_outcome(data, config)
+    if sha256_text(read_text(os.path.join(root, STATE_PATH))) != outcome["state_sha256"]:
+        raise ValueError("outcome: does not match state/jobs.json (stale or incomplete run)")
+    payload = build_alert(state, outcome, config, args.ledger_url)
+    write_atomic(os.path.join(root, args.out) if not os.path.isabs(args.out) else args.out, alert_json(payload))
+    print(f"alert: new {payload['new_count']}, removed {payload['removed_count']}, "
+          f"closing soon {payload['closing_soon_count']}, total {payload['total_jobs']}")
     return 0
 
 
@@ -2542,8 +2768,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true", help="do not write state or index.html")
     p.add_argument("--github-output", help="append changed=/as_of= lines to this file")
     p.add_argument("--summary", help="append a Markdown summary to this file")
+    p.add_argument("--outcome", help="write this run's public outcome (for the alert command) to this file")
     p = sub.add_parser("render", help="render state into an HTML file")
     p.add_argument("--out", default=INDEX_PATH)
+    p = sub.add_parser("alert", help="build the phone alert payload from a refresh outcome")
+    p.add_argument("--outcome", required=True, help="file written by refresh --outcome")
+    p.add_argument("--out", required=True, help="alerts.json path, e.g. dist/alerts.json")
+    p.add_argument("--ledger-url", required=True, help="the repository's GitHub Pages URL")
     sub.add_parser("check", help="verify index.html matches the state")
     p = sub.add_parser("scan", help="recursive public-boundary scan")
     p.add_argument("scan_root", nargs="?", metavar="ROOT")
@@ -2551,7 +2782,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from-html", required=True)
     p.add_argument("--as-of", required=True)
     args = ap.parse_args(argv)
-    handlers = {"refresh": cmd_refresh, "render": cmd_render, "check": cmd_check,
+    handlers = {"refresh": cmd_refresh, "render": cmd_render, "alert": cmd_alert, "check": cmd_check,
                 "scan": cmd_scan, "seed": cmd_seed}
     try:
         return handlers[args.cmd](args, args.root)
