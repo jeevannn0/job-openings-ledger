@@ -7,7 +7,6 @@ import datetime as dt
 import importlib.util
 import io
 import json
-import math
 import os
 import re
 import shutil
@@ -146,7 +145,10 @@ GE_LIST_URL = R.GE_LIST.format(city="Bengaluru", page=1)
 GE_IDS = ["R5055232", "R5055227", "R5056034", "R5055467"]
 
 # One compact breakpoint shared by the script (initial panel state) and the stylesheet (drawer chrome).
-COMPACT_MQ = "(max-width:900px),(max-height:500px)"
+COMPACT_MQ = "(max-width:1023px)"      # single-column layout; the script and the CSS share this string
+WIDE_MQ = "(min-width:1024px)"         # two columns: feed + sticky Informational aside
+SHEET_MQ = "(max-width:767px)"
+PHONE_MQ = "(max-width:639px)"
 
 
 def style_of(doc: str) -> str:
@@ -192,24 +194,32 @@ def media_matches(condition: str, width: int, height: int) -> bool:
     return any(one(q.strip()) for q in condition.split(","))
 
 
-def oklch_luminance(value: str) -> float:
-    """WCAG relative luminance of an `oklch(L% C H)` token (OKLab -> linear sRGB, gamut-clipped)."""
-    l_pct, c, h = re.fullmatch(r"oklch\(([\d.]+)% ([\d.]+) ([\d.]+)\)", value).groups()
-    lightness, c, h = float(l_pct) / 100, float(c), math.radians(float(h))
-    a, b = c * math.cos(h), c * math.sin(h)
-    l_ = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
-    m_ = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
-    s_ = (lightness - 0.0894841775 * a - 1.2914855480 * b) ** 3
-    rgb = (4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
-           -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
-           -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
-    r, g, bl = (min(1.0, max(0.0, v)) for v in rgb)
-    return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+HSL_TOKEN = r"(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)% (\d+(?:\.\d+)?)%"
+
+
+def hsl_luminance(value: str) -> float:
+    """WCAG relative luminance of an `H S% L%` token triplet (CSS hsl -> sRGB)."""
+    h, s, lightness = (float(x) for x in re.fullmatch(HSL_TOKEN, value).groups())
+    s, lightness = s / 100, lightness / 100
+    a = s * min(lightness, 1 - lightness)
+
+    def channel(n: int) -> float:
+        k = (n + h / 30) % 12
+        c = lightness - a * max(-1.0, min(k - 3, 9 - k, 1.0))
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * channel(0) + 0.7152 * channel(8) + 0.0722 * channel(4)
 
 
 def contrast(x: str, y: str) -> float:
-    hi, lo = sorted((oklch_luminance(x), oklch_luminance(y)), reverse=True)
+    hi, lo = sorted((hsl_luminance(x), hsl_luminance(y)), reverse=True)
     return (hi + 0.05) / (lo + 0.05)
+
+
+def theme_tokens(style: str) -> tuple[dict, dict]:
+    """({token: 'H S% L%'} for the default dark theme, the same with the light overrides applied)."""
+    grab = lambda body: dict(re.findall(r"--([a-z0-9-]+):(\d+ \d+% \d+%)", body))  # noqa: E731
+    dark = grab(re.search(r":root\{([^}]*)\}", style).group(1))
+    return dark, dark | grab(re.search(r"html\[data-theme=light\]\{([^}]*)\}", style).group(1))
 
 
 # --------------------------------------------------------------------------- seed, render, template
@@ -253,30 +263,59 @@ class SeedAndRenderTests(unittest.TestCase):
         ]
         for s in snippets:
             self.assertIn(s, doc)
-        # Focused compact/filter invariants instead of the frozen fixture's whole stylesheet.
-        style = re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
-        mobile = style.split("@media(max-width:660px){", 1)[1]
-        for rule in ("table,thead,tbody,tr,th,td{display:block}",
-                     "td{display:grid;grid-template-columns:5rem minmax(0,1fr)",
-                     "#results summary{grid-template-columns:1rem minmax(0,1fr) auto;gap:.5rem;min-height:2.375rem",
-                     ".stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
-                     ".il{display:inline}", "overflow-wrap:anywhere"):
-            self.assertIn(rule, mobile, rule)
-        self.assertIn(".drawer[open]>summary{display:none}", style.split("@media", 1)[0])   # wide: no open chrome
-        self.assertIn('<details class="drawer" id="filter-panel" open>', doc)
+        # Content grid: one column by default and below 1024px (feed first, then the Informational aside);
+        # from 1024px the feed plus one sticky 300px aside.
+        style = style_of(doc)
+        base, blocks = media_blocks(style)
+        self.assertIn(".grid{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;margin-top:24px}", base)
+        self.assertIn(".grid{grid-template-columns:minmax(0,1fr)}.feed{order:1}.ar{order:2}", blocks[COMPACT_MQ])
+        self.assertEqual(blocks[WIDE_MQ],
+                         ".grid{grid-template-columns:minmax(0,1fr) 300px}.feed{grid-column:1}.ar{grid-column:2;"
+                         "position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;"
+                         "max-height:calc(100dvh - 2rem)}.ar-in{overflow-y:auto}")
+        self.assertFalse([c for c in blocks if "1279px" in c or "1280px" in c])
+        for w in (320, 390, 768, 1023, 1024, 1279, 1280, 1440):
+            with self.subTest(w):
+                self.assertEqual([media_matches(c, w, 900) for c in (COMPACT_MQ, WIDE_MQ)], [w < 1024, w >= 1024])
+        # DOM order matches the single-column order: feed, then the Informational aside. No left aside.
+        self.assertLess(doc.index('<section class="feed" id="feed"'), doc.index('<aside class="ar"'))
+        self.assertNotIn('class="al"', doc)
+        self.assertNotIn(".al", style)
+        # Phones: tighter stream, titles clamped to two lines, filters 2 columns.
+        phone = blocks[PHONE_MQ]
+        for rule in ("#results{gap:8px;", "-webkit-line-clamp:2", "-webkit-line-clamp:1",
+                     ".fsel{grid-template-columns:repeat(2,minmax(0,1fr));",
+                     ".cidx ol{flex-wrap:nowrap;overflow-x:auto;"):
+            self.assertIn(rule, phone, rule)
+        self.assertNotIn(".c-f", style)
+        self.assertIn("#results{display:grid;gap:12px;", base)
+        self.assertIn(".fsel{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));", base)
+        # Search panel: heading then the LED line; no "Live" tag and no helper paragraph.
+        self.assertIn('<h2 id="qd-h">Search the ledger</h2><p class="label-sys src-led" id="src-led"', doc)
+        for gone in ('class="tag"', "srch-p", "Type a title, skill or job ID"):
+            self.assertNotIn(gone, doc, gone)
+        self.assertFalse([s for s, _b in css_rules(re.sub(r"@media[^{]*\{", "", style))
+                          if any(x in (".tag", ".srch-p") for x in s)])
+        self.assertIn("overflow-wrap:anywhere", style)
+        self.assertNotIn("<table", doc)
         self.assertIn(f'mq=matchMedia("{COMPACT_MQ}")', doc)
-        self.assertIn("fp.open=hp.open=!mq.matches", doc)
         self.assertIn("@media(prefers-reduced-motion:reduce)", style)
 
     def test_checked_and_stale_metadata(self):
         config, _e, state, template = env()
         doc = R.render(state, template, config)
-        self.assertIn('<span class="il" id="checked">Auto-check pending</span>', doc)
+        led = '<p class="label-sys src-led" id="src-led" data-s="'
+        self.assertRegex(doc, re.escape(led) + r'[a-z]+"><span class="led" aria-hidden="true"></span>'
+                              r'Auto-check pending</p>')
+        self.assertEqual(doc.count("Auto-check pending"), 2)   # src-led + status block Last refresh
+        self.assertNotIn('id="checked"', doc)
         state.checked_at = "2026-10-31T15:34+05:30"
         state.companies["IQVIA"] = dataclasses.replace(state.companies["IQVIA"], status="stale",
                                                        last_success="2026-10-30T09:23+05:30")
         doc = R.render(state, template, config)
-        self.assertIn('id="checked">Checked 31 Oct 15:34 IST</span>', doc)
+        self.assertRegex(doc, re.escape(led) + r'[a-z]+"><span class="led" aria-hidden="true"></span>'
+                              r'Checked 31 Oct 15:34 IST</p>')
+        self.assertEqual(doc.count("Checked 31 Oct 15:34 IST"), 1)
         self.assertIn('"IQVIA":"stale since Oct 30"', doc)
         self.assertIn('"ZS":"not auto-checked"', doc)
 
@@ -2761,6 +2800,45 @@ def health_section(doc: str) -> str:
     return re.search(r'<section class="health".*?</section>', doc, re.S).group(0)
 
 
+def health_summary(doc: str) -> str:
+    """The source-array summary line inside the API terminal (summary spans, #h-next and #h-late)."""
+    return re.search(r'<p class="hs">(.*?)</p>', doc, re.S).group(1)
+
+
+def status_block(doc: str) -> str:
+    """The rows of the terminal's `signal status` block (Last refresh, Result, Openings, Freshness, Next run)."""
+    return re.search(r'<dl class="kvs">(.*?)</dl>', doc, re.S).group(1)
+
+
+def api_dialog(doc: str) -> str:
+    return re.search(r'<dialog id="api".*?</dialog>', doc, re.S).group(0)
+
+
+def main_script(doc: str) -> str:
+    return re.findall(r"<script>(.*?)</script>", doc, re.S)[-1]
+
+
+def page_outside_dialog(doc: str) -> str:
+    """The rendered markup with the <style>, the <script>s and the Requests dialog removed."""
+    body = doc.replace(style_of(doc), "").replace(api_dialog(doc), "")
+    return re.sub(r"<script>.*?</script>", "", body, flags=re.S)
+
+
+def dashboard_fragments(doc: str) -> dict:
+    """The Python-rendered status fragments: the terminal status block and the search-panel LED."""
+    return {"summary": status_block(doc),
+            "led": re.search(r'<p class="label-sys src-led".*?</p>', doc).group(0)}
+
+
+CHANNEL = re.compile(r'<li class="ch" data-h="([a-z]+)"><span class="ch-n" aria-hidden="true">CH\d{2}</span>'
+                     r'<span class="ch-id"><strong class="ch-name">([^<]+)</strong>(.*?)</li>', re.S)
+
+
+def channels(section: str) -> dict:
+    """{company: (freshness state, rest of the channel markup)} in page order."""
+    return {c: (s, rest) for s, c, rest in CHANNEL.findall(section)}
+
+
 class SourceHealthTests(unittest.TestCase):
     def setUp(self):
         self.config, _e, self.state, self.template = env()
@@ -2843,17 +2921,25 @@ class SourceHealthTests(unittest.TestCase):
 
     def test_next_scheduled_uses_cron_not_last_attempt(self):
         self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
-        section = health_section(R.render(self.state, self.template, self.config))
-        self.assertIn('Next scheduled <time id="h-next" datetime="2026-10-31T23:53:00+05:30">31 Oct 23:53 IST</time>',
-                      section)
-        self.assertIn('Checked <time datetime="2026-10-31T22:47:00+05:30">31 Oct 22:47 IST</time>', section)
-        self.assertNotIn("04:47", section)          # last_attempt + 6h
+        doc = R.render(self.state, self.template, self.config)
+        section, block = health_section(doc), status_block(doc)
+        self.assertIn('<dt>Next run</dt><dd><time id="h-next" datetime="2026-10-31T23:53:00+05:30">'
+                      '31 Oct 23:53 IST</time><span id="h-late"></span> · scheduled, not guaranteed</dd>', block)
+        self.assertIn('<dt>Last refresh</dt><dd><time id="st-at" datetime="2026-10-31T22:47:00+05:30">'
+                      '31 Oct 22:47 IST</time> <span class="age" id="st-age">0m ago</span></dd>', block)
+        self.assertNotIn("04:47", section + block)  # last_attempt + 6h
+        for frag in ('id="h-next"', 'id="h-late"', 'id="st-at"', 'id="st-age"'):
+            self.assertEqual(doc.count(frag), 1, frag)
+        self.assertNotIn("h-next", section)
         self.state.checked_at = None
         for name in self.config.companies:
             self.set_company(name, last_success=None, last_attempt=None)
-        section = health_section(R.render(self.state, self.template, self.config))
-        self.assertIn("Next scheduled 05:53, 11:53, 17:53, 23:53 IST", section)
-        self.assertIn("Auto-check pending", section)
+        doc = R.render(self.state, self.template, self.config)
+        block = status_block(doc)
+        self.assertIn("<dt>Next run</dt><dd>05:53, 11:53, 17:53, 23:53 IST · scheduled, not guaranteed</dd>", block)
+        self.assertIn("<dt>Last refresh</dt><dd>Auto-check pending</dd>", block)
+        for frag in ('id="h-next"', 'id="h-late"', 'id="st-at"', 'id="st-age"'):
+            self.assertNotIn(frag, doc, frag)
 
     def test_published_counts_match_rendered_rows_not_listing_total(self):
         self.set_company("JPMorganChase", status="ok", listing_total=987654, last_success=iso(REF),
@@ -2865,10 +2951,10 @@ class SourceHealthTests(unittest.TestCase):
         rows = json.loads(re.search(r"\nconst jobs=(\[\n.*?\n\]);\n", doc, re.S).group(1))
         visible = [r for r in rows if r[5] <= self.config.max_age_days]
         section = health_section(doc)
+        chs = channels(section)
         for company in self.config.companies:
             n = sum(1 for r in visible if r[0] == company)
-            self.assertRegex(section, rf'<th scope="row">{re.escape(company)}</th>.*?'
-                                      rf'<td class="num" data-m="Published">{n}</td>')
+            self.assertIn(f'<div class="ch-p"><dt>Published</dt><dd class="num">{n}</dd></div>', chs[company][1])
         self.assertNotIn("987654", doc)
         self.assertIn(f'<span class="hs-r">{len(visible)} records</span>', section)
         self.assertIn(f'<dd id="total">{len(visible)}</dd>', doc)
@@ -2890,7 +2976,21 @@ class SourceHealthTests(unittest.TestCase):
                          ["company", "state", "published", "attempt_at", "attempt", "success_at", "age"])
         self.assertEqual(set(json.loads(R.health_js())),
                          {"fresh_ms", "grace_ms", "severity", "glyphs", "labels", "late", "stale"})
-        self.assertIn("Latest run held; previous data kept", health_section(doc))
+        self.assertIn("Refresh held, cached data kept", health_section(doc))
+
+    def test_raw_detail_never_reaches_html_for_any_source(self):
+        # CompanyState.detail holds raw reasons (exceptions, HTTP codes, URLs); none of it may render,
+        # even when it mimics fixed page wording or a connector label.
+        hosts = sorted(self.config.hosts)
+        for i, name in enumerate(self.config.companies):
+            self.set_company(name, status="stale", last_success=iso(REF - dt.timedelta(hours=i)),
+                             last_attempt=iso(REF),
+                             detail=f"zzraw{i} https://{hosts[i % len(hosts)]}/wday/cxs ValueError HTTP 429")
+        doc = R.render(self.state, self.template, self.config)
+        for i in range(len(self.config.companies)):
+            self.assertNotIn(f"zzraw{i}", doc)
+        for needle in ("ValueError", "HTTP 429", "/wday/cxs", "https://"):
+            self.assertNotIn(needle, health_section(doc), needle)
 
     def test_semantic_text_and_glyph_markup(self):
         self.all_states_state()
@@ -2898,8 +2998,8 @@ class SourceHealthTests(unittest.TestCase):
         section = health_section(doc)
         expected = {"Siemens": "live", "JPMorganChase": "degraded", "GE HealthCare": "stale",
                     "GE Vernova": "failed", "IQVIA": "unknown", "ZS": "stale"}
-        got = dict((c, s) for s, c in re.findall(r'<tr data-h="([a-z]+)"><th scope="row">([^<]+)</th>', section))
-        self.assertEqual(got, expected)
+        chs = channels(section)
+        self.assertEqual({c: s for c, (s, _r) in chs.items()}, expected)
         for s, (glyph, label) in {"live": ("■", "LIVE"), "degraded": ("▲", "DEGRADED/CACHED"), "stale": ("◷", "STALE"),
                                   "failed": ("×", "FAILED"), "unknown": ("◇", "UNKNOWN/UNCHECKED")}.items():
             self.assertIn(f'<span class="st st-{s}"><span class="g" aria-hidden="true">{glyph}</span> {label}</span>',
@@ -2909,23 +3009,25 @@ class SourceHealthTests(unittest.TestCase):
         for m in glyphs:      # every decorative glyph sits alone inside an aria-hidden span
             self.assertTrue(section[:m.start()].endswith('<span class="g" aria-hidden="true">'))
             self.assertTrue(section[m.end():].startswith("</span>"))
-        self.assertIn('<span class="hs-w"><span class="hs-wl">Worst</span> <span class="st st-failed">', section)
-        self.assertIn('<span class="hc" data-s="stale"><b>2</b>', section)
-        self.assertIn('<span class="hc" data-s="live"><b>1</b>', section)
-        self.assertRegex(section, r'<th scope="row">GE Vernova</th>.*?<time datetime="[^"]+">[^<]+</time> · '
-                                  r'No successful automated check yet; snapshot shown</td>')
-        self.assertRegex(section, r'<th scope="row">Siemens</th>.*?</time> · Accepted</td>')
-        self.assertRegex(section, r'<th scope="row">JPMorganChase</th>.*?</time> · '
-                                  r'Latest run held; previous data kept</td>')
-        self.assertIn("No attempt recorded", section)
-        self.assertIn("None yet", section)
-        for th in ("Source", "Status", "Published", "Latest attempt", "Last good data"):
-            self.assertIn(f'<th scope="col">{th}</th>', section)
-        self.assertIn("<caption", section)
+        self.assertIn('<dt>Freshness</dt><dd>worst <span class="st st-failed">', status_block(doc))
+        self.assertNotIn('class="hc"', section)
+        self.assertRegex(chs["GE Vernova"][1], r'<time datetime="[^"]+">[^<]+</time> · <span class="oc" '
+                                               r'data-o="failed">No successful automated refresh yet, snapshot '
+                                               r'shown</span>')
+        self.assertIn('</time> · <span class="oc" data-o="accepted">Successful refresh</span>', chs["Siemens"][1])
+        self.assertIn('</time> · <span class="oc" data-o="held">Refresh held, cached data kept</span>',
+                      chs["JPMorganChase"][1])
+        self.assertIn('<dd><span class="oc" data-o="pending">No attempt recorded</span></dd>', chs["IQVIA"][1])
+        self.assertIn("<dd>None yet</dd>", chs["IQVIA"][1])
+        # Every channel names its fields with dt/dd pairs, so each value has a programmatic label.
+        for company, (_s, rest) in chs.items():
+            self.assertEqual(re.findall(r"<dt>([^<]+)</dt>", rest), ["Published", "Latest attempt", "Last good data"],
+                             company)
+        self.assertIn('<ol class="ch-list" aria-label="Automated source connectors">', section)
         for value in re.findall(r'<time[^>]* datetime="([^"]+)"', section):
             self.assertRegex(value, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30$")
             self.assertIsNotNone(dt.datetime.fromisoformat(value))
-        words = re.findall(r"</time> · ([A-Za-z ,;]+)<", section)
+        words = re.findall(r'</time> · <span class="oc" data-o="[a-z]+">([A-Za-z ,;]+)<', section)
         self.assertEqual(len(words), 5)                      # every recorded attempt, IQVIA has none
         for word in words:
             self.assertIn(word, R.ATTEMPT_TEXT.values())
@@ -2947,8 +3049,7 @@ class SourceHealthTests(unittest.TestCase):
             "ZS": "stale since Oct 28",                        # held, data older than 6h30
         })
         self.assertEqual(labels, R.stale_labels(self.state, self.config))
-        rows = dict((c, s) for s, c in re.findall(r'<tr data-h="([a-z]+)"><th scope="row">([^<]+)</th>',
-                                                   health_section(doc)))
+        rows = {c: s for c, (s, _r) in channels(health_section(doc)).items()}
         for company, label in labels.items():
             if label.startswith("stale"):
                 self.assertEqual(rows[company], "stale")
@@ -2972,9 +3073,9 @@ class SourceHealthTests(unittest.TestCase):
 
     def test_attempt_wording_is_fixed(self):
         self.assertEqual(R.ATTEMPT_TEXT, {
-            "accepted": "Accepted", "held": "Latest run held; previous data kept",
-            "first_snapshot": "No successful automated check yet; snapshot shown",
-            "first_empty": "No successful automated check yet", "unrecorded": "Outcome not recorded",
+            "accepted": "Successful refresh", "held": "Refresh held, cached data kept",
+            "first_snapshot": "No successful automated refresh yet, snapshot shown",
+            "first_empty": "No successful automated refresh yet", "unrecorded": "Outcome not recorded",
             "none": "No attempt recorded"})
         t = iso(REF)
         self.assertEqual(R.attempt_outcome("ok", t, t, 3), "accepted")
@@ -2988,212 +3089,416 @@ class SourceHealthTests(unittest.TestCase):
         self.set_company("ZS", status="stale", detail="zzreason HTTP 503", last_success=None, last_attempt=t)
         self.state.jobs = [r for r in self.state.jobs if r.company != "ZS"]
         doc = R.render(self.state, self.template, self.config)
-        self.assertRegex(health_section(doc), r'<th scope="row">ZS</th>.*?</time> · '
-                                              r'No successful automated check yet</td>')
+        self.assertIn('</time> · <span class="oc" data-o="failed">No successful automated refresh yet</span></dd>',
+                      channels(health_section(doc))["ZS"][1])
         self.assertNotIn("zzreason", doc)
         self.assertNotIn("503", health_section(doc))
 
     def test_scope_note_contextualises_failed(self):
         doc = R.render(self.state, self.template, self.config)
         section = health_section(doc)
-        self.assertIn('<p class="h-scope">Statuses describe this ledger’s automated checks and cached data, '
-                      'not employer site availability. FAILED means no automated check has succeeded yet.</p>',
-                      section)
-        self.assertLess(section.index('class="h-scope"'), section.index("<table"))
+        self.assertIn('<p class="h-scope">Statuses describe this ledger’s automated source connectors and cached '
+                      'data, not employer site availability. Freshness and the latest refresh outcome are shown '
+                      'separately.</p>', section)
+        self.assertLess(section.index('class="h-scope"'), section.index('<ol class="ch-list"'))
         self.assertEqual(R.HEALTH_LABELS["failed"], "FAILED")
         self.assertEqual(R.FRESHNESS_THRESHOLD, dt.timedelta(hours=6, minutes=30))
-        self.assertIn("Data counts as fresh for 6h 30m after its last successful check.", section)
+        dialog = api_dialog(doc)
+        self.assertIn("no refresh history kept; only the latest recorded attempt is shown", dialog)
+        # The key lives once, in the Requests terminal's `signal sources --help` block, after the source rows.
+        self.assertEqual(doc.count('<dl class="h-key">'), 1)
+        self.assertNotIn("h-key", page_outside_dialog(doc))
+        self.assertNotIn('id="key"', doc)
+        self.assertLess(dialog.index('<ol class="ch-list"'), dialog.index('<dl class="h-key">'))
+        card = dialog[dialog.index("signal sources --help</p>"):]
+        card = card[:card.index("</div>", card.index('<p class="h-note">'))]
+        self.assertIn('<h3 class="vh">What the freshness statuses mean</h3><dl class="h-key">', card)
+        self.assertIn('<p class="h-note">Data counts as fresh for 6h 30m after its last successful check; the next '
+                      'scheduled time is not guaranteed.</p>', card)
+        self.assertEqual(doc.count("every 6"), 1)
+        key = re.search(r'<dl class="h-key">(.*?)</dl>', card, re.S).group(1)
+        self.assertEqual(re.findall(r'<div data-s="([a-z]+)"><dt>', key), list(R.HEALTH_STATES))
+        for s in R.HEALTH_STATES:
+            self.assertIn(f'{R.badge_html(s)}</dt><dd>{R.HEALTH_MEANINGS[s].format(limit="6h 30m")}</dd>', key)
+        self.assertIn("FAILED</span></dt><dd>Refresh was attempted, but no successful automated refresh is recorded "
+                      "yet.", key)
+        self.assertEqual(key.count("6h 30m"), 3)                       # live, degraded, stale
 
     def test_source_order_matches_config(self):
         section = health_section(R.render(self.state, self.template, self.config))
-        self.assertEqual(re.findall(r'<th scope="row">([^<]+)</th>', section), list(self.config.companies))
+        self.assertEqual(list(channels(section)), list(self.config.companies))
+        self.assertEqual(re.findall(r'<span class="ch-n" aria-hidden="true">(CH\d{2})</span>', section),
+                         [f"CH{i:02d}" for i in range(1, len(self.config.companies) + 1)])
 
-    def test_no_terminal_roles_external_assets_or_effects(self):
+    def test_no_external_assets_and_restrained_effects(self):
         doc = R.render(self.state, self.template, self.config)
-        self.assertEqual(set(re.findall(r'\brole="([^"]+)"', doc)), {"status"})
-        style = re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
-        effects = style.split("@media(prefers-reduced-motion:reduce)")[0]
-        for banned in ("@import", "url(", "@font-face", "gradient", "text-shadow", "box-shadow", "@keyframes",
-                       "animation", "transition", "blink", "filter:", "scanline", "border-radius:."):
-            self.assertNotIn(banned, effects.lower(), banned)
-        self.assertIn("border-radius:0", style)
-        self.assertNotRegex(doc, r"(?i)<link\b|<img\b|<iframe\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
-                                 r"typewriter|setInterval|requestAnimationFrame")
+        self.assertEqual(set(re.findall(r'\brole="([^"]+)"', doc)), {"status", "search", "group"})
+        self.assertEqual(doc.count('role="status"'), 1)
+        style = style_of(doc)
+        for banned in ("@import", "url(", "@font-face", "radial-gradient", "conic-gradient", "backdrop-filter",
+                       "scanline"):
+            self.assertNotIn(banned, style.lower(), banned)
+        self.assertNotRegex(doc, r"(?i)<link\b|<img\b|<iframe\b|<svg\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
+                                 r"setInterval|requestAnimationFrame|<table")
         self.assertNotRegex(R.read_text(os.path.join(ROOT, R.TEMPLATE_PATH)), r"https?://")
-        body_font = re.search(r"--body:([^;]+);", style).group(1)
-        self.assertTrue(body_font.startswith("system-ui"))
-        self.assertNotIn("mono", body_font.lower())
+        # Fonts are named and fall back to system faces; nothing is downloaded.
+        fonts = dict(re.findall(r"--font-(sans|display|mono):([^;]+);", style))
+        self.assertEqual(set(fonts), {"sans", "display", "mono"})
+        self.assertTrue(fonts["sans"].startswith('"IBM Plex Sans",system-ui'))
+        self.assertTrue(fonts["sans"].endswith("sans-serif") and fonts["display"].endswith("sans-serif"))
+        self.assertTrue(fonts["mono"].startswith('"JetBrains Mono",ui-monospace') and fonts["mono"].endswith("monospace"))
+        self.assertIn('font-feature-settings:"liga" 0,"calt" 0,"zero","ss01"', style)
+        # Square corners everywhere except the round status LED.
+        self.assertIn("*,:before,:after{box-sizing:border-box;border-radius:0}", style)
+        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style), ["0", "50%", "50%"])
+        self.assertIn(".led{display:inline-block;flex:none;width:6px;height:6px;border-radius:50%;", style)
+        self.assertIn(".dot{position:relative;display:block;flex:none;width:12px;height:12px;padding:0;border:0;"
+                      "border-radius:50%;", style)                       # the terminal's traffic lights
+        # Flat dim backdrop, no blur behind the dialog.
+        self.assertEqual(re.findall(r"::backdrop\{([^}]*)\}", style), ["background:hsl(var(--void-deep)/.72)",
+                                                                       "animation:overlay-fade-in .2s ease-out",
+                                                                       "animation:none!important"])
+        # Blank brand marks: empty bordered boxes, no glyph or image.
+        self.assertIn('<span class="wm">job signal</span><span class="mark" aria-hidden="true"></span>', doc)
+        self.assertEqual(doc.count("job signal"), 1)             # header wordmark only; no Ledger card
+        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary"):
+            self.assertNotIn(gone, doc, gone)
+        rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
+        self.assertIn("width:100px;height:13px;border:1px dashed hsl(var(--hull))", rules[(".mark",)])
+        # Chamfered panels and buttons with a signal hairline; the header status panel is gone.
+        self.assertIn("clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%)", rules[(".panel",)])
+        self.assertIn("clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))",
+                      rules[(".chamfer-btn",)])
+        self.assertNotIn("hud-corners status", doc)
+        self.assertIn('<section class="panel panel-signal srch" id="cmd"', doc)
 
-    def test_compact_mobile_health_panel(self):
+    def test_source_dialog_structure(self):
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('<details id="health-panel"><summary>', doc)     # collapsed without script
-        self.assertIn('<details class="drawer" id="filter-panel" open>', doc)
-        # Phones and short landscape viewports start collapsed; the initial state is set once, so a
-        # later resize or rotation never overrides the reader's own open/closed choice.
-        self.assertIn(f'mq=matchMedia("{COMPACT_MQ}")', doc)
-        self.assertIn("fp.open=hp.open=!mq.matches;", doc)
-        script = re.search(r"<script>(.*?)</script>", doc, re.S).group(1)
-        for banned in ("addEventListener(\"change\"", "addEventListener('change'", "\"resize\"", "onresize",
-                       ".onchange", "e.matches"):
-            self.assertNotIn(banned, script, banned)
-        style = re.search(r"<style>(.*?)</style>", doc, re.S).group(1)
-        self.assertRegex(style.split("@media", 1)[0], r"#health-panel>summary\{display:flex;flex-wrap:wrap")
-        mobile = style.split("@media(max-width:660px){", 1)[1]
-        for rule in ("#health-panel>summary{gap:0 .5rem;padding:.25rem .45rem;font-size:.6875rem",
-                     ".h-table,.h-table tbody,.h-table tr,.h-table th,.h-table td{display:block}",
-                     ".h-table tr{display:flex;flex-wrap:wrap", ".h-wrap{overflow:visible",
-                     "line-height:1.3;overflow-wrap:anywhere}"):
-            self.assertIn(rule, mobile, rule)
-        self.assertIn("body{margin:0;min-width:20rem", style)
-        wide = style.split("@media(max-width:660px)", 1)[0]
-        for cls in ("hs-w", "hs-wl", "hs-n", "hc", "hs-r", "hs-c", "intro-copy", "readout"):   # >660px keeps all
-            self.assertNotIn(f".{cls}", hidden_selectors(wide), cls)
-        summary = re.search(r'<details id="health-panel"><summary>(.*?)</summary>', doc, re.S).group(1)
-        classes = re.findall(r'<span class="(hs-[a-z]|hc)"', summary)
-        self.assertEqual(classes, ["hs-t", "hs-w", "hs-n", *["hc"] * 5, "hs-r", "hs-c", "hs-x"])
-        self.assertIn('<span class="hs-c">', summary)
-        self.assertIn('<span class="hs-x">Next scheduled', summary)
-        # The fragments hidden on phones have nearby visible equivalents.
-        self.assertIn('<span class="il" id="checked">', doc)
-        self.assertIn('<dd id="total">', doc)
-        self.assertIn('<section class="intro"><div class="intro-copy"><h2>', doc)
-        self.assertIn('<div class="readout" role="status" aria-live="polite">', doc)
+        # Everything backend-facing lives in one native "Requests" dialog that starts closed at every width.
+        self.assertIn('<dialog id="api" class="term" aria-labelledby="api-h"><div class="term-win" tabindex="-1">', doc)
+        self.assertNotRegex(doc, r"<dialog\b[^>]*\bopen\b")
+        self.assertEqual(doc.count("<dialog"), 1)
+        dialog = api_dialog(doc)
+        # macOS-style title bar: a real close button (red) and two decorative lights, then a centred title.
+        self.assertIn('<div class="term-bar"><span class="dots"><button class="dot dot-x" id="api-x" type="button" '
+                      'aria-label="Close"></button><span class="dot dot-m" aria-hidden="true"></span><span class="dot '
+                      'dot-z" aria-hidden="true"></span></span><span id="api-h">ops@job-signal — requests — zsh</span>'
+                      '<span class="term-esc" aria-hidden="true">esc</span></div>', dialog)
+        self.assertEqual(dialog.count("<button"), 1)
+        # Four commands and a final prompt, in order; each block is one staggered output group. The status
+        # block comes first, so the reader sees when the latest refresh ran and what it found.
+        prompt = '<p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
+        order = [prompt + "signal status</p>", '<dl class="kvs">', "<dt>Last refresh</dt>", "<dt>Result</dt>",
+                 "<dt>Openings</dt>", "<dt>Freshness</dt>", "<dt>Next run</dt>", 'id="h-next"', 'id="h-late"',
+                 prompt + "signal sources --verbose</p>", '<section class="health" id="health"', '<p class="hs">',
+                 '<p class="h-scope">', '<div class="ch-head"',
+                 '<ol class="ch-list"', prompt + "signal sources --help</p>", '<dl class="h-key">',
+                 '<p class="h-note">', prompt + "signal schedule</p>",
+                 '<p class="kv">every 6 h · cron 23 */6 * * * UTC · no refresh history kept; only the latest recorded '
+                 'attempt is shown</p>', prompt + '<span class="caret" aria-hidden="true"></span></p>']
+        self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
+        self.assertEqual(re.findall(r'<div class="tb" style="--d:(\d)">', dialog), list("01234"))
+        self.assertIn('<div class="tb" style="--d:0">' + prompt + 'signal status</p>\n<dl class="kvs">', dialog)
+        self.assertLess(doc.index('<dialog id="api"'), doc.index('<dl class="kvs">'))
+        self.assertLess(doc.index("</dl></div>", doc.index('<dl class="kvs">')),
+                        doc.index(prompt + "signal sources --verbose</p>"))
+        self.assertEqual(doc.count('<dl class="kvs">'), 1)
+        for frag in ('id="health"', 'id="h-next"', 'id="h-late"', 'id="st-at"', 'id="st-age"', 'class="h-key"',
+                     'class="kvs"'):
+            self.assertEqual(doc.count(frag), dialog.count(frag), frag)
+            self.assertIn(frag, dialog, frag)
+        for gone in ('id="st-pre"', "signal clock", "signal window", 'class="pre"', 'class="ps"'):
+            self.assertNotIn(gone, doc, gone)
+        # Two openers (header, compact header), each progressively enabled; every close path returns focus
+        # to the opener used.
+        self.assertIn('<button class="chamfer-btn req" id="req-btn" type="button" aria-haspopup="dialog" '
+                      'aria-controls="api" hidden><span class="gl" aria-hidden="true">&gt;_</span> Requests</button>', doc)
+        self.assertIn('<button class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" '
+                      'hidden>[ requests ]</button>', doc)
+        self.assertEqual(doc.count('aria-controls="api"'), 2)
+        self.assertEqual(doc.count('aria-haspopup="dialog"'), 2)
+        for gone in ('id="api-btn"', 'id="api-btn2"', 'id="api-btn3"', 'class="x"', 'class="cta-s"', 'id="qv-req"'):
+            self.assertNotIn(gone, doc, gone)
+        script = main_script(doc)
+        self.assertEqual(script.count("showModal()"), 1)
+        for snippet in ('const dlg=$("#api"),win=$("#api .term-win");',
+                        '[$("#req-btn"),$("#req-btn-m")].forEach(b=>{b.hidden=false;'
+                        'b.addEventListener("click",()=>{opener=b;dlg.showModal();win.focus()})})',
+                        'dlg.addEventListener("click",e=>{if(e.target===dlg)dlg.close()})',
+                        '$("#api-x").addEventListener("click",()=>dlg.close())',
+                        'dlg.addEventListener("close",()=>{if(opener)opener.focus()})'):
+            self.assertIn(snippet, script)
+        style = style_of(doc)
+        base, blocks = media_blocks(style)
+        rules = dict((tuple(s), b) for s, b in css_rules(base))
+        self.assertIn("body:has(dialog[open]){overflow:hidden}", base)
+        for decl in ("position:fixed", "margin:auto", "background:transparent"):
+            self.assertIn(decl, rules[("dialog.term",)], decl)
+        for decl in ("display:flex;flex-direction:column", "width:min(920px,94vw)", "max-height:86vh",
+                     "border:1px solid hsl(var(--hull-2))", "background:hsl(264 28% 5%/.98)",
+                     "box-shadow:var(--shadow-dialog)"):
+            self.assertIn(decl, rules[(".term-win",)], decl)
+        self.assertIn("dialog.term[open]{display:flex;animation:dialog-pop-in .2s", base)
+        for decl in ("height:36px", "background:var(--btn-grad)", "border-bottom:1px solid hsl(var(--hull))"):
+            self.assertIn(decl, rules[(".term-bar",)], decl)
+        self.assertEqual((rules[(".dot-x",)], rules[(".dot-m",)], rules[(".dot-z",)]),
+                         ("--dc:var(--bad);cursor:pointer", "--dc:var(--warn)", "--dc:var(--ok)"))
+        for decl in ("overflow:auto", "padding:14px 16px", "font-size:12px", "line-height:1.6"):
+            self.assertIn(decl, rules[(".term-out",)], decl)
+        self.assertFalse([s for s, _b in css_rules(re.sub(r"@media[^{]*\{", "", style))
+                          if any(x in (".pre", ".ps", ".term .pre") or x.startswith(".pre ") for x in s)])
+        self.assertIn("grid-template-columns:8rem minmax(0,1fr)", rules[(".h-key div",)])
+        self.assertIn("border-top:1px solid hsl(var(--hull)/.6)", rules[(".h-key div",)])
+        # Phones get a full-screen sheet with a sticky title bar and stacked source rows.
+        sheet = blocks[SHEET_MQ]
+        sheet_rules = dict((tuple(s), b) for s, b in css_rules(sheet))
+        for decl in ("inset:0", "width:100vw", "height:100dvh", "max-height:none", "margin:0"):
+            self.assertIn(decl, sheet_rules[("dialog.term",)], decl)
+        self.assertIn("box-shadow:none", sheet_rules[(".term-win",)])
+        self.assertIn("position:sticky;top:0", sheet_rules[(".term-bar",)])
+        self.assertIn("grid-template-columns:auto minmax(0,1fr) auto", sheet_rules[(".term-bar",)])  # title fits at 320
+        self.assertIn("font-size:11px;line-height:1.55", sheet_rules[(".term-out",)])
+        self.assertIn(".h-key div{grid-template-columns:minmax(0,1fr);", sheet)
+        self.assertIn("dialog.term[open]{animation:sheet-up .2s", sheet)
+        self.assertIn(".hdr-r{display:none}", sheet)
+        self.assertIn(".ch-head{display:none}", sheet)
+        self.assertIn(".ch-d{grid-column:2/-1;grid-row:2;display:flex;flex-wrap:wrap", sheet)
+        # Desktop: one grid line per source on shared columns.
+        self.assertIn(".ch-head,.ch{display:grid;grid-template-columns:var(--chc);", base)
+        self.assertEqual(len(re.search(r"--chc:([^;]+);", base).group(1).split(" ")), len(R.CHANNEL_COLUMNS))
+        self.assertIn("grid-template-columns:subgrid", rules[(".ch-d",)])
+        section = health_section(doc)
+        self.assertIn('<div class="ch-head" aria-hidden="true">' + "".join(f"<span>{c}</span>" for c in R.CHANNEL_COLUMNS)
+                      + "</div>", section)
+        # The summary is one wrapped mono line (title and records); every fragment stays visible.
+        self.assertIn("display:flex;flex-wrap:wrap", rules[(".hs",)])
+        self.assertIn("overflow-wrap:anywhere", rules[(".ch-name",)])
+        for cls in (".hs-t", ".hs-r", ".kvs", "#st-at", "#st-age"):
+            self.assertNotIn(cls, hidden_selectors(style), cls)
+        summary = health_summary(doc)
+        self.assertEqual(re.findall(r'<span class="(hs-[a-z]|hc)"', summary), ["hs-t", "hs-r"])
+        self.assertEqual(doc.count('<span class="hs-t">'), 1)
+        self.assertNotIn("h-next", summary)
+        self.assertEqual(doc.count('id="h-late"'), 1)
+        for gone in ("hs-a", "hs-n", 'class="hc"', ".hc", "h-rw", "hs-w", "hs-c", "hs-x", "h-roll", "h-rl"):
+            self.assertNotIn(gone, doc, gone)
+        # Status block: a two-column key/value grid on desktop, one column on phones.
+        self.assertEqual(rules[(".kvs",)], "display:grid;grid-template-columns:7.5rem minmax(0,1fr);gap:4px 12px;"
+                                           "margin:0;font-size:12px;line-height:1.6")
+        self.assertEqual(rules[(".kvs div",)], "display:contents")
+        self.assertIn("overflow-wrap:anywhere", rules[(".kvs dd",)])
+        self.assertIn(".kvs{grid-template-columns:minmax(0,1fr);gap:0}.kvs dt{margin-top:6px}", sheet)
 
-    def test_compact_breakpoint_keeps_closed_filters_reachable(self):
-        # Regression: the script closed the panels at (max-height:500px) while the drawer summary was
-        # only shown at <=660px, so 844x390 and 932x430 had a closed filter panel with no control.
+    def test_compact_breakpoint_is_shared_and_selects_stay_visible(self):
         doc = R.render(self.state, self.template, self.config)
         js_mq = re.search(r'mq=matchMedia\("([^"]+)"\)', doc).group(1)
         self.assertEqual(js_mq, COMPACT_MQ)
-        base, blocks = media_blocks(style_of(doc))
+        style = style_of(doc)
+        base, blocks = media_blocks(style)
         self.assertIn(COMPACT_MQ, blocks)                                 # same spelling in CSS and JS
-        compact = dict((tuple(s), b) for s, b in css_rules(blocks[COMPACT_MQ]))
-        self.assertIn("display:flex", compact[(".drawer[open]>summary",)])
-        # Outside the compact query only an *open* drawer hides its summary; a closed one always shows
-        # it, so a reader who resizes after closing the panel still has the control.
-        self.assertRegex(base, r"(^|[}\n])\.drawer>summary\{display:flex;")
-        self.assertIn(".drawer[open]>summary", hidden_selectors(base))
-        drawer_hidden = {s for s in hidden_selectors(style_of(doc)) if s.startswith(".drawer")}
-        self.assertEqual(drawer_hidden, {".drawer[open]>summary", ".drawer>summary::-webkit-details-marker"})
-        for (w, h), closed in {(320, 568): True, (390, 844): True, (402, 874): True, (430, 932): True,
-                               (720, 450): True, (768, 1024): True, (844, 390): True, (932, 430): True,
-                               (900, 1200): True, (901, 501): False, (1440, 900): False}.items():
+        for (w, h), compact in {(320, 568): True, (390, 844): True, (768, 1024): True, (1023, 768): True,
+                                (1024, 768): False, (1440, 900): False}.items():
             with self.subTest(f"{w}x{h}"):
-                starts_closed = media_matches(js_mq, w, h)
-                self.assertEqual(starts_closed, closed)                   # tablets collapse too
-                shows_open_summary = media_matches(COMPACT_MQ, w, h)
-                self.assertEqual(shows_open_summary, starts_closed)
-        # The panels start open in the markup (no-script) and the script sets only the initial state.
-        self.assertIn('<details class="drawer" id="filter-panel" open>', doc)
-        self.assertIn("fp.open=hp.open=!mq.matches;", doc)
-        self.assertNotIn("mq.addEventListener", doc)
-        self.assertNotIn("addListener", doc)
-        self.assertIn('<summary><span class="fs-label">Filters</span><span id="filter-state">', doc)
+                self.assertEqual(media_matches(js_mq, w, h), compact)
+        # The script reads it only when Enter is pressed in the search box, to jump to the results.
+        script = main_script(doc)
+        self.assertIn('q.addEventListener("keydown",e=>{if(e.key==="Enter"&&mq.matches){e.preventDefault();q.blur();'
+                      '$("#feed").scrollIntoView({behavior:RM.matches?"auto":"smooth",block:"start"})}})', script)
+        self.assertEqual(script.count("scrollIntoView"), 1)
+        for banned in ("mq.addEventListener", "addListener", '"resize"', "onresize", ".onchange"):
+            self.assertNotIn(banned, script, banned)
+        # On phones the three selects start collapsed behind a Filters toggle; the search box, Reset, the
+        # stats line and the active-filter chips stay visible. Desktop never collapses them, and nothing
+        # hides the dialog's controls. The toggle sets the initial state once (no resize listener).
+        self.assertIn('<button class="ob ftog" id="ftog" type="button" aria-controls="fsel" aria-expanded="false" '
+                      'hidden><span>Filters (<span id="fn">0</span>)</span><span class="ftog-c" aria-hidden="true">▾'
+                      '</span></button>', doc)
+        self.assertIn(".ftog{display:none}", base)
+        self.assertNotIn("data-fc", base)
+        self.assertIn(".srch[data-fc] .fsel{display:none}", blocks[SHEET_MQ])
+        self.assertIn(".ftog:not([hidden]){display:flex;justify-content:space-between;width:100%;min-height:32px;",
+                      blocks[SHEET_MQ])
+        self.assertIn('cmd.toggleAttribute("data-fc",matchMedia("(max-width:767px)").matches);ftog.hidden=false;',
+                      script)
+        self.assertIn('ftog.addEventListener("click",()=>{const open=cmd.toggleAttribute("data-fc");'
+                      'ftog.setAttribute("aria-expanded",String(!open));if(!open)$("#age").focus()})', script)
+        self.assertIn('$("#fn").textContent=on.filter(([k])=>k!=="query"&&k!=="company").length;', script)
+        self.assertFalse({s for s in hidden_selectors(style)
+                          if any(k in s for k in ("api", "term", "field", "query", "reset"))})
+        self.assertIn("[hidden]{display:none!important}", base)
+        # The older page skeletons do not come back; the terminal chrome exists only inside the dialog.
+        for gone in ('class="rail"', 'class="top"', 'class="stk"', 'class="lg-head"', 'class="sec-h"',
+                     'class="tile"', "<details", 'id="sync"', 'class="pulse"', 'id="srcs"', 'class="sr"', 'id="key"',
+                     'class="st-note"', 'id="src-led-text"'):
+            self.assertNotIn(gone, doc, gone)
+        outside = page_outside_dialog(doc)
+        for chrome in ('class="term-win"', 'class="dot', 'class="caret"', 'class="tb"', "ops@job-signal"):
+            self.assertNotIn(chrome, outside, chrome)
+            self.assertIn(chrome, api_dialog(doc), chrome)
 
-    def test_control_borders_use_high_contrast_token(self):
+    def test_theme_text_contrast(self):
         style = style_of(R.render(self.state, self.template, self.config))
-        token = dict(re.findall(r"--([a-z0-9]+):(oklch\([^)]*\))", style))
-        for bg in ("n0", "n1", "n2"):                     # control fill, panel/page fill, hover fill
-            self.assertGreaterEqual(contrast(token["ctl"], token[bg]), 3.0, bg)
-        self.assertLess(contrast(token["n3"], token["n0"]), 3.0)          # decorative rules stay quiet
-        base, _blocks = media_blocks(style)
-        rules = dict((tuple(s), b) for s, b in css_rules(base))
-        for sel in ((".field input", ".field select"), (".drawer>summary",), (".health",)):
-            self.assertIn("border:1px solid var(--ctl)", rules[sel], sel)
-        self.assertEqual(len(re.findall(r"var\(--ctl\)", style)), 3)     # controls only, not every rule
+        dark, light = theme_tokens(style)
+        text = ("steel", "steel-2", "steel-muted", "signal", "ok", "bad", "warn", "info", "band-n", "band-1", "band-2")
+        for name, t in (("dark", dark), ("light", light)):
+            # Page background (cards, aside cards): every text colour meets 4.5:1.
+            for fg in text:
+                with self.subTest(f"{name} {fg} on void"):
+                    self.assertGreaterEqual(contrast(t[fg], t["void"]), 4.5)
+            # Panel and header-strip fills: neutral and state text meet 4.5:1.
+            for fg in text:
+                if fg != "signal":
+                    with self.subTest(f"{name} {fg} on plate"):
+                        self.assertGreaterEqual(contrast(t[fg], t["plate"]), 4.5)
+            for fg in ("steel", "steel-2"):
+                self.assertGreaterEqual(contrast(t[fg], t["plate-2"]), 4.5, f"{name} {fg}")
+            # The specified signal token is about 4.3:1 on dark plates: fine for its large and UI uses (3:1).
+            self.assertGreaterEqual(contrast(t["signal"], t["plate"]), 3.0, name)
+            self.assertGreaterEqual(contrast(t["void"], t["signal"]), 4.5, name)     # chamfer button
+        rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
+        self.assertIn("background:hsl(var(--signal));color:hsl(var(--void))", rules[(".chamfer-btn",)])
+        self.assertNotIn((".tag",), rules)
 
-    def test_phone_readout_is_visually_hidden_live_region(self):
+    def test_live_region_is_debounced_and_stats_mirror(self):
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('<div class="readout" role="status" aria-live="polite">', doc)
-        _base, blocks = media_blocks(style_of(doc))
-        phone = dict((tuple(s), b) for s, b in css_rules(blocks["(max-width:660px)"]))
-        clip = phone[(".hs-wl", ".readout")]
+        self.assertIn('<div class="readout vh" role="status" aria-live="polite">', doc)
+        base, _blocks = media_blocks(style_of(doc))
+        clip = dict((tuple(s), b) for s, b in css_rules(base))[(".vh",)]
         for decl in ("position:absolute", "width:1px", "height:1px", "overflow:hidden", "clip-path:inset(50%)"):
             self.assertIn(decl, clip, decl)
         all_hidden = hidden_selectors(style_of(doc))
-        self.assertNotIn(".readout", all_hidden)                          # stays in the accessibility tree
-        self.assertNotRegex(style_of(doc), r"\.readout[^{}]*\{[^}]*visibility:hidden")
-        self.assertEqual(phone[(".intro",)], "display:block;padding:0;border:0")
-        # The live region keeps updating, and the visible equivalents remain.
-        for snippet in ('document.querySelector("#status-total").textContent=visibleJobs.length',
-                        'document.querySelector("#status-companies").textContent=cc',
-                        'document.querySelector("#status-filter").textContent=f.join(" / ")',
-                        'document.querySelector("#total").textContent=visibleJobs.length',
-                        'document.querySelector("#filter-state").textContent='):
-            self.assertIn(snippet, doc)
+        self.assertNotIn(".readout", all_hidden)
+        self.assertNotIn(".vh", all_hidden)
+        # Visible totals update at once; the live region is debounced to 450ms while filtering.
+        script = main_script(doc)
+        for snippet in ('put("total",visibleJobs.length)', 'put("companies",cc)', 'put("today",today)',
+                        'announce(visibleJobs.length,cc,f.join(" / "))',
+                        'clearTimeout(annT);if(booted)annT=setTimeout(w,450)', '$("#status-total").textContent=t',
+                        '$("#fbar").hidden=!on.length',
+                        'const put=(id,v)=>{const s=String(v),e=document.getElementById(id);'
+                        'if(e.textContent!==s)e.textContent=s};'):
+            self.assertIn(snippet, script, snippet)
+        self.assertLess(script.index('put("total",'), script.index("announce(visibleJobs.length"))
+        self.assertEqual(script.count("setTimeout("), 1)
+        # The search-panel counters are the only visible copy; the left-aside mirrors are gone.
+        for gone in ("-side", "week-side", "in the last 7 days"):
+            self.assertNotIn(gone, doc, gone)
+        for mid in ("total", "companies", "today"):
+            self.assertEqual(len(re.findall(rf'<dd id="{mid}">\d+</dd>', doc)), 1, mid)
+        self.assertIn('<dl class="stats"><div class="stat"><dt>Openings</dt><dd id="total">', doc)
+        self.assertIn('<div class="fbar" id="fbar" hidden><span id="fcount">No active filters</span>'
+                      '<ul class="chips" id="chips" aria-label="Active filters"></ul></div>', doc)
+        self.assertLess(doc.index('id="cmd"'), doc.index('id="fbar"'))
+        self.assertLess(doc.index('id="fbar"'), doc.index('id="feed"'))
 
     def test_phone_health_summary_is_bounded_for_any_state_mix(self):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
-        summary = re.search(r'<details id="health-panel"><summary>(.*?)</summary>', doc, re.S).group(1)
-        self.assertEqual({s for s in ("live", "degraded", "stale", "failed", "unknown")
-                          if f'<span class="hc" data-s="{s}"><b>' in summary},
-                         set(R.HEALTH_STATES))                            # all five coexist
-        self.assertIn('<span class="hs-w"><span class="hs-wl">Worst</span> <span class="st st-failed">'
-                      '<span class="g" aria-hidden="true">×</span> FAILED</span></span>', summary)
-        _base, blocks = media_blocks(style_of(doc))
-        phone_hidden = hidden_selectors(blocks["(max-width:660px)"])
-        for cls in (".hs-n", ".hc", ".hs-r", ".hs-c"):                     # counts, prefix, total, checked
-            self.assertIn(cls, phone_hidden, cls)
-        for cls in (".hs-t", ".hs-w", ".hs-x", ".st", ".hs-wl", "#h-next", "#h-late"):
+        summary, block = health_summary(doc), status_block(doc)
+        self.assertIn('<dt>Freshness</dt><dd>worst <span class="st st-failed">'
+                      '<span class="g" aria-hidden="true">×</span> FAILED</span></dd>', block)
+        # Per-state counts live only in the rows; the summary carries no count spans.
+        self.assertNotIn('class="hc"', summary)
+        for cls in (".hs-t", ".st", "#h-next", "#h-late", ".hs-r", ".kvs", "#st-at", "#st-age"):
             self.assertNotIn(cls, hidden_selectors(style_of(doc)), cls)
-        # With the variable-length fragments gone, the phone summary is three fixed-length parts.
-        visible = re.sub(r'<span class="hc"[^>]*><b>\d+</b> <span class="g"[^>]*>.</span> [A-Z/]+</span>', "",
-                         summary)
-        visible = re.sub(r'<span class="(hs-n|hs-r|hs-c)">.*?</span>', "", visible)
-        visible = re.sub(r'<span class="hs-wl">Worst</span> ', "", visible)
-        text = re.sub(r"<[^>]+>", "", visible)
-        self.assertEqual(text, "Source health× FAILEDNext scheduled 31 Oct 23:53 IST")
+        # The terminal sheet wraps the summary and the status block at any width; their text is fixed wording.
+        records = sum(R.published_counts(self.state, self.config).values())
+        self.assertEqual(re.sub(r"<[^>]+>", "", summary), f"// 01 Source array{records} records")
+        new_today = sum(1 for r in self.state.jobs if r.first_seen == self.state.as_of.isoformat()
+                        and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
+        self.assertEqual(re.sub(r"<[^>]+>", "", block),
+                         "Last refresh31 Oct 22:47 IST 0m ago"
+                         "Result2/6 sources accepted · 2 held · 1 failed · 1 pending"
+                         f"Openings{records} published · {new_today} first seen today"
+                         "Freshnessworst × FAILED"
+                         "Next run31 Oct 23:53 IST · scheduled, not guaranteed")
 
     def test_last_good_data_has_visual_separator(self):
         self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
         section = health_section(R.render(self.state, self.template, self.config))
-        self.assertRegex(section, r'<td class="h-data" data-m="Last good data"><time datetime="[^"]+">'
-                                  r'[^<]+</time> <span class="age">0m ago</span></td>')
+        self.assertRegex(section, r'<div class="h-data"><dt>Last good data</dt><dd><time datetime="[^"]+">'
+                                  r'[^<]+</time> <span class="age">0m ago</span></dd></div>')
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style_of(R.render(
             self.state, self.template, self.config)))[0]))
-        self.assertEqual(rules[(".h-data .age:before",)], 'content:"· ";content:"· "/"";color:var(--t2)')
+        self.assertEqual(rules[(".h-data .age:before",)],
+                         'content:"· ";content:"· "/"";color:hsl(var(--steel-muted))')
 
     def test_placeholder_accounting(self):
         names = set(R.PLACEHOLDER.findall(self.template))
-        self.assertTrue({"SOURCE_COUNT", "EMPTY_COUNT", "HEALTH_REF", "HEALTH_SUMMARY", "HEALTH_ROWS",
-                         "HEALTH_JS", "FRESH_LIMIT"} <= names)
+        self.assertTrue({"SOURCE_COUNT", "EMPTY_COUNT", "HEALTH_REF", "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_JS",
+                         "FRESH_LIMIT", "CRON", "WORST_STATE", "CHECKED"} <= names)
+        for gone in ("SOURCE_TILES", "SRC_LED", "PULSE_ROWS", "SOURCE_ROWS", "STATUS_PRE", "DAY_UPPER"):
+            self.assertNotIn(gone, names, gone)
+        self.assertEqual(self.template.count("{{CHECKED}}"), 1)          # search-panel LED line only
+        self.assertIn('id="src-led" data-s="{{WORST_STATE}}"><span class="led" aria-hidden="true"></span>'
+                      '{{CHECKED}}</p>', self.template)
+        for gone in ("source_tiles_html", "src_led_html", "pulse_rows_html", "source_rows_html", "PULSE_LABELS",
+                     "status_pre_html"):
+            self.assertFalse(hasattr(R, gone), gone)
+        # Fragments with ids or script data appear exactly once in the template and the renderer enforces it.
+        self.assertLessEqual(R.ONCE_PLACEHOLDERS, names)
+        for name in sorted(R.ONCE_PLACEHOLDERS):
+            self.assertEqual(self.template.count("{{" + name + "}}"), 1, name)
+            with self.subTest(f"twice {name}"), self.assertRaises(ValueError):
+                R.render(self.state, self.template.replace("</footer>", "{{" + name + "}}</footer>"), self.config)
         doc = R.render(self.state, self.template, self.config)
+        self.assertIn("{{CRON}}", self.template)
+        self.assertIn("· cron 23 */6 * * * UTC ·", api_dialog(doc))
+        self.assertEqual(doc.count(f"cron {R.SCHEDULE_CRON} UTC"), 1)
         self.assertIsNone(R.PLACEHOLDER.search(doc))
         for name in sorted(names):
             with self.subTest(name), self.assertRaises(ValueError):
                 R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
         self.assertNotIn("Companies checked", doc)
-        self.assertIn('<dt>Automated sources</dt><dd id="sources">6</dd>', doc)
-        self.assertIn(f"Informational: no date-verifiable match ({len(self.state.empty_companies)})", doc)
+        self.assertIn('<h2 class="vh" id="src-h">Source health: 6 automated sources</h2>', doc)
+        self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {len(self.state.empty_companies)} '
+                      'companies</span>', doc)
+        self.assertIn('<dl class="info-dl" id="empty-list"></dl>', doc)
+        self.assertIn('<div><dt>${esc(c)}</dt><dd>${esc(n)}</dd></div>', doc)
         self.assertEqual(len(self.state.empty_companies), 7)
 
     def test_all_stale_scheduler_silence(self):
         last = REF - dt.timedelta(hours=20)
         for name in self.config.companies:
             self.set_company(name, status="stale", last_success=iso(last), last_attempt=iso(REF))
-        section = health_section(R.render(self.state, self.template, self.config))
-        self.assertEqual(re.findall(r'<tr data-h="([a-z]+)">', section), ["stale"] * 6)
-        self.assertIn('<span class="hs-wl">Worst</span> <span class="st st-stale">', section)
-        self.assertIn('<span class="hc" data-s="stale"><b>6</b>', section)
-        self.assertIn('<span class="hc" data-s="live" hidden><b>0</b>', section)
-        self.assertIn('<span class="age">20h 0m ago</span>', section)
-        self.assertIn('<span id="h-late"></span>', section)
-        # A silent scheduler leaves an old page up: the browser re-ages it and downgrades fresh rows.
         doc = R.render(self.state, self.template, self.config)
+        section = health_section(doc)
+        self.assertEqual(re.findall(r'<li class="ch" data-h="([a-z]+)">', section), ["stale"] * 6)
+        self.assertNotIn("Worst", section)
+        self.assertIn('<span class="age">20h 0m ago</span>', section)
+        # The terminal status block and the search-panel LED carry the same worst state.
+        frags = dashboard_fragments(doc)
+        self.assertIn("<dt>Freshness</dt><dd>worst " + R.badge_html("stale") + "</dd>", frags["summary"])
+        self.assertIn('data-s="stale"', frags["led"])
+        # A silent scheduler leaves an old page up: the browser re-ages it and flags the late update right
+        # after the next-run time in the status block.
+        self.assertTrue(frags["summary"].endswith('</time><span id="h-late"></span> · scheduled, not guaranteed'
+                                                  '</dd></div>'))
+        script = main_script(doc)
+        self.assertIn('$("#src-led").dataset.s=worst;', script)
+        for gone in ("#srcs", ".sr-n", ".sr-s", "src-led-text", "#pulse"):
+            self.assertNotIn(gone, script, gone)
         h = json.loads(re.search(r",H=(\{.*?\});\n", doc).group(1))
         self.assertEqual(h["fresh_ms"], 6.5 * 3600 * 1000)
         self.assertEqual(h["grace_ms"], 30 * 60 * 1000)
         self.assertEqual(h["severity"], list(R.HEALTH_SEVERITY))
-        for snippet in ('if(!(now>ref))return', 'd>H.fresh_ms&&(tr.dataset.h==="live"||tr.dataset.h==="degraded")',
-                        'badge(tr.querySelector(".st"),"stale")', 'now>Date.parse(nx.dateTime)+H.grace_ms',
+        for snippet in ('if(!(now>ref))return', 'd>H.fresh_ms&&(li.dataset.h==="live"||li.dataset.h==="degraded")',
+                        'badge(li.querySelector(".st"),"stale")', 'now>Date.parse(nx.dateTime)+H.grace_ms',
                         'document.querySelector("#h-late").textContent=H.late',
-                        'STALE[tr.querySelector("th").textContent]=`${H.stale}'):
-            self.assertIn(snippet, doc)
+                        'STALE[li.querySelector(".ch-name").textContent]=`${H.stale}',
+                        'document.querySelectorAll(".kvs .st").forEach(el=>badge(el,ws))',
+                        'const sa=$("#st-at");if(sa)$("#st-age").textContent=ago(now-Date.parse(sa.dateTime));',
+                        'const nx=document.querySelector("#h-next");'
+                        'if(nx&&now>Date.parse(nx.dateTime)+H.grace_ms)document.querySelector("#h-late")'
+                        '.textContent=H.late'):
+            self.assertIn(snippet, script)
+        self.assertNotIn(".hs-w", script)
+        # Re-aging runs before the search-panel LED and the cards read HS/STALE.
+        self.assertLess(script.index("H.grace_ms"), script.index("const HS={}"))
+        self.assertNotIn(".tile", doc)
         self.assertEqual(h["late"], " · update not yet published")
         self.assertEqual(h["stale"], "stale since ")
         self.assertNotIn("overdue", doc)
-        # Every company label matches its panel row: all six are stale since the same day.
         self.assertEqual(R.stale_labels(self.state, self.config),
                          {c: "stale since Oct 31" for c in self.config.companies})
 
@@ -3218,9 +3523,391 @@ class SourceHealthTests(unittest.TestCase):
         counts = R.published_counts(state, config)
         ref = R.health_reference(state)
         for h in R.source_health(state, config, ref):
-            self.assertIn(f'<tr data-h="{h.state}"><th scope="row">{h.company}</th>', section)
+            self.assertEqual(channels(section)[h.company][0], h.state, h.company)
             self.assertEqual(h.published, counts[h.company])
         self.assertIn(f'<span class="hs-r">{sum(counts.values())} records</span>', section)
+        self.assertIn(f"<dt>Openings</dt><dd><b>{sum(counts.values())}</b> published · ", status_block(doc))
+
+    def test_connector_labels_are_a_positive_allowlist(self):
+        self.assertEqual(R.CONNECTOR_LABELS, {
+            "siemens_avature_html": "Avature HTML", "jpm_oracle_ce": "Oracle Careers API",
+            "gehc_workday_cxs": "Workday CXS API", "iqvia_workday_cxs": "Workday CXS API",
+            "gevernova_paradox_api": "Paradox Jobs API", "zs_jibe_api": "Jibe Jobs API",
+            "static": "Static snapshot"})
+        section = health_section(R.render(self.state, self.template, self.config))
+        expected = {"Siemens": "Avature HTML", "JPMorganChase": "Oracle Careers API", "GE HealthCare": "Workday CXS API",
+                    "GE Vernova": "Paradox Jobs API", "IQVIA": "Workday CXS API", "ZS": "Jibe Jobs API"}
+        for company, (_s, rest) in channels(section).items():
+            self.assertTrue(rest.startswith(f'<span class="ch-c"><span class="vh">, source connector </span>'
+                                            f'{expected[company]}</span></span>'), company)
+        for mode in {self.config.sources[c]["mode"] for c in self.config.companies}:
+            self.assertNotIn(mode, section, mode)                       # internal mode keys stay private
+        for host in self.config.hosts:
+            self.assertNotIn(host, section, host)
+        # An unlisted mode fails the render rather than leaking its key.
+        with mock.patch.dict(self.config.sources["ZS"], {"mode": "zs_future_api"}), self.assertRaises(ValueError):
+            R.render(self.state, self.template, self.config)
+
+    def test_latest_refresh_rollup_counts(self):
+        self.all_states_state()
+        sources = R.source_health(self.state, self.config, R.health_reference(self.state))
+        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 1})
+        doc = R.render(self.state, self.template, self.config)
+        section, block = health_section(doc), status_block(doc)
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/6 sources accepted · <span data-o="held">'
+                      '<b>2</b> held</span> · <span data-o="failed"><b>1</b> failed</span> · <span data-o="pending">'
+                      '<b>1</b> pending</span></dd></div>', block)
+        self.assertEqual(doc.count("sources accepted"), 1)               # status block only
+        for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/6"):
+            self.assertNotIn(gone, section, gone)
+        self.assertNotIn("Worst", doc)
+        self.assertEqual(block.count("worst "), 1)                       # Freshness row badge only
+        self.assertEqual(sum(R.attempt_rollup(sources).values()), len(self.config.companies))
+        self.assertEqual(set(R.ROLLUP_OF), set(R.ATTEMPT_TEXT))
+
+    def test_status_block_openings_counts_first_seen_today(self):
+        def expected_new(state):
+            return sum(1 for r in state.jobs if r.first_seen == state.as_of.isoformat() and
+                       max(0, (state.as_of - dt.date.fromisoformat(r.posted_date)).days) <= self.config.max_age_days)
+
+        visible = sum(R.published_counts(self.state, self.config).values())
+        n = expected_new(self.state)
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn(f"<div><dt>Openings</dt><dd><b>{visible}</b> published · <b>{n}</b> first seen today</dd></div>",
+                      status_block(doc))
+        self.assertEqual(visible, int(re.search(r'<dd id="total">(\d+)</dd>', doc).group(1)))
+        # Bump one visible, not-yet-new row's first_seen to as_of: the count rises by one. The fixture may
+        # mark every row new, so one visible row is first moved to yesterday to give a stable baseline.
+        today = self.state.as_of.isoformat()
+        i = next(i for i, r in enumerate(self.state.jobs)
+                 if (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
+        if self.state.jobs[i].first_seen == today:
+            yesterday = (self.state.as_of - dt.timedelta(days=1)).isoformat()
+            self.state.jobs[i] = dataclasses.replace(self.state.jobs[i], first_seen=yesterday)
+            n = expected_new(self.state)
+            self.assertIn(f"<dd><b>{visible}</b> published · <b>{n}</b> first seen today</dd>",
+                          status_block(R.render(self.state, self.template, self.config)))
+        self.state.jobs[i] = dataclasses.replace(self.state.jobs[i], first_seen=today)
+        self.assertEqual(expected_new(self.state), n + 1)
+        self.assertIn(f"<dd><b>{visible}</b> published · <b>{n + 1}</b> first seen today</dd>",
+                      status_block(R.render(self.state, self.template, self.config)))
+        # A row first seen today but past the age window is not published and not counted.
+        old = (self.state.as_of - dt.timedelta(days=self.config.max_age_days + 5)).isoformat()
+        self.state.jobs[i] = dataclasses.replace(self.state.jobs[i], posted_date=old)
+        self.assertIn(f"<dd><b>{visible - 1}</b> published · <b>{n}</b> first seen today</dd>",
+                      status_block(R.render(self.state, self.template, self.config)))
+
+    def test_status_block_rows_and_placeholder(self):
+        self.assertEqual(self.template.count("{{STATUS_BLOCK}}"), 1)
+        self.assertIn('<dl class="kvs">{{STATUS_BLOCK}}</dl>', self.template)
+        self.assertIn("STATUS_BLOCK", R.ONCE_PLACEHOLDERS)
+        block = R.status_block_html(self.state, self.config)
+        self.assertEqual(re.findall(r"<div><dt>([^<]+)</dt><dd>", block),
+                         ["Last refresh", "Result", "Openings", "Freshness", "Next run"])
+        self.assertEqual(block.count("<div>"), 5)
+        self.assertEqual(status_block(R.render(self.state, self.template, self.config)), block)
+
+    def test_purple_theme_has_no_yellow_tokens(self):
+        doc = R.render(self.state, self.template, self.config)
+        style = style_of(doc)
+        self.assertNotRegex(style.lower(), r"#[0-9a-f]{3,8}\b|rgb\(|oklch\(|--type-")
+        self.assertNotRegex(doc.lower(), r"yellow|gold|amber|lime")
+        dark, light = theme_tokens(style)
+        literals = re.findall(r"hsl\((\d+ \d+% \d+%)", style)           # inline fallbacks, e.g. the backdrop
+        for value in [*dark.values(), *light.values(), *literals]:
+            h, s, _l = (float(x) for x in value.replace("%", "").split())
+            if s >= 10:                                                 # chromatic values only
+                self.assertFalse(40 <= h <= 70, f"{value} reads as yellow/gold")
+        for t in (dark, light):
+            h, s, _l = (float(x) for x in t["signal"].replace("%", "").split())
+            self.assertTrue(260 <= h <= 280 and s >= 80, t["signal"])                     # vivid purple
+            for n in ("void", "plate", "plate-2", "plate-3", "hull", "hull-2", "steel", "steel-muted"):
+                self.assertTrue(255 <= float(t[n].split()[0]) <= 270, n)                 # violet neutrals
+            self.assertTrue(300 <= float(t["warn"].split()[0]) <= 340)                   # pink warning
+        self.assertEqual({k: dark[k] for k in ("band-n", "band-1", "band-2")},
+                         {"band-n": "262 45% 76%", "band-1": "150 42% 68%", "band-2": "188 45% 70%"})
+        self.assertGreater(style.count("var(--signal)"), 30)
+        self.assertIn('html[data-theme=light]{color-scheme:light;', style)
+
+    def test_header_has_only_the_requests_button(self):
+        self.all_states_state()
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn('<div class="wm-row"><span class="wm">job signal</span><span class="mark" aria-hidden="true">'
+                      '</span><span class="label-sys-bright live"><span class="led led-pulse" aria-hidden="true">'
+                      '</span>live · automated</span><button class="th-m" id="theme-m" type="button" aria-label="Switch '
+                      'to light mode" hidden>[ theme ]</button><button class="th-m" id="req-btn-m" type="button" '
+                      'aria-haspopup="dialog" aria-controls="api" hidden>[ requests ]</button></div>', doc)
+        # Two short lines on desktop; both are visually hidden (still read out) on phones.
+        self.assertIn('<h1><span class="h1a">New openings every six hours</span><span class="h1b"> · 0–2 years · '
+                      'Bengaluru · Kochi</span></h1>\n<p class="lede">First-party employer portals · deduplicated · '
+                      'last 30 days</p>', doc)
+        self.assertNotIn("A public ledger of fresh roles", doc)
+        header = re.search(r'<header class="hdr">.*?</header>', doc, re.S).group(0)
+        right = header[header.index('<div class="hdr-r">'):]
+        self.assertEqual(right, '<div class="hdr-r"><button class="chamfer-btn req" id="req-btn" type="button" '
+                                'aria-haspopup="dialog" aria-controls="api" hidden><span class="gl" aria-hidden="true">'
+                                '&gt;_</span> Requests</button></div>\n</header>')
+        for gone in ('class="panel', "status", "<pre", 'id="st-', "Details", "Status key", "signal status"):
+            self.assertNotIn(gone, header, gone)
+        # No `$ signal …` command text, status block or status key outside the dialog.
+        outside = page_outside_dialog(doc)
+        text = re.sub(r"<[^>]+>", "", outside)
+        for gone in ("$ signal", "signal status", "signal clock", "signal window", "Refresh status", "Status key",
+                     "Freshness key", "source pulse", "Source details", "Source status"):
+            self.assertNotIn(gone, text, gone)
+        for gone in ('id="st-pre"', 'id="h-next"', 'id="h-late"', 'id="health"', 'class="h-key"', 'class="ps"'):
+            self.assertNotIn(gone, outside, gone)
+        base, blocks = media_blocks(style_of(doc))
+        rules = dict((tuple(s), b) for s, b in css_rules(base))
+        self.assertIn("max-width:44rem", rules[(".hdr-l",)])
+        self.assertIn("align-self:flex-start", rules[(".hdr-r",)])
+        self.assertEqual(rules[(".req",)], "gap:8px;height:32px")
+        self.assertIn("font:600 15px/1.35 var(--font-sans)", rules[("h1",)])          # no display-size hero
+        self.assertNotIn("clamp(", rules[("h1",)])
+        self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
+        self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
+                      "white-space:nowrap}", blocks[SHEET_MQ])
+        self.assertRegex(status_block(doc), r'<div><dt>Next run</dt><dd><time id="h-next" datetime="[^"]+">'
+                                            r'31 Oct 23:53 IST</time><span id="h-late"></span> · scheduled, not '
+                                            r'guaranteed</dd></div>$')
+        # The search panel shows only the checked time; its LED takes the worst freshness state.
+        self.assertEqual(dashboard_fragments(doc)["led"],
+                         '<p class="label-sys src-led" id="src-led" data-s="failed"><span class="led" aria-hidden="true">'
+                         '</span>Checked 31 Oct 22:47 IST</p>')
+        self.assertIn(".src-led .led{color:hsl(var(--sc))}", base)
+        self.assertIn("[data-s=failed]{--sc:var(--bad)}", base)
+        self.state.checked_at = None
+        self.assertIn('<span class="led" aria-hidden="true"></span>Auto-check pending</p>',
+                      dashboard_fragments(R.render(self.state, self.template, self.config))["led"])
+        self.assertNotIn((".ps",), rules)
+        self.assertNotIn((".pre",), rules)
+        # In-page anchors stay in this tab despite <base target="_blank">.
+        for href in re.findall(r'<a [^>]*href="#[^"]*"[^>]*>', doc):
+            self.assertIn('target="_self"', href)
+
+    def test_terminal_never_shows_detail_or_urls(self):
+        hosts = sorted(self.config.hosts)
+        for i, name in enumerate(self.config.companies):
+            self.set_company(name, status="stale", last_success=iso(REF - dt.timedelta(hours=i)), last_attempt=iso(REF),
+                             detail=f"zzterm{i} https://{hosts[i % len(hosts)]}/wday/cxs KeyError HTTP 503",
+                             listing_total=765432 + i, screened={"999981": "2026-10-30"},
+                             removal_hold={"at": "2026-10-30T09:11+05:30", "ids": ["999982"]})
+        doc = R.render(self.state, self.template, self.config)
+        dialog = api_dialog(doc)
+        for needle in ("zzterm", "https://", "http", "/wday", "KeyError", "503", "765432", "999981", "999982",
+                       "09:11", "removal", "screened", "listing", *hosts,
+                       *{self.config.sources[c]["mode"] for c in self.config.companies}):
+            self.assertNotIn(needle, dialog, needle)
+        self.assertNotIn("zzterm", doc)
+        self.assertEqual(list(channels(dialog)), list(self.config.companies))
+        with mock.patch.dict(self.config.sources["ZS"], {"mode": "zs_future_api"}), self.assertRaises(ValueError):
+            R.render(self.state, self.template, self.config)
+
+    def test_motion_is_short_finite_and_reduced(self):
+        doc = R.render(self.state, self.template, self.config)
+        style = style_of(doc)
+        effects, reduced = style.split("@media(prefers-reduced-motion:reduce)")
+        for kill in ("animation:none!important", "transition:none!important", "dialog.term::backdrop{animation:none!important}"):
+            self.assertIn(kill, reduced)
+        secs = lambda t: float(t[:-2]) / 1000 if t.endswith("ms") else float(t[:-1])   # noqa: E731
+        durations = dict(re.findall(r"--(dur-[a-z]+):([\d.]+m?s)", style))
+        self.assertEqual(durations, {"dur-press": "90ms", "dur-fast": ".15s", "dur-base": ".2s", "dur-slow": ".32s"})
+        # The LED pulse is the only infinite animation; everything else is one short run (the caret blinks
+        # six times and stops).
+        anims = re.findall(r"animation:([^;}]+)", effects)
+        self.assertEqual([a for a in anims if "infinite" in a], ["led-pulse 2s ease-in-out infinite"])
+        self.assertEqual(style.count("infinite"), 1)
+        self.assertIn("blink .5s steps(1) 6", anims)
+        self.assertIn("pxin .24s steps(3) backwards", anims)
+        self.assertIn("@keyframes blink{50%{opacity:0}}", style)
+        for decl in anims:
+            if "infinite" in decl:
+                continue
+            times = re.findall(r"(?<![\w.])\d*\.?\d+m?s\b", decl)
+            self.assertTrue(times, decl)
+            self.assertLess(max(secs(t) for t in times), 0.6, decl)
+        for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink"):
+            self.assertIn(f"@keyframes {name}{{", style)
+        # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
+        # terminal's four output blocks stagger by 90ms and all finish within .7s.
+        self.assertEqual(re.findall(r"animation-delay:([^;}]+)", effects), ["calc(var(--i)*40ms)",
+                                                                            "calc(var(--d)*90ms)"])
+        steps = [int(d) for d in re.findall(r'<div class="tb" style="--d:(\d+)">', doc)]
+        self.assertEqual(steps, [0, 1, 2, 3, 4])
+        self.assertLess(max(steps) * 0.09 + 0.24, 0.7)
+        self.assertIn("anim=!booted&&i<12", doc)
+        self.assertIn('<main id="main" class="container boot-in">', doc)
+        for decl in re.findall(r"transition:([^;}]+)", effects):
+            for part in decl.split(","):
+                part = re.sub(r"var\(--(dur-[a-z]+)\)", lambda m: durations[m.group(1)], part)
+                for t in re.findall(r"(?<![\w.])\d*\.?\d+m?s\b", part):
+                    self.assertLessEqual(secs(t), 0.32, decl)
+        # Exactly two pulsing LEDs (header and feed toolbar), both in static markup.
+        markup = doc.replace(style, "")
+        self.assertEqual(markup.count("led-pulse"), 2)
+        self.assertEqual(markup.count('<span class="led led-pulse" aria-hidden="true"></span>'), 2)
+        self.assertNotIn("led-pulse", main_script(doc))
+        self.assertNotIn("offsetWidth", doc)
+        self.assertNotIn("getBoundingClientRect", doc)
+        self.assertIn('behavior:RM.matches?"auto":"smooth"', doc)
+
+    def test_stats_markup_and_target_sizes(self):
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn('<div class="stat"><dt><span class="vh">Posted </span>Today</dt><dd id="today">', doc)
+        self.assertEqual(re.findall(r"<dl class=\"stats\">(.*?)</dl>", doc)[0].count("<dt>"), 3)
+        style = style_of(doc)
+        base, blocks = media_blocks(style)
+        rules = dict((tuple(s), b) for s, b in css_rules(base))
+        px = lambda body, prop: int(re.search(rf"(?:^|;){prop}:(\d+)px", body).group(1))   # noqa: E731
+        for sel, prop, least in (((".ob", ".ci", ".chip"), "min-height", 28), ((".chamfer-btn",), "min-height", 32),
+                                 (("#query",), "height", 24), ((".field select",), "height", 28)):
+            self.assertGreaterEqual(px(rules[sel], prop), least, (sel, prop))
+        # The 12px red close light has a 24px hit area: a pseudo-element extends it by 6px on every side.
+        self.assertIn("width:12px;height:12px", rules[(".dot",)])
+        self.assertEqual(rules[(".dot-x:after",)], 'content:"";position:absolute;inset:-6px')
+        self.assertIn("position:relative", rules[(".dot",)])
+        self.assertEqual(px(rules[(".req",)], "height"), 32)
+        wide = dict((tuple(s), b) for s, b in css_rules(blocks["(min-width:768px)"]))
+        self.assertIn("min-width:44px;height:44px", wide[(".thm:not([hidden])",)])
+        sheet = dict((tuple(s), b) for s, b in css_rules(blocks[SHEET_MQ]))
+        self.assertGreaterEqual(px(sheet[(".th-m:not([hidden])",)], "min-height"), 28)
+        for gone in (".lk", ".go", ".cta"):
+            self.assertNotIn(gone, style, gone)
+        # On phones the card title link covers the whole card.
+        self.assertIn('.job:after{content:"";position:absolute;inset:0}', blocks[PHONE_MQ])
+        self.assertTrue(rules[(".card",)].startswith("position:relative;"))
+        # Absolutely positioned screen-reader text inside scrolling chips stays inside its chip.
+        self.assertIn(".ci,.chip{position:relative}", base)
+
+    def test_dashboard_fragments_are_allowlisted(self):
+        hosts = sorted(self.config.hosts)
+        for i, name in enumerate(self.config.companies):
+            self.set_company(name, status="stale", last_success=iso(REF - dt.timedelta(hours=i)), last_attempt=iso(REF),
+                             detail=f"zzdash{i} https://{hosts[i % len(hosts)]}/wday/cxs KeyError HTTP 503",
+                             listing_total=765432 + i, screened={"999981": "2026-10-30"},
+                             stale_since="2026-10-29T03:17+05:30",
+                             removal_hold={"at": "2026-10-30T09:11+05:30", "ids": ["999982"]})
+        doc = R.render(self.state, self.template, self.config)
+        frags = dashboard_fragments(doc)
+        modes = {self.config.sources[c]["mode"] for c in self.config.companies}
+        for key, frag in frags.items():
+            for needle in ("zzdash", "https://", "http", "/wday", "KeyError", "503", "765432", "999981", "999982",
+                           "09:11", "03:17", "removal", "screened", "listing", "stale_since", "excluded", *hosts, *modes):
+                self.assertNotIn(needle, frag, f"{key}: {needle}")
+        sources = R.source_health(self.state, self.config, R.health_reference(self.state))
+        worst = R.worst_state(h.state for h in sources)
+        self.assertEqual(frags["led"], f'<p class="label-sys src-led" id="src-led" data-s="{worst}"><span class="led" '
+                                       'aria-hidden="true"></span>Checked 31 Oct 22:47 IST</p>')
+        # Outside the dialog, no connector names, per-source states or refresh counts are shown at all.
+        outside = page_outside_dialog(doc)
+        for needle in ("Avature", "Oracle Careers", "Workday", "Paradox", "Jibe", "Static snapshot", "accepted",
+                       "held", "connector", 'data-h="', "st st-", *modes, *hosts):
+            self.assertNotIn(needle, outside, needle)
+        # The seeded state renders the same LED shape with no check yet.
+        seeded = dashboard_fragments(R.render(env()[2], self.template, self.config))["led"]
+        self.assertRegex(seeded, r'^<p class="label-sys src-led" id="src-led" data-s="(live|degraded|stale|failed|'
+                                 r'unknown)"><span class="led" aria-hidden="true"></span>Auto-check pending</p>$')
+        with mock.patch.dict(self.config.sources["ZS"], {"mode": "zs_future_api"}), self.assertRaises(ValueError):
+            R.render(self.state, self.template, self.config)
+
+    def test_feed_cards_sorting_and_company_chips(self):
+        doc = R.render(self.state, self.template, self.config)
+        script = main_script(doc)
+        # One flat stream of cards; only the first 12 animate, and only on the first render.
+        for snippet in ('const card=(r,i)=>{const[c,id,t,e,d,a,l,u,b,cd]=r,', 'anim=!booted&&i<12',
+                        '<article class="card${anim?" reveal":""}"${anim?` style="--i:${i}"`:""}>',
+                        '<span class="av" aria-hidden="true">${esc(ini(c))}</span>',
+                        '<h3 class="c-l"><span class="c-co">${esc(c)}</span> posted <a class="job" href="${esc(u)}" '
+                        'rel="noopener noreferrer">${esc(t)}</a></h3>',
+                        'ini=c=>{const w=c.split(/\\s+/).filter(Boolean);return(w.length>1?w[0][0]+w[1][0]:c.slice(0,2))'
+                        '.toUpperCase()}',
+                        'const BAND={n:"No number",1:"≤ 1 year",2:"≤ 2 years"}',
+                        '${ns?"":`<p class="c-x"><span class="vh">Minimum experience stated: </span>${esc(e)}</p>`}',
+                        '<span class="vh">Job ID </span>${esc(id)}</span>${cd?',
+                        '</p>`}</div></div></article>`};',
+                        'out.innerHTML=visibleJobs.map(card).join("")||\'<p class="none">No openings match these '
+                        'filters.</p>\''):
+            self.assertIn(snippet, script, snippet)
+        for gone in ('class="sec"', "groups.set(", "<ol class=\"rows\">", 'class="c-f"', 'class="tags"', 'class="tg',
+                     'class="go"', "open ↗", "slug", "lb=STALE"):
+            self.assertNotIn(gone, script, gone)
+        # The title is the card's only link.
+        self.assertEqual(script[script.index("const card="):script.index("function render()")].count("<a "), 1)
+        # Sorting: newest = age then configured company order; closing soon = known deadlines first.
+        self.assertIn("byNew=(x,y)=>x[5]-y[5]||oi(x[0])-oi(y[0]),byClose=(x,y)=>{const a=daysToClose(x[9]),"
+                      "b=daysToClose(y[9]);return a===b?byNew(x,y):a===null?1:b===null?-1:a-b}", script)
+        self.assertIn('jobs.filter(match).sort(sortBy==="close"?byClose:byNew)', script)
+        self.assertIn('<div class="tgl" role="group" aria-label="Sort openings"><button class="ob" id="sort-new" '
+                      'type="button" aria-pressed="true">Newest</button><button class="ob" id="sort-close" type="button" '
+                      'aria-pressed="false">Closing soon</button></div>', doc)
+        self.assertIn('$("#sort-l").textContent=sortBy==="close"?"· closing soon":"· newest first"', script)
+        # Company chips: "All companies" plus one per configured company, kept in sync with #company, which is a
+        # non-visible state holder placed just before the phone Filters toggle and the three visible filters.
+        self.assertIn('<select id="company" class="vh" aria-hidden="true" tabindex="-1"><option value="">All '
+                      'companies</option></select>\n<button class="ob ftog" id="ftog" type="button" aria-controls="fsel" '
+                      'aria-expanded="false" hidden><span>Filters (<span id="fn">0</span>)</span><span class="ftog-c" '
+                      'aria-hidden="true">▾</span></button>\n<div class="fsel" id="fsel"><div class="field">'
+                      '<label for="age">', doc)
+        self.assertNotIn('<label for="company">', doc)
+        self.assertEqual(re.search(r'<div class="fsel" id="fsel">.*?</div>\n', doc).group(0).count('class="field"'), 3)
+        self.assertIn('ci.innerHTML=`<li><button class="ci" type="button" data-co="" aria-pressed="true">All companies '
+                      '<b>0</b></button></li>`+order.map(c=>`<li><button class="ci" type="button" data-co="${esc(c)}" '
+                      'aria-pressed="false">', script)
+        self.assertIn('cf.value=b.dataset.co&&cf.value!==b.dataset.co?b.dataset.co:"";render()', script)
+        self.assertIn('b.setAttribute("aria-pressed",String(co===cv))', script)
+        base = media_blocks(style_of(doc))[0]
+        self.assertIn(".ob[aria-pressed=true],.ci[aria-pressed=true]{border-color:hsl(var(--signal)/.7);"
+                      "background:hsl(var(--signal)/.08);color:hsl(var(--signal))}", base)
+        self.assertIn('<p class="note">Discovery list, not a fit ranking.', doc)
+
+    def test_theme_toggle_defaults_dark(self):
+        doc = R.render(self.state, self.template, self.config)
+        self.assertIn('<html lang="en">', doc)
+        self.assertIn('<meta name="color-scheme" content="dark">', doc)
+        self.assertIn(':root{color-scheme:dark;', doc)
+        head = doc[:doc.index("<style>")]
+        self.assertIn('<script>try{if(localStorage.getItem("theme")==="light"){document.documentElement.dataset.theme='
+                      '"light";document.querySelector(\'meta[name="color-scheme"]\').content="light"}}catch(e){}</script>',
+                      head)
+        script = main_script(doc)
+        self.assertIn('root.dataset.theme=t;csm.content=t;try{localStorage.setItem("theme",t)}catch(e){}', script)
+        self.assertIn('<button class="thm" id="theme" type="button" hidden><span class="thm-g" aria-hidden="true">◐'
+                      '</span><span class="thm-l">Light mode</span></button>', doc)
+        self.assertIn('<button class="th-m" id="theme-m" type="button" aria-label="Switch to light mode" hidden>'
+                      '[ theme ]</button>', doc)
+        style = style_of(doc)
+        base, blocks = media_blocks(style)
+        self.assertIn(".thm,.th-m{display:none}", base)
+        self.assertIn(".thm-l{max-width:0;overflow:hidden;", base)
+        self.assertIn(".thm:not([hidden]){position:fixed;right:16px;bottom:16px;", blocks["(min-width:768px)"])
+        self.assertIn(".thm:hover .thm-l,.thm:focus-visible .thm-l{max-width:12rem;padding-left:10px}",
+                      blocks["(min-width:768px)"])
+        self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
+
+    def test_right_aside_holds_informational_only(self):
+        doc = R.render(self.state, self.template, self.config)
+        self.assertEqual(doc.count("<aside"), 1)
+        self.assertNotIn('class="al"', doc)
+        aside = re.search(r'<aside class="ar".*?</aside>', doc, re.S).group(0)
+        self.assertTrue(aside.startswith('<aside class="ar" aria-label="Informational companies"><div class="ar-in">\n'
+                                         '<section class="side" id="empty" aria-labelledby="empty-h">'))
+        self.assertEqual(re.findall(r'<section class="side" id="([a-z]+)"', aside), ["empty"])
+        self.assertEqual(aside.count("<section"), 1)
+        self.assertIn(f'Informational · {len(self.state.empty_companies)} companies', aside)
+        for gone in ("led-pulse", "h-key", "pulse", "srcs", "Status key", "Source details", "<button"):
+            self.assertNotIn(gone, aside, gone)
+        # Quick views and the left aside's Reset filters are gone; the sort toggle and the search-panel
+        # Reset remain the only controls for those actions.
+        script = main_script(doc)
+        for snippet in ('setSort=s=>{sortBy=s;sN.setAttribute("aria-pressed",String(sortBy==="new"));',
+                        '[sN,sC].forEach(b=>b.addEventListener("click",()=>setSort(b===sC?"close":"new")))',
+                        '$("#reset").addEventListener("click",reset);render();'):
+            self.assertIn(snippet, script, snippet)
+        for gone in ('id="qv"', "Quick views", "data-f=", "qv-req", 'id="reset2"', "Reset filters", 'class="cta"'):
+            self.assertNotIn(gone, doc, gone)
+        for gone in ('$("#qv")', "dataset.f", "#reset2"):
+            self.assertNotIn(gone, script, gone)
+        self.assertEqual(doc.count('id="reset"'), 1)
 
 
 if __name__ == "__main__":

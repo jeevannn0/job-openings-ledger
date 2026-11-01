@@ -760,7 +760,8 @@ def checked_text(state: State) -> str:
 
 # --------------------------------------------------------------------------- source health
 # The public health panel is a positive-allowlist projection. It reads only CompanyState.status,
-# last_success and last_attempt, plus the count of published rows. detail, screened, removal_hold,
+# last_success and last_attempt, plus the count of published rows and the configured mode's fixed
+# CONNECTOR_LABELS name (never a URL or host). detail, screened, removal_hold,
 # listing_total, stale_since and last_discovery_attempt never reach the page.
 
 FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # one refresh cadence plus scheduler slack
@@ -772,10 +773,35 @@ HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least t
 HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",
                  "unknown": "UNKNOWN/UNCHECKED"}
 HEALTH_GLYPHS = {"live": "■", "degraded": "▲", "stale": "◷", "failed": "×", "unknown": "◇"}
-ATTEMPT_TEXT = {"accepted": "Accepted", "held": "Latest run held; previous data kept",
-                "first_snapshot": "No successful automated check yet; snapshot shown",
-                "first_empty": "No successful automated check yet", "unrecorded": "Outcome not recorded",
+ATTEMPT_TEXT = {"accepted": "Successful refresh", "held": "Refresh held, cached data kept",
+                "first_snapshot": "No successful automated refresh yet, snapshot shown",
+                "first_empty": "No successful automated refresh yet", "unrecorded": "Outcome not recorded",
                 "none": "No attempt recorded"}
+# Latest-refresh rollup buckets for the summary: an accepted run, a held run with earlier good data,
+# a held run with no good data ever (failed), and no recorded outcome (pending).
+ROLLUP_KEYS = ("accepted", "held", "failed", "pending")
+ROLLUP_OF = {"accepted": "accepted", "held": "held", "first_snapshot": "failed", "first_empty": "failed",
+             "unrecorded": "pending", "none": "pending"}
+ROLLUP_LABELS = {"accepted": "accepted", "held": "held", "failed": "failed", "pending": "pending"}
+# Public connector names, keyed by config mode. A positive allowlist: no URL, host, or endpoint path
+# reaches the page, and a mode without an entry fails the render.
+CONNECTOR_LABELS = {
+    "siemens_avature_html": "Avature HTML",
+    "jpm_oracle_ce": "Oracle Careers API",
+    "gehc_workday_cxs": "Workday CXS API",
+    "iqvia_workday_cxs": "Workday CXS API",
+    "gevernova_paradox_api": "Paradox Jobs API",
+    "zs_jibe_api": "Jibe Jobs API",
+    "static": "Static snapshot",
+}
+# Plain-language meaning of each freshness state; {limit} is the freshness threshold.
+HEALTH_MEANINGS = {
+    "live": "Latest refresh succeeded and its data is under {limit} old.",
+    "degraded": "Latest refresh was held; cached data under {limit} old is shown.",
+    "stale": "Last successful data is older than {limit}.",
+    "failed": "Refresh was attempted, but no successful automated refresh is recorded yet.",
+    "unknown": "No automated check is recorded yet (snapshot or static source).",
+}
 LATE_TEXT = " · update not yet published"      # next slot + grace has passed with no newer page
 STALE_PREFIX = "stale since "                  # company label once cached data passes the threshold
 _DATETIME_ATTR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30")
@@ -894,45 +920,103 @@ def badge_html(state: str) -> str:
             f'{HEALTH_LABELS[state]}</span>')
 
 
+METER_CELLS = 5      # decorative pixel meter per source channel; CSS lights cells from data-h
+
+
+def connector_label(config: Config, company: str) -> str:
+    """Public connector name for a company's configured mode; unknown modes fail closed."""
+    mode = config.sources[company]["mode"]
+    if mode not in CONNECTOR_LABELS:
+        raise ValueError("render: no public connector label for a configured mode")
+    return CONNECTOR_LABELS[mode]
+
+
+def attempt_rollup(sources: Iterable[SourceHealth]) -> dict[str, int]:
+    """Source counts per latest-refresh bucket (ROLLUP_KEYS order)."""
+    out = {k: 0 for k in ROLLUP_KEYS}
+    for h in sources:
+        out[ROLLUP_OF[h.attempt]] += 1
+    return out
+
+
+def legend_html() -> str:
+    """Status key list items: fixed glyph, label and meaning per freshness state."""
+    limit = html.escape(age_text(FRESHNESS_THRESHOLD).removesuffix(" ago"))
+    return "".join(f'<div data-s="{s}"><dt>{badge_html(s)}</dt><dd>{HEALTH_MEANINGS[s].format(limit=limit)}</dd></div>'
+                   for s in HEALTH_STATES)
+
+
 def health_html(state: State, config: Config) -> tuple[str, str, str]:
-    """(data-ref attribute, summary line, table rows) for the source-health panel. Fixed wording only."""
+    """(data-ref attribute, summary line, channel list items) for the source array. Fixed wording only."""
     reference = health_reference(state)
     sources = source_health(state, config, reference)
     ref_attr = f' data-ref="{reference.astimezone(IST).isoformat(timespec="seconds")}"' if reference else ""
-    counts = {s: sum(1 for h in sources if h.state == s) for s in HEALTH_STATES}
     total = sum(h.published for h in sources)
-    parts = ['<span class="hs-t">Source health</span>',
-             f'<span class="hs-w"><span class="hs-wl">Worst</span> {badge_html(worst_state(h.state for h in sources))}</span>',
-             f'<span class="hs-n">{len(sources)} source{"" if len(sources) == 1 else "s"}:</span>']
-    for s in HEALTH_STATES:
-        hidden = "" if counts[s] else " hidden"
-        parts.append(f'<span class="hc" data-s="{s}"{hidden}><b>{counts[s]}</b> '
-                     f'<span class="g" aria-hidden="true">{HEALTH_GLYPHS[s]}</span> {HEALTH_LABELS[s]}</span>')
-    parts.append(f'<span class="hs-r">{total} record{"" if total == 1 else "s"}</span>')
-    # Phones keep hs-t, the worst badge and hs-x; the hs-wl word is visually hidden but still read,
-    # and hs-n, hc, hs-r and hs-c are hidden because nearby equivalents stay: #checked in the header,
-    # #total in the stats, per-row status in the expanded table.
-    checked = iso_time(state.checked_at)
-    parts.append(f'<span class="hs-c">Checked {time_html(checked)}</span>' if checked
-                 else '<span class="hs-c">Auto-check pending</span>')
-    if reference:
-        nxt = time_html(next_scheduled(reference), ' id="h-next"')
-        parts.append(f'<span class="hs-x">Next scheduled {nxt}<span id="h-late"></span></span>')
-    else:
-        slots = [dt.datetime(2000, 1, 1, h, SCHEDULE_UTC_MINUTE, tzinfo=dt.timezone.utc).astimezone(IST)
-                 for h in SCHEDULE_UTC_HOURS]
-        parts.append(f'<span class="hs-x">Next scheduled {", ".join(f"{s:%H:%M}" for s in slots)} IST</span>')
+    # Summary: title and records only. Last refresh, result rollup, worst freshness and next run are
+    # shown once, in the status block (status_block_html); per-source states live in the rows below.
+    parts = ['<span class="hs-t"><span class="sl" aria-hidden="true">// 01 </span>Source array</span>',
+             f'<span class="hs-r">{total} record{"" if total == 1 else "s"}</span>']
     rows = []
-    for h in sources:
-        attempt = (f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + ATTEMPT_TEXT[h.attempt]
+    meter = '<span class="ch-m" aria-hidden="true">' + "<i></i>" * METER_CELLS + "</span>"
+    for n, h in enumerate(sources, 1):
+        outcome = f'<span class="oc" data-o="{ROLLUP_OF[h.attempt]}">{ATTEMPT_TEXT[h.attempt]}</span>'
+        attempt = (f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + outcome
         data = (f'{time_html(h.success_at)} <span class="age">{age_text(h.age)}</span>'
                 if h.success_at and h.age is not None else "None yet")
-        rows.append(f'<tr data-h="{h.state}"><th scope="row">{html.escape(h.company)}</th>'
-                    f'<td data-m="Status">{badge_html(h.state)}</td>'
-                    f'<td class="num" data-m="Published">{h.published}</td>'
-                    f'<td data-m="Latest attempt">{attempt}</td>'
-                    f'<td class="h-data" data-m="Last good data">{data}</td></tr>')
-    return ref_attr, "".join(parts), "\n".join(rows)
+        rows.append(f'<li class="ch" data-h="{h.state}"><span class="ch-n" aria-hidden="true">CH{n:02d}</span>'
+                    f'<span class="ch-id"><strong class="ch-name">{html.escape(h.company)}</strong>'
+                    f'<span class="ch-c"><span class="vh">, source connector </span>'
+                    f'{html.escape(connector_label(config, h.company))}</span></span>{badge_html(h.state)}{meter}'
+                    f'<dl class="ch-d"><div class="ch-p"><dt>Published</dt><dd class="num">{h.published}</dd></div>'
+                    f'<div class="ch-a"><dt>Latest attempt</dt><dd>{attempt}</dd></div>'
+                    f'<div class="h-data"><dt>Last good data</dt><dd>{data}</dd></div></dl></li>')
+    # Visual column header for the terminal's source grid; each row still labels its own fields with dt/dd.
+    head = ('<div class="ch-head" aria-hidden="true">' + "".join(f"<span>{c}</span>" for c in CHANNEL_COLUMNS)
+            + "</div>")
+    return ref_attr, "".join(parts), head + \
+        '\n<ol class="ch-list" aria-label="Automated source connectors">\n' + "\n".join(rows) + "\n</ol>"
+
+
+CHANNEL_COLUMNS = ("CH", "Source / connector", "Freshness", "Published", "Latest attempt", "Last good data")
+
+
+def status_block_html(state: State, config: Config) -> str:
+    """`<div><dt>/<dd></div>` rows for the terminal's `<dl class="kvs">` status block. Fixed wording; only
+    checked_at, source health, the attempt rollup, published counts, first_seen and the schedule are read."""
+    reference = health_reference(state)
+    sources = source_health(state, config, reference)
+    roll = attempt_rollup(sources)
+    checked = iso_time(state.checked_at)
+    if checked:
+        # The browser re-ages #st-age from #st-at; at render time it is measured against the reference.
+        at = time_html(checked, ' id="st-at"')
+        last = f'{at} <span class="age" id="st-age">{age_text(reference - checked)}</span>'
+    else:
+        last = "Auto-check pending"
+    result = (f'<b data-o="accepted">{roll["accepted"]}</b>/{len(sources)} sources {ROLLUP_LABELS["accepted"]} · '
+              + " · ".join(f'<span data-o="{k}"><b>{roll[k]}</b> {ROLLUP_LABELS[k]}</span>'
+                           for k in ROLLUP_KEYS if k != "accepted"))
+    published = sum(published_counts(state, config).values())
+    today = state.as_of.isoformat()
+    new_today = sum(1 for r in state.jobs if r.first_seen == today and
+                    max(0, (state.as_of - dt.date.fromisoformat(r.posted_date)).days) <= config.max_age_days)
+    openings = f"<b>{published}</b> published · <b>{new_today}</b> first seen today"
+    worst = f"worst {badge_html(worst_state(h.state for h in sources))}"
+    if reference:
+        # #h-next and #h-late live once, here; the browser flags a late update.
+        nxt = time_html(next_scheduled(reference), ' id="h-next"') + '<span id="h-late"></span>'
+    else:
+        nxt = schedule_slots_text()
+    rows = (("Last refresh", last), ("Result", result), ("Openings", openings), ("Freshness", worst),
+            ("Next run", f"{nxt} · scheduled, not guaranteed"))
+    return "".join(f"<div><dt>{k}</dt><dd>{v}</dd></div>" for k, v in rows)
+
+
+def schedule_slots_text() -> str:
+    """The four daily cron slots in IST, for pages with no reference time."""
+    slots = [dt.datetime(2000, 1, 1, h, SCHEDULE_UTC_MINUTE, tzinfo=dt.timezone.utc).astimezone(IST)
+             for h in SCHEDULE_UTC_HOURS]
+    return ", ".join(f"{s:%H:%M}" for s in slots) + " IST"
 
 
 def health_js() -> str:
@@ -940,6 +1024,11 @@ def health_js() -> str:
                     "grace_ms": int((FRESHNESS_THRESHOLD - REFRESH_CADENCE).total_seconds() * 1000),
                     "severity": list(HEALTH_SEVERITY), "glyphs": HEALTH_GLYPHS, "labels": HEALTH_LABELS,
                     "late": LATE_TEXT, "stale": STALE_PREFIX})
+
+
+# Fragments that carry element ids or script data: the template must use each exactly once.
+ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
+                               "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK"})
 
 
 def render(state: State, template: str, config: Config) -> str:
@@ -950,14 +1039,14 @@ def render(state: State, template: str, config: Config) -> str:
     companies = len({r[0] for r in visible})
     day = long_date(state.as_of)
     health_ref, health_summary, health_rows = health_html(state, config)
+    reference = health_reference(state)
+    sources = source_health(state, config, reference)
     values = {
         "DAY": html.escape(day),
-        "DAY_UPPER": html.escape(day.upper()),
         "CHECKED": html.escape(checked_text(state)),
         "TOTAL": str(len(visible)),
         "COMPANIES_MATCHED": str(companies),
         "TODAY_COUNT": str(sum(1 for r in visible if r[5] == 0)),
-        "VISIBLE_ROWS": f"{len(visible)} row{'' if len(visible) == 1 else 's'}",
         "JOBS_JS": "[\n" + ",\n".join(js_json(r) for r in rows) + "\n]",
         "EMPTY_JS": "[\n" + ",\n".join(js_json(list(e)) for e in state.empty_companies) + "]",
         "ORDER_JS": js_json(list(config.companies)),
@@ -968,20 +1057,28 @@ def render(state: State, template: str, config: Config) -> str:
         "HEALTH_REF": health_ref,
         "HEALTH_SUMMARY": health_summary,
         "HEALTH_ROWS": health_rows,
+        "HEALTH_KEY": legend_html(),
+        "STATUS_BLOCK": status_block_html(state, config),
         "HEALTH_JS": health_js(),
+        "CRON": html.escape(SCHEDULE_CRON),
         "FRESH_LIMIT": html.escape(age_text(FRESHNESS_THRESHOLD).removesuffix(" ago")),
+        # Search-panel LED colour; the browser re-ages it alongside the terminal rows.
+        "WORST_STATE": worst_state(h.state for h in sources),
     }
-    used: set[str] = set()
+    used: dict[str, int] = {}
 
     def sub(m: re.Match) -> str:
         if m.group(1) not in values:
             raise ValueError(f"template: unknown placeholder {m.group(1)}")
-        used.add(m.group(1))
+        used[m.group(1)] = used.get(m.group(1), 0) + 1
         return values[m.group(1)]
 
     doc = PLACEHOLDER.sub(sub, template)   # single pass: substituted values are never re-scanned
-    if used != set(values):
-        raise ValueError("template: missing placeholders " + ", ".join(sorted(set(values) - used)))
+    if set(used) != set(values):
+        raise ValueError("template: missing placeholders " + ", ".join(sorted(set(values) - set(used))))
+    repeated = sorted(k for k in ONCE_PLACEHOLDERS if used.get(k, 0) > 1)
+    if repeated:
+        raise ValueError("template: placeholders used more than once " + ", ".join(repeated))
     if doc.lower().count("</script") != template.lower().count("</script"):
         raise ValueError("render: script terminator count changed")
     hits = find_forbidden(doc)
