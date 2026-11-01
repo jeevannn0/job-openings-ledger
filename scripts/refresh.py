@@ -1054,8 +1054,9 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
     for n, h in enumerate(sources, 1):
         cs = state.companies[h.company]
         last = cs.pulls[-1] if cs.pulls and cs.pulls[-1]["at"] == cs.last_attempt else None
-        attempt = ((f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + outcome_html(h.attempt)
-                   + took_html(last["took"] if last else None))
+        # Outcome and how long the pull took; the attempt's clock time is the run's "Last refresh" above, and
+        # the dated history sits under the row.
+        attempt = outcome_html(h.attempt) + took_html(last["took"] if last else None)
         data = (f'{time_html(h.success_at)} <span class="age">{age_text(h.age)}</span>'
                 if h.success_at and h.age is not None else "None yet")
         rows.append(f'<li class="ch" data-h="{h.state}"><span class="ch-n" aria-hidden="true">CH{n:02d}</span>'

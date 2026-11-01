@@ -1916,8 +1916,7 @@ class PullHistoryTests(unittest.TestCase):
         row = channel_row(doc := R.render(self.state, self.template, self.config), "ZS")
         tick = '<span class="oc" data-o="accepted"><span aria-hidden="true">✓</span><span class="vh">Successful refresh</span></span>'
         took = ' <span class="tk"><span class="vh">in </span>~2.5 min</span>'
-        self.assertIn(f'<div class="ch-a"><dt>Last pull</dt><dd><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST'
-                      f'</time> · {tick}{took}</dd></div>', row)
+        self.assertIn(f'<div class="ch-a"><dt>Last pull</dt><dd>{tick}{took}</dd></div>', row)   # no clock time here
         self.assertIn(f'<li><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST</time> · {tick}{took} · '
                       '<span class="pd"><b class="pa">+2 new</b></span> · 3 total</li>'
                       f'<li><time datetime="2026-10-31T11:53:00+05:30">31 Oct 11:53 IST</time> · {tick} · '
@@ -3346,13 +3345,17 @@ class SourceHealthTests(unittest.TestCase):
             self.assertTrue(section[m.end():].startswith("</span>"))
         self.assertIn('<dt>Freshness</dt><dd><span class="st st-failed">', status_block(doc))
         self.assertNotIn('class="hc"', section)
-        self.assertRegex(chs["GE Vernova"][1], r'<time datetime="[^"]+">[^<]+</time> · <span class="oc" '
-                                               r'data-o="failed">No successful automated refresh yet, snapshot '
-                                               r'shown</span>')
-        self.assertIn('</time> · <span class="oc" data-o="accepted"><span aria-hidden="true">✓</span><span class="vh">Successful refresh</span></span>', chs["Siemens"][1])
-        self.assertIn('</time> · <span class="oc" data-o="held">Refresh held, cached data kept</span>',
+        # Last pull is the outcome (and, once timed, how long it took); its clock time is not repeated here,
+        # since every source is pulled in the run named by the status block's Last refresh.
+        self.assertIn('<dt>Last pull</dt><dd><span class="oc" data-o="failed">No successful automated refresh yet, '
+                      'snapshot shown</span></dd>', chs["GE Vernova"][1])
+        self.assertIn('<dt>Last pull</dt><dd><span class="oc" data-o="accepted"><span aria-hidden="true">✓</span>'
+                      '<span class="vh">Successful refresh</span></span></dd>', chs["Siemens"][1])
+        self.assertIn('<dt>Last pull</dt><dd><span class="oc" data-o="held">Refresh held, cached data kept</span></dd>',
                       chs["JPMorganChase"][1])
         self.assertIn('<dd><span class="oc" data-o="pending">No attempt recorded</span></dd>', chs["IQVIA"][1])
+        for _s, rest in chs.values():
+            self.assertNotIn('<dt>Last pull</dt><dd><time', rest)
         self.assertIn("<dd>None yet</dd>", chs["IQVIA"][1])
         # Every channel names its fields with dt/dd pairs, so each value has a programmatic label.
         for company, (_s, rest) in chs.items():
@@ -3362,9 +3365,9 @@ class SourceHealthTests(unittest.TestCase):
         for value in re.findall(r'<time[^>]* datetime="([^"]+)"', section):
             self.assertRegex(value, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30$")
             self.assertIsNotNone(dt.datetime.fromisoformat(value))
-        words = re.findall(r'</time> · <span class="oc" data-o="[a-z]+">(?:<span aria-hidden="true">✓</span><span class="vh">)?'
-                           r'([A-Za-z ,;]+)<', section)
-        self.assertEqual(len(words), 5)                      # every recorded attempt, IQVIA has none
+        words = re.findall(r'<dt>Last pull</dt><dd><span class="oc" data-o="[a-z]+">'
+                           r'(?:<span aria-hidden="true">✓</span><span class="vh">)?([A-Za-z ,;]+)<', section)
+        self.assertEqual(len(words), 6)                      # one outcome per source; IQVIA's is "No attempt recorded"
         for word in words:
             self.assertIn(word, R.ATTEMPT_TEXT.values())
         # A success shows as a tick with its words kept for screen readers; nothing else gets a glyph.
@@ -3436,7 +3439,7 @@ class SourceHealthTests(unittest.TestCase):
         self.set_company("ZS", status="stale", detail="zzreason HTTP 503", last_success=None, last_attempt=t)
         self.state.jobs = [r for r in self.state.jobs if r.company != "ZS"]
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('</time> · <span class="oc" data-o="failed">No successful automated refresh yet</span></dd>',
+        self.assertIn('<dt>Last pull</dt><dd><span class="oc" data-o="failed">No successful automated refresh yet</span></dd>',
                       channels(health_section(doc))["ZS"][1])
         self.assertNotIn("zzreason", doc)
         self.assertNotIn("503", health_section(doc))
