@@ -3424,9 +3424,20 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r'\brole="([^"]+)"', doc)), {"status", "search", "group"})
         self.assertEqual(doc.count('role="status"'), 1)
         style = style_of(doc)
+        # The splash scope (.nv rules) is the one place allowed a radial vignette and an inline data-URI grain
+        # texture; the page itself stays flat and asset-free.
+        page_style = style
+        for rule in re.findall(r"[^{}]*\.nv[^{}]*\{[^{}]*\}", style):
+            page_style = page_style.replace(rule, "", 1)
         for banned in ("@import", "url(", "@font-face", "radial-gradient", "conic-gradient", "backdrop-filter",
                        "scanline"):
-            self.assertNotIn(banned, style.lower(), banned)
+            self.assertNotIn(banned, page_style.lower(), banned)
+        self.assertEqual(style.count("url("), 2)                            # the grain texture and its inner filter ref
+        self.assertIn("background:url(\"data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' width='160' "
+                      "height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' "
+                      "stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .64 0 0 0 0 .36 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E"
+                      "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
+        self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
         self.assertNotRegex(doc, r"(?i)<link\b|<img\b|<iframe\b|<svg\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
                                  r"setInterval|requestAnimationFrame|<table")
         self.assertNotRegex(R.read_text(os.path.join(ROOT, R.TEMPLATE_PATH)), r"https?://")
@@ -3681,10 +3692,11 @@ class SourceHealthTests(unittest.TestCase):
                         'if(e.textContent!==s)e.textContent=s};'):
             self.assertIn(snippet, script, snippet)
         self.assertLess(script.index('put("total",'), script.index("announce(visibleJobs.length"))
-        self.assertEqual(script.count("setTimeout("), 2)        # the live-region debounce and the first logo glitch
+        self.assertEqual(script.count("setTimeout("), 3)        # live-region debounce, first logo glitch, splash ceiling
         # The search-panel counters are the only visible copy; the left-aside mirrors are gone.
+        markup = doc.replace(style_of(doc), "")        # the splash CSS uses radial-gradient's closest-side keyword
         for gone in ("-side", "week-side", "in the last 7 days"):
-            self.assertNotIn(gone, doc, gone)
+            self.assertNotIn(gone, markup, gone)
         for mid in ("total", "companies", "today"):
             self.assertEqual(len(re.findall(rf'<dd id="{mid}">\d+</dd>', doc)), 1, mid)
         self.assertIn('<dl class="stats"><div class="stat"><dt>Openings</dt><dd id="total">', doc)
@@ -4039,9 +4051,15 @@ class SourceHealthTests(unittest.TestCase):
         secs = lambda t: float(t[:-2]) / 1000 if t.endswith("ms") else float(t[:-1])   # noqa: E731
         durations = dict(re.findall(r"--(dur-[a-z]+):([\d.]+m?s)", style))
         self.assertEqual(durations, {"dur-press": "90ms", "dur-fast": ".15s", "dur-base": ".2s", "dur-slow": ".32s"})
+        # The splash (every rule whose selector mentions .nv) runs on its own clock and is checked separately
+        # below; everything else keeps the short-run rules.
+        splash_rules = re.findall(r"[^{}]*\.nv[^{}]*\{[^{}]*\}", effects)
+        core = effects
+        for rule in splash_rules:
+            core = core.replace(rule, "", 1)
         # The LED pulse is the only infinite animation; everything else is one short run (the caret blinks
         # six times and stops).
-        anims = re.findall(r"animation:([^;}]+)", effects)
+        anims = re.findall(r"animation:([^;}]+)", core)
         self.assertEqual([a for a in anims if "infinite" in a], ["led-pulse 2s ease-in-out infinite"])
         self.assertEqual(style.count("infinite"), 1)
         self.assertIn("blink .5s steps(1) 6", anims)
@@ -4094,13 +4112,62 @@ class SourceHealthTests(unittest.TestCase):
             self.assertTrue(times, decl)
             self.assertLess(max(secs(t) for t in times), 0.6, decl)
         for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink", "glitch-x",
-                     "glitch-a", "glitch-b"):
+                     "glitch-a", "glitch-b", "nv-on", "nv-flash", "nv-grain", "nv-type", "nv-cut", "nv-acq", "nv-lock",
+                     "nv-off", "nv-off2"):
             self.assertIn(f"@keyframes {name}{{", style)
-        self.assertEqual(style.count("@keyframes"), 10)
+        self.assertEqual(style.count("@keyframes"), 19)
         # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
         # terminal's four output blocks stagger by 90ms and all finish within .7s.
         self.assertEqual(re.findall(r"animation-delay:([^;}]+)", effects), ["calc(var(--i)*40ms)",
                                                                             "calc(var(--d)*90ms)"])
+        # Splash: a violet night-vision scope that powers on, scans the mark in, locks and powers off. It is an
+        # overlay (the page is complete underneath), finite (every run ends by 1.8s, a 2.2s script ceiling
+        # removes it regardless), shown once per session (decided in the head before first paint), skippable by
+        # tap or key, and never shown under reduced motion. Nothing in it is infinite.
+        self.assertGreaterEqual(len(splash_rules), 20)
+        ends = []
+        for rule in splash_rules:
+            for decl in re.findall(r"animation:([^;}]+)", rule):
+                for part in decl.split(","):
+                    times = re.findall(r"(?<![\w.-])\d*\.?\d+m?s\b", part)
+                    count = re.search(r"\)\s+(\d+)\s*$", part.strip() + " ") or re.search(r"\b(\d+)\s*$", part.strip())
+                    reps = int(count.group(1)) if count and " infinite" not in part else 1
+                    dur = secs(times[0]) if times else 0
+                    delay = secs(times[1]) if len(times) > 1 else 0
+                    self.assertNotIn("infinite", part)
+                    ends.append(delay + dur * reps)
+        self.assertLessEqual(max(ends), 1.8)
+        self.assertIn(".nv{position:fixed;inset:0;z-index:50;overflow:hidden;background:hsl(var(--void-deep));color:hsl(var(--signal));"
+                      "cursor:pointer;animation:nv-off .3s cubic-bezier(.2,.7,.2,1) 1.5s both}", effects)
+        self.assertIn(".nv.nv-x{animation:nv-off2 .3s cubic-bezier(.2,.7,.2,1) both}html[data-noboot] .nv{display:none}", effects)
+        self.assertIn(".nv{display:none}", reduced)
+        self.assertIn("html:not([data-noboot]) .nv~main.boot-in{animation:boot-in .5s cubic-bezier(.2,.7,.2,1) 1.45s backwards}",
+                      effects)
+        self.assertIn(".nv-g{position:absolute;inset:-25%;background:url(\"data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2F", effects)
+        self.assertIn("nv-grain .4s steps(4) 4}", effects)                   # grain jitters for 1.6s, then stops
+        self.assertIn("@keyframes nv-on{0%{clip-path:inset(50% 0 50% 0)}", style)   # CRT line opens into the scope
+        self.assertIn("@keyframes nv-off{0%{clip-path:inset(0);opacity:1}60%{clip-path:inset(49.5% 0 49.5% 0);opacity:1}"
+                      "100%{clip-path:inset(50% 0 50% 0);opacity:0}}", style)
+        self.assertEqual(re.search(r"@keyframes nv-off\{(.*?)\}\}", style).group(1),
+                         re.search(r"@keyframes nv-off2\{(.*?)\}\}", style).group(1))   # the skip restarts the same exit
+        head = doc[:doc.index("<style>")]
+        self.assertIn('try{if(sessionStorage.getItem("k9boot"))document.documentElement.dataset.noboot=""}catch(e){}</script>', head)
+        self.assertIn('<a class="skip" href="#main" target="_self">Skip to the page</a>\n<div class="nv" id="boot" aria-hidden="true">'
+                      '<div class="nv-s"><div class="nv-g"></div><div class="nv-sl"></div><div class="nv-v"></div>'
+                      '<div class="nv-m"><pre class="nv-lf"></pre></div><div class="nv-hud">', doc)
+        self.assertIn('<p class="nv-r nv-r1">K9 · nv scope</p><p class="nv-r nv-r2">', doc)
+        self.assertRegex(doc, r'<p class="nv-r nv-r2">\d+ openings</p><p class="nv-r nv-r3"><span class="nv-t1">acquiring signal'
+                              r'</span><span class="nv-t2">target locked</span></p><p class="nv-r nv-r4">tap to skip</p></div></div>'
+                              r'<div class="nv-f"></div></div>\n<main id="main" class="container boot-in">')
+        self.assertEqual(doc.count('class="nv-lf"'), 1)                       # the mark text is cloned by script
+        for snippet in ('const boot=$("#boot");if(boot){boot.querySelector(".nv-lf").textContent=lf0.textContent;let done=false;',
+                        'const bye=()=>{if(done)return;done=true;boot.remove();try{sessionStorage.setItem("k9boot","1")}catch(e){}'
+                        'glitch()},skip=()=>{if(!done)boot.classList.add("nv-x")};',
+                        'if(RM.matches||document.hidden||getComputedStyle(boot).display==="none")bye();',
+                        'else{boot.addEventListener("animationend",e=>{if(e.target===boot)bye()});'
+                        'boot.addEventListener("pointerdown",skip);document.addEventListener("keydown",skip,{once:true});'
+                        'setTimeout(bye,2200)}}'):
+            self.assertIn(snippet, main_script(doc), snippet)
         steps = [int(d) for d in re.findall(r'<div class="tb" style="--d:(\d+)">', doc)]
         self.assertEqual(steps, [0, 1, 2, 3, 4])
         self.assertLess(max(steps) * 0.09 + 0.24, 0.7)
@@ -4270,7 +4337,8 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn(':root{color-scheme:dark;', doc)
         head = doc[:doc.index("<style>")]
         self.assertIn('<script>try{if(localStorage.getItem("theme")==="light"){document.documentElement.dataset.theme='
-                      '"light";document.querySelector(\'meta[name="color-scheme"]\').content="light"}}catch(e){}</script>',
+                      '"light";document.querySelector(\'meta[name="color-scheme"]\').content="light"}}catch(e){}'
+                      'try{if(sessionStorage.getItem("k9boot"))document.documentElement.dataset.noboot=""}catch(e){}</script>',
                       head)
         script = main_script(doc)
         self.assertIn('root.dataset.theme=t;csm.content=t;try{localStorage.setItem("theme",t)}catch(e){}', script)
