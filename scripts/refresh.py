@@ -97,7 +97,7 @@ MAX_REDIRECTS = 3
 BLOCK_TRIP = 3                 # consecutive blocked page checks before a source stops probing
 REMOVAL_GUARD_MIN = 3          # a run may not remove >= this many rows AND more than half
 REMOVAL_DETAIL = "removal guard"
-REFRESH_CADENCE = dt.timedelta(hours=6)   # matches the workflow cron; a held removal needs a re-check this much later
+REFRESH_CADENCE = dt.timedelta(hours=6)   # a held removal needs a re-check this much later (two schedule slots)
 MAX_HOLD_IDS = 2000
 SHRINK_MIN_PRIOR = 10          # listing-size shrink guard applies once a listing had this many
 SHRINK_DETAIL = "suspicious listing shrink"
@@ -829,10 +829,13 @@ def checked_html(state: State) -> str:
 # CONNECTOR_LABELS name (never a URL or host) and each pull's PULL_FIELDS. detail, screened, removal_hold,
 # listing_total, stale_since and last_discovery_attempt never reach the page.
 
-FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # one refresh cadence plus scheduler slack
-SCHEDULE_CRON = "23 */6 * * *"          # UTC; must match .github/workflows/refresh.yml
+# The refresh is scheduled every three hours, twice as often as the freshness window needs: GitHub's
+# scheduler runs cron slots hours late at busy times and sometimes drops them outright (two of the four
+# six-hourly slots on 1 Nov 2026 never ran). A run that finds nothing new is cheap and says "no change".
+FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # two schedule slots plus slack: one dropped slot never goes stale
+SCHEDULE_CRON = "23 */3 * * *"          # UTC; must match .github/workflows/refresh.yml
 SCHEDULE_UTC_MINUTE = 23
-SCHEDULE_UTC_HOURS = (0, 6, 12, 18)     # 05:53, 11:53, 17:53, 23:53 IST
+SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # 05:53, 08:53, 11:53, 14:53, 17:53, 20:53, 23:53, 02:53 IST
 HEALTH_STATES = ("live", "degraded", "stale", "failed", "unknown")     # display order
 HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least to most severe
 HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",
@@ -1136,9 +1139,9 @@ def status_block_html(state: State, config: Config) -> str:
 
 
 def schedule_slots_text() -> str:
-    """The four daily cron slots in IST, for pages with no reference time."""
-    slots = [dt.datetime(2000, 1, 1, h, SCHEDULE_UTC_MINUTE, tzinfo=dt.timezone.utc).astimezone(IST)
-             for h in SCHEDULE_UTC_HOURS]
+    """The daily cron slots in IST, in clock order, for pages with no reference time."""
+    slots = sorted((dt.datetime(2000, 1, 1, h, SCHEDULE_UTC_MINUTE, tzinfo=dt.timezone.utc).astimezone(IST)
+                    for h in SCHEDULE_UTC_HOURS), key=lambda s: (s.hour, s.minute))
     return ", ".join(f"{s:%H:%M}" for s in slots) + " IST"
 
 

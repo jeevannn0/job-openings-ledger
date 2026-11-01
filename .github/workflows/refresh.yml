@@ -2,7 +2,9 @@ name: Refresh job ledger
 
 on:
   schedule:
-    - cron: "23 */6 * * *"   # UTC; minute 23 avoids the top-of-hour scheduler rush
+    # UTC; minute 23 avoids the top-of-hour scheduler rush. Every three hours, twice what the freshness
+    # window needs, because GitHub runs scheduled slots late at busy times and sometimes drops them.
+    - cron: "23 */3 * * *"
   workflow_dispatch:
   # A human push to the default branch takes the publish-only path below: it re-renders and deploys
   # the committed state without contacting any employer site. The refresh job's own commit is pushed
