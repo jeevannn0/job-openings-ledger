@@ -1858,7 +1858,7 @@ class PullHistoryTests(unittest.TestCase):
             '</dl><details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>last 3 pulls</summary>'
             '<ol class="pl-list">'
             '<li><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST</time> · '
-            '<span class="oc" data-o="accepted">Successful refresh</span> · <span class="pd"><b class="pa">+3 new</b> · '
+            '<span class="oc" data-o="accepted"><span aria-hidden="true">✓</span><span class="vh">Successful refresh</span></span> · <span class="pd"><b class="pa">+3 new</b> · '
             '<span class="pr">−1 removed</span></span> · 9 total</li>'
             '<li><time datetime="2026-10-31T11:53:00+05:30">31 Oct 11:53 IST</time> · '
             '<span class="oc" data-o="held">Refresh held, cached data kept</span> · <span class="pd">'
@@ -1869,7 +1869,7 @@ class PullHistoryTests(unittest.TestCase):
         self.assertIn('<span class="pd"><b class="pa">+2 new</b></span> · 3 total</li>', channel_row(doc, "ZS"))
         # A seeded entry has no added/removed counts, so it shows only the total.
         self.assertIn('last 1 pull</summary><ol class="pl-list"><li><time datetime="2026-10-31T16:38:00+05:30">'
-                      '31 Oct 16:38 IST</time> · <span class="oc" data-o="accepted">Successful refresh</span> · '
+                      '31 Oct 16:38 IST</time> · <span class="oc" data-o="accepted"><span aria-hidden="true">✓</span><span class="vh">Successful refresh</span></span> · '
                       '5 total</li></ol></details></li>', channel_row(doc, "IQVIA"))
         iqvia_pulls = channel_row(doc, "IQVIA").split("<details")[1]
         for gone in ('class="pd"', 'class="nc"', "published"):
@@ -3303,7 +3303,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertRegex(chs["GE Vernova"][1], r'<time datetime="[^"]+">[^<]+</time> · <span class="oc" '
                                                r'data-o="failed">No successful automated refresh yet, snapshot '
                                                r'shown</span>')
-        self.assertIn('</time> · <span class="oc" data-o="accepted">Successful refresh</span>', chs["Siemens"][1])
+        self.assertIn('</time> · <span class="oc" data-o="accepted"><span aria-hidden="true">✓</span><span class="vh">Successful refresh</span></span>', chs["Siemens"][1])
         self.assertIn('</time> · <span class="oc" data-o="held">Refresh held, cached data kept</span>',
                       chs["JPMorganChase"][1])
         self.assertIn('<dd><span class="oc" data-o="pending">No attempt recorded</span></dd>', chs["IQVIA"][1])
@@ -3316,10 +3316,15 @@ class SourceHealthTests(unittest.TestCase):
         for value in re.findall(r'<time[^>]* datetime="([^"]+)"', section):
             self.assertRegex(value, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30$")
             self.assertIsNotNone(dt.datetime.fromisoformat(value))
-        words = re.findall(r'</time> · <span class="oc" data-o="[a-z]+">([A-Za-z ,;]+)<', section)
+        words = re.findall(r'</time> · <span class="oc" data-o="[a-z]+">(?:<span aria-hidden="true">✓</span><span class="vh">)?'
+                           r'([A-Za-z ,;]+)<', section)
         self.assertEqual(len(words), 5)                      # every recorded attempt, IQVIA has none
         for word in words:
             self.assertIn(word, R.ATTEMPT_TEXT.values())
+        # A success shows as a tick with its words kept for screen readers; nothing else gets a glyph.
+        self.assertEqual(section.count('<span aria-hidden="true">✓</span><span class="vh">Successful refresh</span>'),
+                         section.count('data-o="accepted">'))
+        self.assertNotRegex(section, r'data-o="(?:held|failed|pending)"><span aria-hidden')
         for gone in ("Not completed", "overdue"):
             self.assertNotIn(gone, doc, gone)
         for gone in ("Completed", "outage", " down", "unavailable"):
@@ -3361,6 +3366,13 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(R.stale_labels(self.state, self.config)["Siemens"], "stale since Oct 31")
 
     def test_attempt_wording_is_fixed(self):
+        # A success renders as a tick with its wording kept for screen readers; every other outcome keeps its
+        # words, since those are the ones that need explaining.
+        self.assertEqual(R.outcome_html("accepted"), '<span class="oc" data-o="accepted"><span aria-hidden="true">✓</span>'
+                                                     '<span class="vh">Successful refresh</span></span>')
+        for key, text in R.ATTEMPT_TEXT.items():
+            if key != "accepted":
+                self.assertEqual(R.outcome_html(key), f'<span class="oc" data-o="{R.ROLLUP_OF[key]}">{text}</span>', key)
         self.assertEqual(R.ATTEMPT_TEXT, {
             "accepted": "Successful refresh", "held": "Refresh held, cached data kept",
             "first_snapshot": "No successful automated refresh yet, snapshot shown",

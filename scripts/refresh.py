@@ -891,6 +891,15 @@ def classify_source(status: str, last_success: str | None, last_attempt: str | N
     return "live" if status == "ok" else "degraded"
 
 
+def outcome_html(key: str) -> str:
+    """An attempt outcome for the terminal. A success is a tick (its wording stays for screen readers); every
+    other outcome keeps its words, because those are the ones that need explaining."""
+    text = ATTEMPT_TEXT[key]
+    if key == "accepted":
+        text = f'<span aria-hidden="true">✓</span><span class="vh">{text}</span>'
+    return f'<span class="oc" data-o="{ROLLUP_OF[key]}">{text}</span>'
+
+
 def attempt_outcome(status: str, last_success: str | None, last_attempt: str | None, published: int) -> str:
     """Key of ATTEMPT_TEXT. Only status and timestamps are read; a held run's reason never reaches the page."""
     if iso_time(last_attempt) is None:
@@ -1019,8 +1028,7 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
     rows = []
     meter = '<span class="ch-m" aria-hidden="true">' + "<i></i>" * METER_CELLS + "</span>"
     for n, h in enumerate(sources, 1):
-        outcome = f'<span class="oc" data-o="{ROLLUP_OF[h.attempt]}">{ATTEMPT_TEXT[h.attempt]}</span>'
-        attempt = (f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + outcome
+        attempt = (f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + outcome_html(h.attempt)
         data = (f'{time_html(h.success_at)} <span class="age">{age_text(h.age)}</span>'
                 if h.success_at and h.age is not None else "None yet")
         rows.append(f'<li class="ch" data-h="{h.state}"><span class="ch-n" aria-hidden="true">CH{n:02d}</span>'
@@ -1059,8 +1067,7 @@ def pulls_html(pulls: list) -> str:
             delta = f' · <span class="pd">{" · ".join(parts)}</span>' if parts else ' · <span class="nc">no change</span>'
         else:
             delta = ""
-        items.append(f'<li>{time_html(at)} · <span class="oc" data-o="{ROLLUP_OF[p["result"]]}">'
-                     f'{ATTEMPT_TEXT[p["result"]]}</span>{delta} · {int(p["published"])} total</li>')
+        items.append(f'<li>{time_html(at)} · {outcome_html(p["result"])}{delta} · {int(p["published"])} total</li>')
     n = len(pulls)
     return (f'<details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>'
             f'last {n} pull{"" if n == 1 else "s"}</summary><ol class="pl-list">' + "".join(items) + "</ol></details>")
