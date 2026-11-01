@@ -3975,7 +3975,7 @@ class SourceHealthTests(unittest.TestCase):
         # Phone header is a two-row grid: the mark + a short LIVE badge (" · automated" hidden) spanning the rest
         # of row one, then both bracket buttons together on row two, pushed to the right.
         self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.wm-row{display:grid;grid-template-columns:auto 1fr auto}"
-                                                    ".live{grid-column:2/4}.live+.th-m{grid-column:2;justify-self:end}"
+                                                    ".live{grid-column:2/4}.live+.th-m{grid-column:1/3;justify-self:end}"
                                                     ".live+.th-m+.th-m{grid-column:3}.th-m:not([hidden])"))
         self.assertNotIn(".lv-x", base)
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
