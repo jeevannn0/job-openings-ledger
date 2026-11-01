@@ -6,8 +6,7 @@
     {"method": "GET", "url": "https://iqvia.wd1.myworkdayjobs.com/robots.txt", "status": 404, "body": "not found"},
     {"method": "GET", "url": "https://careers.gevernova.com/robots.txt", "status": 200, "content_type": "text/plain", "body": "User-agent: *\nDisallow: /admin/\n"},
 
-    {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/?folderRecordsPerPage=6&folderOffset=0&search=Bangalore", "status": 200, "body_file": "siemens_list.html"},
-    {"method": "POST", "url": "https://jobs.siemens.com/en_US/externaljobs/SearchJobs", "status": 200, "body_file": "siemens_list.html"},
+    {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/?folderRecordsPerPage=6&folderOffset=0&search=Bangalore&folderSort=postedDate&folderSortDirection=DESC", "status": 200, "body_file": "siemens_list.html"},
     {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/528001", "status": 200, "body_file": "siemens_detail_new.html"},
     {"method": "GET", "url": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/520000", "status": 200, "body_file": "siemens_detail_old.html"},
     {"method": "GET", "url_prefix": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/", "status": 200, "body_file": "siemens_detail.html"},

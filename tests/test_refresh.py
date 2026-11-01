@@ -261,10 +261,14 @@ class SeedAndRenderTests(unittest.TestCase):
         doc, legacy = R.render(state, template, config), R.read_text(LEGACY_PAGE)
         snippets = [
             re.search(r'<div class="field"><label for="closing">.*?</select></div>', legacy, re.S).group(0),
-            re.search(r"daysToClose=s=>[^,]*,fmtClose=[^;]*;", legacy).group(0),
+            # The closing day lost its zero padding ("Nov 5", like every other date on the page).
+            re.search(r"daysToClose=s=>[^,]*,fmtClose=[^;]*;", legacy).group(0).replace("${s.slice(8,10)}",
+                                                                                         "${+s.slice(8,10)}"),
         ]
         for s in snippets:
             self.assertIn(s, doc)
+        self.assertIn("fmtClose=s=>`${MON[+s.slice(5,7)-1]} ${+s.slice(8,10)}`;", doc)
+        self.assertNotIn("${s.slice(8,10)}", doc)
         # match() is the legacy function plus the one "New today" clause added since.
         legacy_match = re.search(r"function match\(r\)\{.*?\}return true\}", legacy).group(0)
         now_match = re.search(r"function match\(r\)\{.*?\}return true\}", doc).group(0)
@@ -949,29 +953,121 @@ class SiemensTests(unittest.TestCase):
         def list_page(url, _b):
             start = next(page_ids)
             return resp(200, siemens_list_page(range(start, start + 6)))
-        routes = [("GET", R.SIEMENS_SEARCH + "/*", list_page), ("POST", R.SIEMENS_SEARCH, resp(200, "<html>sorted</html>")),
-                  *live_siemens_routes()]
+        routes = [("GET", R.SIEMENS_SEARCH + "/*", list_page), *live_siemens_routes()]
         res, t = self.run_siemens(None, routes, {"max_list_pages": 4, "probe_every_pages": 2, "max_new_details": 3})
         self.assertFalse(res.listing_complete)
         self.assertIn("page cap reached", res.detail)
         list_gets = sum(1 for m, u in t.calls if m == "GET" and "SearchJobs" in u)
-        self.assertEqual(list_gets, 1 + 4)                     # session bootstrap + capped pages
+        self.assertEqual(list_gets, 4)                         # the capped pages; no separate bootstrap page
         new_details = sum(1 for _m, u in t.calls if "JobDetail/6" in u)
-        self.assertLessEqual(new_details, 2 + 3)               # probes + capped new details
-        self.assertLessEqual(t.count("JobDetail"), 23 + 2 + 3)
+        self.assertLessEqual(new_details, 3 + 3)               # probes (pages 0, 2 and the capped last) + new details
+        self.assertLessEqual(t.count("JobDetail"), 23 + 3 + 3)
+
+    def test_listing_pages_carry_the_sort_and_nothing_is_posted(self):
+        """The portal keeps no session sort: a sorted form POST was followed by relevance-ordered GETs, which
+        screened stale roles and stopped discovery early (1 Nov 2026). Every page asks for the sort itself."""
+        routes = [("GET", R.SIEMENS_SEARCH + "/*", lambda u, _b: resp(200, siemens_list_page(range(
+                      int(re.search(r"folderOffset=(\d+)", u).group(1)) + 620000,
+                      int(re.search(r"folderOffset=(\d+)", u).group(1)) + 620006)))),
+                  ("GET", "https://jobs.siemens.com/en_US/externaljobs/JobDetail/62*",
+                   lambda u, _b: resp(200, siemens_detail_page(u.rsplit("/", 1)[-1], "01-Sep-2026"))),
+                  *live_siemens_routes()]
+        res, t = self.run_siemens(None, routes, {"max_new_details": 0})
+        self.assertTrue(res.listing_complete)
+        self.assertIn("window complete (1 pages)", res.detail)
+        listing = [(m, u) for m, u in t.calls if "SearchJobs" in u]
+        self.assertEqual(listing, [("GET", R.SIEMENS_LIST.format(offset=0, search="Bangalore"))])
+        self.assertIn("&folderSort=postedDate&folderSortDirection=DESC", R.SIEMENS_LIST)
+        self.assertFalse([m for m, _u in t.calls if m != "GET"])
+        self.assertFalse(hasattr(R, "SIEMENS_SORT_BODY"))
+        self.assertEqual(R.SIEMENS_PAGE_SIZE, 6)
+
+    def test_listing_unavailable_on_the_first_page_is_reported(self):
+        routes = [("GET", R.SIEMENS_SEARCH + "/*", resp(503, "<html>down</html>")), *live_siemens_routes()]
+        res, t = self.run_siemens(None, routes, {"max_new_details": 0})
+        self.assertFalse(res.listing_complete)
+        self.assertIn("discovery listing unavailable", res.detail)
+        self.assertTrue(res.ok)                                # liveness still passed; discovery retried next day
+        self.assertEqual(len(res.live), 23)
+
+    def test_probe_runs_on_the_last_page_the_cap_allows(self):
+        """The window ends just inside the page cap but between regular probes: the capped last page is
+        probed, so the listing is still recognised as complete instead of 'page cap reached'."""
+        def list_page(u, _b):
+            offset = int(re.search(r"folderOffset=(\d+)", u).group(1))
+            return resp(200, siemens_list_page(range(630000 + offset, 630006 + offset)))
+        # Pages 0..2: page 0's probe is recent, page 2 (the cap's last page) is older than the window.
+        posted = {"630005": "30-Oct-2026", "630017": "01-Sep-2026"}
+        routes = [("GET", R.SIEMENS_SEARCH + "/*", list_page),
+                  ("GET", "https://jobs.siemens.com/en_US/externaljobs/JobDetail/63*",
+                   lambda u, _b: resp(200, siemens_detail_page(u.rsplit("/", 1)[-1],
+                                                               posted.get(u.rsplit("/", 1)[-1], "15-Oct-2026")))),
+                  *live_siemens_routes()]
+        res, t = self.run_siemens(None, routes, {"max_list_pages": 3, "probe_every_pages": 5, "max_new_details": 0})
+        self.assertTrue(res.listing_complete)
+        self.assertIn("discovery window complete (3 pages)", res.detail)
+        probes = [u.rsplit("/", 1)[-1] for _m, u in t.calls if "JobDetail/63" in u]
+        self.assertEqual(probes, ["630005", "630017"])         # page 0 and the capped page 2; page 1 skipped
+        self.assertEqual(sum(1 for m, u in t.calls if m == "GET" and "SearchJobs" in u), 3)
 
     def test_unordered_listing_is_not_authoritative(self):
         dates = iter(["10-Oct-2026", "20-Oct-2026"])
         routes = [("GET", R.SIEMENS_SEARCH + "/*", lambda u, _b: resp(200, siemens_list_page(range(
                       int(re.search(r"folderOffset=(\d+)", u).group(1)) + 610000,
                       int(re.search(r"folderOffset=(\d+)", u).group(1)) + 610006)))),
-                  ("POST", R.SIEMENS_SEARCH, resp(200, "<html>sorted</html>")),
                   ("GET", "https://jobs.siemens.com/en_US/externaljobs/JobDetail/61*",
                    lambda u, _b: resp(200, siemens_detail_page(u.rsplit("/", 1)[-1], next(dates, "01-Oct-2026")))),
                   *live_siemens_routes()]
         res, _t = self.run_siemens(None, routes, {"probe_every_pages": 1, "max_new_details": 0})
         self.assertFalse(res.listing_complete)
         self.assertIn("not date-ordered", res.detail)
+
+    def test_detail_locations_are_one_place_per_list_item(self):
+        """The detail page lists several locations as <li> items of 'City - State - Country'; they must stay
+        separate places and show as cities (the one row this adapter had added read 'Bangalore - Karnataka -
+        India', and a two-location role would have become one run-together place)."""
+        config, _e, _s, _t = env()
+        page = siemens_detail_page("640001", "30-Oct-2026").replace(
+            '<div class="article__content__view__field__value">Bangalore, Karnataka, India</div>',
+            '<div class="article__content__view__field__value"><ul class="list list--bullet list--locations">'
+            '<li class="list__item">\n Bangalore - Karnataka - India\n</li>'
+            '<li class="list__item">\n Pune - Maharashtra - India\n</li></ul></div>')
+        t = FakeTransport([("GET", "https://jobs.siemens.com/en_US/externaljobs/JobDetail/640001", resp(200, page))])
+        f = R.Fetcher(config, 60, transport=t, sleep=lambda _s: None, cookies=True)
+        cache: dict = {}
+        info = R.siemens_detail(f, "640001", cache)
+        self.assertEqual(info.state, "live")
+        self.assertEqual(info.posted, dt.date(2026, 10, 30))
+        self.assertEqual(info.places, ("Bangalore - Karnataka - India", "Pune - Maharashtra - India"))
+        self.assertEqual(R.join_places(R.target_places(info.places, config)), "Bangalore and Pune")
+        self.assertIs(R.siemens_detail(f, "640001", cache), info)   # cached: no second request
+        self.assertEqual(t.count("JobDetail/640001"), 1)
+        # The legacy single-value form still parses.
+        t2 = FakeTransport([("GET", "https://jobs.siemens.com/en_US/externaljobs/JobDetail/640002",
+                             resp(200, siemens_detail_page("640002")))])
+        f2 = R.Fetcher(config, 60, transport=t2, sleep=lambda _s: None, cookies=True)
+        self.assertEqual(R.siemens_detail(f2, "640002", {}).places, ("Bangalore, Karnataka, India",))
+
+
+class PlaceAndExperienceTextTests(unittest.TestCase):
+    def test_target_places_show_the_city_for_comma_and_dash_hierarchies(self):
+        config, _e, _s, _t = env()
+        places = ["Pune - Maharashtra - India", "Bangalore - Karnataka - India", "Kochi, Kerala, India",
+                  "Bengaluru", "Winston-Salem, NC, US"]
+        self.assertEqual(R.target_places(places, config),
+                         ["Bangalore", "Kochi", "Bengaluru", "Pune", "Winston-Salem"])   # targets first
+        self.assertEqual(R.join_places(R.target_places(["Bangalore - Karnataka - India"], config)), "Bangalore")
+
+    def test_experience_snippet_keeps_a_decimal_year_count(self):
+        ok, band, summary, found = R.assess_experience("Requires 1.5+ years of experience in SQL. Strong SQL.", 2)
+        self.assertEqual((ok, band, found), (True, "2", 1.5))
+        self.assertEqual(summary, "1.5+ years of experience in SQL")
+        ok, band, summary, found = R.assess_experience("0.5 - 2 years of relevant experience; Python a plus", 2)
+        self.assertEqual((ok, band, found), (True, "2", 2.0))
+        self.assertEqual(summary, "0.5 - 2 years of relevant experience")
+        # Sentence breaks still end the clause.
+        _ok, _band, summary, _found = R.assess_experience("Minimum 2 years of experience. Degree in CS.", 2)
+        self.assertEqual(summary, "2 years of experience")
 
 
 # --------------------------------------------------------------------------- IQVIA discovery
@@ -2985,9 +3081,9 @@ def source_minimum(company, config, state):
 
     def pages(total, size):
         return -(-total // size)
-    if company == "Siemens":
-        n = (1 + rows + 2 + cfg["max_list_pages"] + cfg["max_list_pages"] // cfg["probe_every_pages"] + 1
-             + cfg["max_new_details"])
+    if company == "Siemens":             # robots, one detail per row, the listing pages, the probes (every few
+        n = (1 + rows + cfg["max_list_pages"] + cfg["max_list_pages"] // cfg["probe_every_pages"] + 2   # pages,
+             + cfg["max_new_details"])                           # a short last page, the capped page), new details
         return n * _per_request(config, "jobs.siemens.com")
     if company == "JPMorganChase":       # boot search plus two target-city facets (Bengaluru, Bangalore)
         n = 1 + 1 + 2 * pages(cfg["max_total"], R.JPM_PAGE) + rows + cfg["max_new_details"]
@@ -3985,6 +4081,27 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn(f"<dd><b>{visible - 1}</b> published · <b>{n}</b> new today</dd>",
                       status_block(R.render(self.state, self.template, self.config)))
 
+    def test_new_today_means_the_same_in_the_tile_the_rows_and_the_status_block(self):
+        """One rule (row field 10 == 0, i.e. days_since(first_seen) clamped at zero) feeds the stats tile, the
+        card data and the terminal, including a row dated after as_of (a run made with the clock set back)."""
+        def counts(doc):
+            rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
+            tile = int(re.search(r'<dd id="today">(\d+)</dd>', doc).group(1))
+            block = int(re.search(r"published · <b>(\d+)</b> new today", status_block(doc)).group(1))
+            return tile, block, sum(1 for r in rows if r[10] == 0 and r[5] <= self.config.max_age_days)
+
+        tile, block, rows = counts(R.render(self.state, self.template, self.config))
+        self.assertEqual(tile, block)
+        self.assertEqual(tile, rows)
+        yesterday = (self.state.as_of - dt.timedelta(days=1)).isoformat()
+        tomorrow = (self.state.as_of + dt.timedelta(days=1)).isoformat()
+        self.state.jobs = [dataclasses.replace(r, first_seen=yesterday) for r in self.state.jobs]
+        self.assertEqual(counts(R.render(self.state, self.template, self.config)), (0, 0, 0))
+        self.state.jobs[0] = dataclasses.replace(self.state.jobs[0], first_seen=tomorrow)
+        self.assertEqual(counts(R.render(self.state, self.template, self.config)), (1, 1, 1))
+        self.assertEqual(R.days_since(tomorrow, self.state.as_of), 0)
+        self.assertEqual(R.days_since(yesterday, self.state.as_of), 1)
+
     def test_status_block_rows_and_placeholder(self):
         self.assertEqual(self.template.count("{{STATUS_BLOCK}}"), 1)
         self.assertIn('<dl class="kvs">{{STATUS_BLOCK}}</dl>', self.template)
@@ -4234,14 +4351,18 @@ class SourceHealthTests(unittest.TestCase):
         self.assertRegex(doc, r'<p class="nv-r nv-r2">\d+ openings</p><p class="nv-r nv-r3"><span class="nv-t1">acquiring signal'
                               r'</span><span class="nv-t2">target locked</span></p><p class="nv-r nv-r4">tap to skip</p></div></div>'
                               r'<div class="nv-f"></div></div>\n<main id="main" class="container boot-in">')
+        # The mark glitches when the splash lifts; on a repeat visit (no splash) only the 600 ms timer runs it,
+        # so the page never glitches twice within its first second.
         for snippet in ('const boot=$("#boot");if(boot){let done=false;',
-                        'const bye=()=>{if(done)return;done=true;boot.remove();try{sessionStorage.setItem("k9boot","1")}catch(e){}'
-                        'glitch()},skip=()=>{if(!done)boot.classList.add("nv-x")};',
+                        'const bye=played=>{if(done)return;done=true;boot.remove();'
+                        'try{sessionStorage.setItem("k9boot","1")}catch(e){}if(played)glitch()},'
+                        'skip=()=>{if(!done)boot.classList.add("nv-x")};',
                         'if(RM.matches||document.hidden||getComputedStyle(boot).display==="none")bye();',
-                        'else{boot.addEventListener("animationend",e=>{if(e.target===boot)bye()});'
+                        'else{boot.addEventListener("animationend",e=>{if(e.target===boot)bye(1)});'
                         'boot.addEventListener("pointerdown",skip);document.addEventListener("keydown",skip,{once:true});'
-                        'setTimeout(bye,2200)}}'):
+                        'setTimeout(bye,2200,1)}}'):
             self.assertIn(snippet, main_script(doc), snippet)
+        self.assertNotIn("bye()}", main_script(doc))      # every path that saw the splash passes the flag
         steps = [int(d) for d in re.findall(r'<div class="tb" style="--d:(\d+)">', doc)]
         self.assertEqual(steps, [0, 1, 2, 3, 4])
         self.assertLess(max(steps) * 0.09 + 0.24, 0.7)

@@ -144,12 +144,13 @@ JOB_ID_RE = {
 
 SIEMENS_BASE = "https://jobs.siemens.com"
 SIEMENS_SEARCH = SIEMENS_BASE + "/en_US/externaljobs/SearchJobs"
-SIEMENS_LIST = SIEMENS_SEARCH + "/?folderRecordsPerPage=6&folderOffset={offset}&search={search}"
+# Newest posted first. The sort is a request parameter, not session state: the portal's sort form POST
+# answers with a sorted page, but the following listing GETs fall back to relevance order (verified
+# 1 Nov 2026), which made discovery stop early or screen stale roles. Every listing page carries the sort.
+SIEMENS_LIST = (SIEMENS_SEARCH + "/?folderRecordsPerPage=6&folderOffset={offset}&search={search}"
+                "&folderSort=postedDate&folderSortDirection=DESC")
 SIEMENS_DETAIL = SIEMENS_BASE + "/en_US/externaljobs/JobDetail/{id}"
-# Server-side session sort (newest posted first); facet field names come from the portal form.
-SIEMENS_SORT_BODY = ("folderSort=postedDate&folderSortDirection=DESC&listFilterMode=true&search={search}"
-                     "&42387_hidden=1&42388_hidden=1&42394=&42395=&timeZone=UTC")
-SIEMENS_PAGE_SIZE = 6
+SIEMENS_PAGE_SIZE = 6              # the portal ignores other folderRecordsPerPage values
 SIEMENS_CARD = re.compile(
     r'article__header__text__title[^"]*"[^>]*>\s*<a[^>]*href="[^"]*JobDetail/(?:[^"/?#]+/)?(\d{5,7})"[^>]*>(.*?)</a>',
     re.S)
@@ -335,6 +336,11 @@ def iso_time(value: object) -> dt.datetime | None:
 
 def stamp(now: dt.datetime) -> str:
     return now.astimezone(IST).isoformat(timespec="minutes")
+
+
+def days_since(day: str, as_of: dt.date) -> int:
+    """Whole days from an ISO date to as_of, never negative (a run dated before a row's date counts as 0)."""
+    return max(0, (as_of - dt.date.fromisoformat(day)).days)
 
 
 def workday_closing(end_date: object) -> str | None:
@@ -1123,9 +1129,9 @@ def status_block_html(state: State, config: Config) -> str:
                         + [f'<span data-o="{k}"><b>{roll[k]}</b> {ROLLUP_LABELS[k]}</span>'
                            for k in ROLLUP_KEYS if k != "accepted" and roll[k]])
     published = sum(published_counts(state, config).values())
-    today = state.as_of.isoformat()
-    new_today = sum(1 for r in state.jobs if r.first_seen == today and
-                    max(0, (state.as_of - dt.date.fromisoformat(r.posted_date)).days) <= config.max_age_days)
+    # The same rule as the page's "New today" tile and the cards' New tag (row field 10 == 0).
+    new_today = sum(1 for r in state.jobs if days_since(r.first_seen, state.as_of) == 0 and
+                    days_since(r.posted_date, state.as_of) <= config.max_age_days)
     openings = f"<b>{published}</b> published · <b>{new_today}</b> new today"
     worst = badge_html(worst_state(h.state for h in sources))
     if reference:
@@ -1162,8 +1168,7 @@ def render(state: State, template: str, config: Config) -> str:
         validate_row(r, config)
     # Row 10: days since the ledger first saw the posting (0 = new today). This is what the feed's "New today"
     # toggle, the New tag on cards and the terminal's "+N new" all mean; the posting's own date is row 5.
-    rows = [r.js_row(state.as_of) + [max(0, (state.as_of - dt.date.fromisoformat(r.first_seen)).days)]
-            for r in state.jobs]
+    rows = [r.js_row(state.as_of) + [days_since(r.first_seen, state.as_of)] for r in state.jobs]
     visible = [r for r in rows if r[5] <= config.max_age_days]
     companies = len({r[0] for r in visible})
     day = long_date(state.as_of)
@@ -1586,7 +1591,8 @@ def assess_experience(text: str, max_years: float, require_cue: bool = True,
         hi = _to_num(m.group(2)) if m.group(2) else lo
         mins.append(lo)
         uppers.append(max(lo, hi))
-        clause = clean_text(re.split(r"[.;\n•]", flat[m.start():m.start() + 200])[0].strip(), 140)
+        # The clause ends at a sentence or list break; a decimal point ("1.5 years") is not one.
+        clause = clean_text(re.split(r"\.(?!\d)|[;\n•]", flat[m.start():m.start() + 200])[0].strip(), 140)
         if clause and clause not in snippets:
             snippets.append(clause)
     if not mins:
@@ -1629,7 +1635,9 @@ def make_row(company: str, jid: str, title: str, exp: str, location: str, url: s
 def target_places(places: Iterable[str], config: Config) -> list[str]:
     hits = [p for p in places if any(c in p.lower() for c in config.cities)]
     rest = [p for p in places if p not in hits]
-    return [p.split(",")[0].strip() for p in hits + rest]
+    # 'Bengaluru, Karnataka, India' (Oracle, Jibe) and 'Bangalore - Karnataka - India' (Avature) both
+    # show as their city.
+    return [re.split(r",| - ", p, maxsplit=1)[0].strip() for p in hits + rest]
 
 
 # --------------------------------------------------------------------------- sources
@@ -1679,9 +1687,12 @@ def siemens_detail(fetcher: Fetcher, jid: str, cache: dict) -> SiemensDetail:
         for m in SIEMENS_FIELD.finditer(raw):
             label = clean_text(strip_html(m.group(1)), 60)
             if label and label not in fields:
-                fields[label] = clean_text(strip_html(m.group(2)), 400)
-        posted = parse_any_date(fields.get("Posted since", ""))
-        places = tuple(p.strip() for p in re.split(r"[;|]", fields.get("Location(s)", "")) if p.strip())
+                fields[label] = strip_html(m.group(2))      # line breaks kept: list items become lines
+        posted = parse_any_date(clean_text(fields.get("Posted since", ""), 400))
+        # Several locations are a <ul> of 'City - State - Country' items, one per line after strip_html;
+        # collapsing whitespace first would run them together into one place.
+        places = tuple(p for p in (clean_text(x, 120) for x in re.split(r"[;|\n]", fields.get("Location(s)", "")))
+                       if p)
         start = raw.find("article__content__view__field")
         body = strip_html(raw[start:] if start >= 0 else raw)[:40000]
         info = SiemensDetail(state, posted, places, body)
@@ -1699,20 +1710,13 @@ class Discovery:
 def siemens_discover(cfg: dict, fetcher: Fetcher, today: dt.date, config: Config, cache: dict) -> Discovery:
     search = urllib.parse.quote(cfg["search_text"])
     cutoff = today - dt.timedelta(days=config.max_age_days)
-    boot = fetcher.request(SIEMENS_LIST.format(offset=0, search=search))   # session cookie
-    if not html_ok(boot):
-        return Discovery([], False, "listing unavailable")
-    sort = fetcher.request(SIEMENS_SEARCH, "POST", body=SIEMENS_SORT_BODY.format(search=search).encode(),
-                           headers={"Content-Type": "application/x-www-form-urlencoded"})
-    if not html_ok(sort):
-        return Discovery([], False, "sort rejected")
     cards: list[tuple[str, str]] = []
     seen: set[str] = set()
     last_probe: dt.date | None = None
     for page in range(cfg["max_list_pages"]):
         resp = fetcher.request(SIEMENS_LIST.format(offset=page * SIEMENS_PAGE_SIZE, search=search))
         if not html_ok(resp):
-            return Discovery(cards, False, f"page {page} unavailable")
+            return Discovery(cards, False, "listing unavailable" if page == 0 else f"page {page} unavailable")
         found = [(m.group(1), clean_text(strip_html(m.group(2)), 160)) for m in SIEMENS_CARD.finditer(resp.text())]
         if not found:
             return Discovery(cards, False, "empty first page" if page == 0 else "list ended before window")
@@ -1721,7 +1725,9 @@ def siemens_discover(cfg: dict, fetcher: Fetcher, today: dt.date, config: Config
                 seen.add(jid)
                 cards.append((jid, title))
         last_page = len(found) < SIEMENS_PAGE_SIZE
-        if page % cfg["probe_every_pages"] == 0 or last_page:
+        # Probe the page's oldest card every few pages, on a short final page, and on the last page the
+        # cap allows, so a window that ends just inside the cap is still recognised as complete.
+        if page % cfg["probe_every_pages"] == 0 or last_page or page == cfg["max_list_pages"] - 1:
             probe = siemens_detail(fetcher, found[-1][0], cache)
             if probe.posted is None:
                 return Discovery(cards, False, "probe date unavailable")
