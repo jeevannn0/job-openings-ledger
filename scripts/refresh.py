@@ -1086,7 +1086,7 @@ def status_block_html(state: State, config: Config) -> str:
     today = state.as_of.isoformat()
     new_today = sum(1 for r in state.jobs if r.first_seen == today and
                     max(0, (state.as_of - dt.date.fromisoformat(r.posted_date)).days) <= config.max_age_days)
-    openings = f"<b>{published}</b> published · <b>{new_today}</b> first seen today"
+    openings = f"<b>{published}</b> published · <b>{new_today}</b> new today"
     worst = f"worst {badge_html(worst_state(h.state for h in sources))}"
     if reference:
         # #h-next and #h-late live once, here; the browser flags a late update.
@@ -1120,7 +1120,10 @@ ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "A
 def render(state: State, template: str, config: Config) -> str:
     for r in state.jobs:
         validate_row(r, config)
-    rows = [r.js_row(state.as_of) for r in state.jobs]
+    # Row 10: days since the ledger first saw the posting (0 = new today). This is what the feed's "New today"
+    # toggle, the New tag on cards and the terminal's "+N new" all mean; the posting's own date is row 5.
+    rows = [r.js_row(state.as_of) + [max(0, (state.as_of - dt.date.fromisoformat(r.first_seen)).days)]
+            for r in state.jobs]
     visible = [r for r in rows if r[5] <= config.max_age_days]
     companies = len({r[0] for r in visible})
     day = long_date(state.as_of)
@@ -1132,7 +1135,7 @@ def render(state: State, template: str, config: Config) -> str:
         "CHECKED": checked_html(state),
         "TOTAL": str(len(visible)),
         "COMPANIES_MATCHED": str(companies),
-        "TODAY_COUNT": str(sum(1 for r in visible if r[5] == 0)),
+        "NEW_TODAY": str(sum(1 for r in visible if r[10] == 0)),
         "JOBS_JS": "[\n" + ",\n".join(js_json(r) for r in rows) + "\n]",
         "EMPTY_JS": "[\n" + ",\n".join(js_json(list(e)) for e in state.empty_companies) + "]",
         "ORDER_JS": js_json(list(config.companies)),

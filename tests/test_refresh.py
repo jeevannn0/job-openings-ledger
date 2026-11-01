@@ -247,7 +247,10 @@ class SeedAndRenderTests(unittest.TestCase):
         legacy = R.read_text(LEGACY_PAGE)
         legacy_lines = set(re.search(r"\nconst jobs=\[\n(.*?)\n\];", legacy, re.S).group(1).split(",\n"))
         new_lines = set(re.search(r"\nconst jobs=\[\n(.*?)\n\];", first, re.S).group(1).split(",\n"))
-        self.assertEqual(new_lines, legacy_lines)
+        # Rows gained an 11th field (days since first seen) after the legacy page; the first ten still match.
+        trimmed = {R.js_json(json.loads(line)[:10]) for line in new_lines}
+        self.assertTrue(all(len(json.loads(line)) == 11 for line in new_lines))
+        self.assertEqual(trimmed, legacy_lines)
 
     def test_committed_index_matches_committed_state(self):
         config, state, template = R.load_all(ROOT)
@@ -258,11 +261,15 @@ class SeedAndRenderTests(unittest.TestCase):
         doc, legacy = R.render(state, template, config), R.read_text(LEGACY_PAGE)
         snippets = [
             re.search(r'<div class="field"><label for="closing">.*?</select></div>', legacy, re.S).group(0),
-            re.search(r"function match\(r\)\{.*?\}return true\}", legacy).group(0),
             re.search(r"daysToClose=s=>[^,]*,fmtClose=[^;]*;", legacy).group(0),
         ]
         for s in snippets:
             self.assertIn(s, doc)
+        # match() is the legacy function plus the one "New today" clause added since.
+        legacy_match = re.search(r"function match\(r\)\{.*?\}return true\}", legacy).group(0)
+        now_match = re.search(r"function match\(r\)\{.*?\}return true\}", doc).group(0)
+        self.assertEqual(now_match.replace("if(onlyNew&&r[10]!==0)return false;", "", 1), legacy_match)
+        self.assertNotEqual(now_match, legacy_match)
         # Content grid: one column by default and below 1024px (feed first, then the Informational aside);
         # from 1024px the feed plus one sticky 300px aside.
         style = style_of(doc)
@@ -3614,7 +3621,7 @@ class SourceHealthTests(unittest.TestCase):
                       script)
         self.assertIn('ftog.addEventListener("click",()=>{const open=cmd.toggleAttribute("data-fc");'
                       'ftog.setAttribute("aria-expanded",String(!open));if(!open)$("#age").focus()})', script)
-        self.assertIn('$("#fn").textContent=on.filter(([k])=>k!=="query"&&k!=="company").length;', script)
+        self.assertIn('$("#fn").textContent=on.filter(([k])=>k!=="query"&&k!=="company"&&k!=="new").length;', script)
         self.assertFalse({s for s in hidden_selectors(style)
                           if any(k in s for k in ("api", "term", "field", "query", "reset"))})
         self.assertIn("[hidden]{display:none!important}", base)
@@ -3704,7 +3711,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
                          "Result2/6 sources accepted · 2 held · 1 failed · 1 pending"
-                         f"Openings{records} published · {new_today} first seen today"
+                         f"Openings{records} published · {new_today} new today"
                          "Freshnessworst × FAILED"
                          "Next run31 Oct 23:53 IST · scheduled, not guaranteed")
 
@@ -3868,7 +3875,7 @@ class SourceHealthTests(unittest.TestCase):
         visible = sum(R.published_counts(self.state, self.config).values())
         n = expected_new(self.state)
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn(f"<div><dt>Openings</dt><dd><b>{visible}</b> published · <b>{n}</b> first seen today</dd></div>",
+        self.assertIn(f"<div><dt>Openings</dt><dd><b>{visible}</b> published · <b>{n}</b> new today</dd></div>",
                       status_block(doc))
         self.assertEqual(visible, int(re.search(r'<dd id="total">(\d+)</dd>', doc).group(1)))
         # Bump one visible, not-yet-new row's first_seen to as_of: the count rises by one. The fixture may
@@ -3880,16 +3887,16 @@ class SourceHealthTests(unittest.TestCase):
             yesterday = (self.state.as_of - dt.timedelta(days=1)).isoformat()
             self.state.jobs[i] = dataclasses.replace(self.state.jobs[i], first_seen=yesterday)
             n = expected_new(self.state)
-            self.assertIn(f"<dd><b>{visible}</b> published · <b>{n}</b> first seen today</dd>",
+            self.assertIn(f"<dd><b>{visible}</b> published · <b>{n}</b> new today</dd>",
                           status_block(R.render(self.state, self.template, self.config)))
         self.state.jobs[i] = dataclasses.replace(self.state.jobs[i], first_seen=today)
         self.assertEqual(expected_new(self.state), n + 1)
-        self.assertIn(f"<dd><b>{visible}</b> published · <b>{n + 1}</b> first seen today</dd>",
+        self.assertIn(f"<dd><b>{visible}</b> published · <b>{n + 1}</b> new today</dd>",
                       status_block(R.render(self.state, self.template, self.config)))
         # A row first seen today but past the age window is not published and not counted.
         old = (self.state.as_of - dt.timedelta(days=self.config.max_age_days + 5)).isoformat()
         self.state.jobs[i] = dataclasses.replace(self.state.jobs[i], posted_date=old)
-        self.assertIn(f"<dd><b>{visible - 1}</b> published · <b>{n}</b> first seen today</dd>",
+        self.assertIn(f"<dd><b>{visible - 1}</b> published · <b>{n}</b> new today</dd>",
                       status_block(R.render(self.state, self.template, self.config)))
 
     def test_status_block_rows_and_placeholder(self):
@@ -4116,7 +4123,7 @@ class SourceHealthTests(unittest.TestCase):
 
     def test_stats_markup_and_target_sizes(self):
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('<div class="stat"><dt><span class="vh">Posted </span>Today</dt><dd id="today">', doc)
+        self.assertIn('<div class="stat"><dt>New today</dt><dd id="today">', doc)
         self.assertEqual(re.findall(r"<dl class=\"stats\">(.*?)</dl>", doc)[0].count("<dt>"), 3)
         style = style_of(doc)
         base, blocks = media_blocks(style)
@@ -4177,7 +4184,7 @@ class SourceHealthTests(unittest.TestCase):
         doc = R.render(self.state, self.template, self.config)
         script = main_script(doc)
         # One flat stream of cards; only the first 12 animate, and only on the first render.
-        for snippet in ('const card=(r,i)=>{const[c,id,t,e,d,a,l,u,b,cd]=r,', 'anim=!booted&&i<12',
+        for snippet in ('const card=(r,i)=>{const[c,id,t,e,d,a,l,u,b,cd,nw]=r,', 'anim=!booted&&i<12',
                         '<article class="card${anim?" reveal":""}"${anim?` style="--i:${i}"`:""}>',
                         '<span class="av" aria-hidden="true">${esc(ini(c))}</span>',
                         '<h3 class="c-l"><span class="c-co">${esc(c)}</span> posted <a class="job" href="${esc(u)}" '
@@ -4200,18 +4207,42 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("byNew=(x,y)=>x[5]-y[5]||oi(x[0])-oi(y[0]),byClose=(x,y)=>{const a=daysToClose(x[9]),"
                       "b=daysToClose(y[9]);return a===b?byNew(x,y):a===null?1:b===null?-1:a-b}", script)
         self.assertIn('jobs.filter(match).sort(sortBy==="close"?byClose:byNew)', script)
-        # Toolbar: a Today filter toggle ahead of the sort pair. It drives the "Posted within" select (0 = today)
-        # so the chips, Reset and the select itself all stay in sync, and render() mirrors the select back into
-        # the button's pressed state.
+        # Toolbar: a "New today" filter toggle ahead of the sort pair. "New" means first seen by the ledger today
+        # (row 10 == 0), the same thing the terminal's "+N new" pull lines and "N new today" count mean; the
+        # posting's own date stays on the "Posted within" select, whose chip reads "Posted today" so the two
+        # cannot be confused. Cards first seen today carry a New tag.
         self.assertIn('<div class="tgl"><button class="ob" id="only-today" type="button" aria-pressed="false"><span class="vh">'
-                      'Show only openings posted </span>Today</button>'
+                      'Show only openings </span>New today</button>'
                       '<div class="tgl" role="group" aria-label="Sort openings"><button class="ob" id="sort-new" '
                       'type="button" aria-pressed="true">Newest</button><button class="ob" id="sort-close" type="button" '
                       'aria-pressed="false">Closing soon</button></div></div>', doc)
-        self.assertIn('$("#only-today").addEventListener("click",()=>{af.value=af.value==="0"?"30":"0";render()});', script)
-        self.assertIn('put("today",today);$("#only-today").setAttribute("aria-pressed",String(af.value==="0"));', script)
+        for snippet in ('let booted=false,annT=0,sortBy="new",onlyNew=false;',
+                        '$("#only-today").addEventListener("click",()=>{onlyNew=!onlyNew;render()});',
+                        'if(onlyNew&&r[10]!==0)return false;',
+                        'today=visibleJobs.filter(r=>r[10]===0).length;',
+                        'put("today",today);$("#only-today").setAttribute("aria-pressed",String(onlyNew));',
+                        'if(onlyNew)f.push("NEW TODAY");',
+                        'if(onlyNew)on.push(["new","New today"]);if(af.value!=="30")on.push(["age",af.value==="0"?"Posted today":'
+                        '`Posted ≤${af.value} days`]);',
+                        'if(b.dataset.k==="new"){onlyNew=false;render();$("#only-today").focus();return}',
+                        'q.value.trim()||onlyNew||+af.value<30',
+                        'clf.value="";onlyNew=false;render();q.focus()};',
+                        '<p class="c-m">${nw===0?\'<span class="nw">New</span>\':""}<span class="bd" data-b="${esc(b)}">'):
+            self.assertIn(snippet, script, snippet)
         self.assertIn(".tgl{display:flex;gap:6px}.tgl>.tgl{margin-left:6px}", style_of(doc))
+        self.assertIn(".nw{font-weight:700;color:hsl(var(--signal))}", style_of(doc))
         self.assertIn('<option value="0">Today</option>', doc)
+        self.assertNotIn("r[5]===0", script)
+        # Row 10 of the job data is days since first seen, and the stats "New today" counts the published rows
+        # where it is 0.
+        rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
+        self.assertTrue(all(len(r) == 11 and isinstance(r[10], int) and r[10] >= 0 for r in rows))
+        by_id = {r.job_id: r for r in self.state.jobs}
+        for r in rows:
+            first = dt.date.fromisoformat(by_id[r[1]].first_seen)
+            self.assertEqual(r[10], max(0, (self.state.as_of - first).days), r[1])
+        shown = [r for r in rows if r[5] <= self.config.max_age_days]
+        self.assertEqual(int(re.search(r'<dd id="today">(\d+)</dd>', doc).group(1)), sum(1 for r in shown if r[10] == 0))
         self.assertIn('$("#sort-l").textContent=sortBy==="close"?"· closing soon":"· newest first"', script)
         # Company chips: "All companies" plus one per configured company, kept in sync with #company, which is a
         # non-visible state holder placed just before the phone Filters toggle and the three visible filters.
