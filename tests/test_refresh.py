@@ -4022,7 +4022,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("@keyframes blink{50%{opacity:0}}", style)
         # The logo glitches: two script-cloned ghost layers (clipped away at rest) show displaced slices for a
         # few stepped frames while the base layer jitters by a pixel; one .5s run on load, on hover/focus and
-        # every fourth LED pulse (8s, no timer loop), never under reduced motion or in a hidden tab. No frames
+        # every second LED pulse (4s, no timer loop), never under reduced motion or in a hidden tab. No frames
         # swap and the mark itself stays put.
         for gone in ("bark", 'class="lf la"', 'class="lf lb"', ".lb{", ".lk{"):
             self.assertNotIn(gone, doc, gone)
@@ -4044,7 +4044,7 @@ class SourceHealthTests(unittest.TestCase):
                       'logo.classList.add("glitch")};', script)
         self.assertIn('logo.addEventListener("animationend",()=>logo.classList.remove("glitch"));'
                       'logo.addEventListener("mouseenter",glitch);$(".wm-row").addEventListener("focusin",glitch);'
-                      'setTimeout(glitch,600);let gi=0;$(".live .led").addEventListener("animationiteration",()=>{if(++gi%4===0)'
+                      'setTimeout(glitch,600);let gi=0;$(".live .led").addEventListener("animationiteration",()=>{if(++gi%2===0)'
                       'glitch()});', script)
         for decl in anims:
             if "infinite" in decl:
