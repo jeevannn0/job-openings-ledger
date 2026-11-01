@@ -1702,8 +1702,13 @@ class DryRunTests(unittest.TestCase):
 
 # --------------------------------------------------------------------------- per-source pull history
 
-def pull(at, result="accepted", published=0, added=0, removed=0):
-    return dict(zip(R.PULL_FIELDS, (at, result, published, added, removed)))
+def pull(at, result="accepted", published=0, added=0, removed=0, took=None):
+    return dict(zip(R.PULL_FIELDS, (at, result, published, added, removed, took)))
+
+
+def untimed(entry: dict) -> dict:
+    """A pull entry without its measured time, for comparing runs made on the real clock."""
+    return {k: v for k, v in entry.items() if k != "took"}
 
 
 def channel_row(doc: str, company: str) -> str:
@@ -1719,7 +1724,8 @@ class PullHistoryTests(unittest.TestCase):
     def test_company_state_fields_end_with_pulls(self):
         self.assertEqual([f.name for f in dataclasses.fields(R.CompanyState)], list(R.COMPANY_FIELDS))
         self.assertEqual(R.COMPANY_FIELDS[-2:], ("removal_hold", "pulls"))
-        self.assertEqual(R.PULL_FIELDS, ("at", "result", "published", "added", "removed"))
+        self.assertEqual(R.PULL_FIELDS, ("at", "result", "published", "added", "removed", "took"))
+        self.assertEqual(R.LEGACY_PULL_FIELDS, R.PULL_FIELDS[:-1])
         self.assertEqual((R.MAX_PULLS, R.CompanyState("seed", "x").pulls), (6, []))
         self.assertEqual(list(json.loads(self.state.to_json())["companies"]["Siemens"]), list(R.COMPANY_FIELDS))
 
@@ -1759,8 +1765,11 @@ class PullHistoryTests(unittest.TestCase):
 
     def test_strict_validation_fails_closed(self):
         times = [f"2026-10-{d:02d}T05:53+05:30" for d in range(20, 27)]
-        good = [pull(t) for t in times[:6]]
+        good = [pull(t, took=n * 40) for n, t in enumerate(times[:6])]
         bad = {"seven entries": [pull(t) for t in times],
+               "negative took": [pull(times[0], took=-1)],
+               "bool took": [pull(times[0], took=True)],
+               "string took": [pull(times[0], took="2 min")],
                "wrong keys": [{"at": times[0], "result": "accepted", "published": 1, "added": 0}],
                "extra key": [{**pull(times[0]), "detail": "x"}],
                "key order": [dict(reversed(list(pull(times[0]).items())))],
@@ -1775,6 +1784,11 @@ class PullHistoryTests(unittest.TestCase):
         data = json.loads(self.state.to_json())
         data["companies"]["Siemens"]["pulls"] = good
         self.assertEqual(R.load_state(data, self.config).companies["Siemens"].pulls, good)
+        # Entries written before pulls were timed load as untimed (took None) and round-trip from there.
+        data["companies"]["Siemens"]["pulls"] = [untimed(e) for e in good]
+        loaded = R.load_state(data, self.config)
+        self.assertEqual(loaded.companies["Siemens"].pulls, [pull(t) for t in times[:6]])
+        self.assertEqual(R.load_state(json.loads(loaded.to_json()), self.config).to_json(), loaded.to_json())
         for name, value in bad.items():
             with self.subTest(name):
                 d = json.loads(self.state.to_json())
@@ -1794,8 +1808,10 @@ class PullHistoryTests(unittest.TestCase):
             with self.subTest(company):
                 added = {r.job_id for r in rows_of(after, company)} - before_ids
                 self.assertEqual(len(added & FIXTURE_ADDED), 1)
-                self.assertEqual(after.companies[company].pulls,
-                                 [pull("2026-10-31T18:00+05:30", "accepted", published[company], len(added), 0)])
+                self.assertEqual([untimed(e) for e in after.companies[company].pulls],
+                                 [untimed(pull("2026-10-31T18:00+05:30", "accepted", published[company], len(added), 0))])
+                took = after.companies[company].pulls[0]["took"]
+                self.assertTrue(isinstance(took, int) and took >= 0, took)
         doc = R.read_text(os.path.join(tmp, R.INDEX_PATH))
         self.assertIn('<summary><span class="tri" aria-hidden="true">▸</span>last 1 pull</summary>',
                       channel_row(doc, "Siemens"))
@@ -1815,7 +1831,9 @@ class PullHistoryTests(unittest.TestCase):
                 self.assertEqual([p["at"] for p in pulls], [R.stamp(w) for w in runs[1:]])   # oldest dropped
                 self.assertEqual(pulls[-1]["at"], state.companies[company].last_attempt)
                 n = R.published_counts(state, self.config)[company]
-                self.assertEqual(pulls[-1], pull(R.stamp(runs[-1]), "first_snapshot" if n else "first_empty", n, 0, 0))
+                self.assertEqual(untimed(pulls[-1]),
+                                 untimed(pull(R.stamp(runs[-1]), "first_snapshot" if n else "first_empty", n, 0, 0)))
+                self.assertTrue(all(isinstance(e["took"], int) for e in pulls))   # every attempt was timed
 
     def test_budget_skipped_source_records_a_held_pull(self):
         ticks = iter([0.0] + [R.RUN_BUDGET_S] * 50)            # the run budget is gone before any source
@@ -1823,8 +1841,8 @@ class PullHistoryTests(unittest.TestCase):
                                         factory_for(self.config, FakeTransport()), clock=lambda: next(ticks))
         self.assertEqual({o.detail for o in outcomes}, {"run time budget exhausted"})
         for company in self.config.companies:
-            self.assertEqual([(p["at"], p["added"], p["removed"]) for p in after.companies[company].pulls],
-                             [(R.stamp(NOW), 0, 0)])
+            self.assertEqual([(p["at"], p["added"], p["removed"], p["took"]) for p in after.companies[company].pulls],
+                             [(R.stamp(NOW), 0, 0, None)])
 
     def test_offline_and_static_runs_record_nothing(self):
         self.state.companies["Siemens"].pulls = [pull("2026-10-31T05:53+05:30", published=3)]
@@ -1885,6 +1903,34 @@ class PullHistoryTests(unittest.TestCase):
         # Re-aging reads only .h-data times; pull times stay as rendered.
         self.assertNotIn(".pulls", main_script(doc))
         self.assertNotIn("pl-list", main_script(doc))
+
+    def test_pull_time_is_shown_on_the_row_and_in_the_history(self):
+        # A timed pull shows how long it took, muted, right after its outcome: on its history line, and on the
+        # source's Last pull when that history entry is the latest attempt. Untimed entries show nothing.
+        at = "2026-10-31T17:53+05:30"
+        self.state.checked_at = "2026-10-31T22:47+05:30"
+        self.state.companies["ZS"] = dataclasses.replace(self.state.companies["ZS"], status="ok", last_success=at,
+                                                         last_attempt=at,
+                                                         pulls=[pull("2026-10-31T11:53+05:30", "accepted", 3, 0, 0, None),
+                                                                pull(at, "accepted", 3, 2, 0, 135)])
+        row = channel_row(doc := R.render(self.state, self.template, self.config), "ZS")
+        tick = '<span class="oc" data-o="accepted"><span aria-hidden="true">✓</span><span class="vh">Successful refresh</span></span>'
+        took = ' <span class="tk"><span class="vh">in </span>~2.5 min</span>'
+        self.assertIn(f'<div class="ch-a"><dt>Last pull</dt><dd><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST'
+                      f'</time> · {tick}{took}</dd></div>', row)
+        self.assertIn(f'<li><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST</time> · {tick}{took} · '
+                      '<span class="pd"><b class="pa">+2 new</b></span> · 3 total</li>'
+                      f'<li><time datetime="2026-10-31T11:53:00+05:30">31 Oct 11:53 IST</time> · {tick} · '
+                      '<span class="nc">no change</span> · 3 total</li>', row)
+        self.assertEqual(row.count('class="tk"'), 2)
+        # The Last pull time comes only from the entry for the current attempt.
+        self.state.companies["ZS"].last_attempt = "2026-10-31T19:00+05:30"
+        self.assertEqual(channel_row(R.render(self.state, self.template, self.config), "ZS").count('class="tk"'), 1)
+        self.assertIn(".tk{font-weight:500;color:hsl(var(--steel-muted));white-space:nowrap}", style_of(doc))
+        self.assertEqual([R.took_text(s) for s in (0, 7, 9, 10, 23, 57, 58, 75, 135, 290, 599, 600, 1500)],
+                         ["0 s", "7 s", "9 s", "~10 s", "~25 s", "~55 s", "~1 min", "~1.5 min", "~2.5 min", "~5 min",
+                          "~10 min", "~10 min", "~25 min"])
+        self.assertEqual([R.took_html(v) for v in (None, True, "9", -1.5)], ["", "", "", ""])
 
     def test_pull_styles_and_breakpoints(self):
         base, blocks = media_blocks(style_of(R.render(self.state, self.template, self.config)))

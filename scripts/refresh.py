@@ -554,9 +554,11 @@ COMPANY_FIELDS = ("status", "detail", "last_success", "last_attempt", "stale_sin
 PRE_PULLS_COMPANY_FIELDS = COMPANY_FIELDS[:-1]  # state written before pulls existed (seeded on load)
 LEGACY_COMPANY_FIELDS = COMPANY_FIELDS[:-2]     # state written before removal_hold existed
 # Per-source pull history: the newest MAX_PULLS refresh attempts, oldest first. Each entry holds only
-# the attempt time, its ATTEMPT_TEXT key and three counts; never detail, URLs, hosts or job IDs.
+# the attempt time, its ATTEMPT_TEXT key, three counts and how many seconds the pull took; never detail,
+# URLs, hosts or job IDs.
 MAX_PULLS = 6
-PULL_FIELDS = ("at", "result", "published", "added", "removed")
+PULL_FIELDS = ("at", "result", "published", "added", "removed", "took")
+LEGACY_PULL_FIELDS = PULL_FIELDS[:-1]          # entries written before pulls were timed
 PULL_RESULTS = ("accepted", "held", "first_snapshot", "first_empty")
 
 
@@ -696,7 +698,7 @@ def load_state(data: dict, config: Config) -> State:
         if "pulls" in raw:
             if not valid_pulls(cs.pulls):
                 raise ValueError(f"state: {name} pulls")
-            cs.pulls = [dict(p) for p in cs.pulls]
+            cs.pulls = [pull_entry(*(p[k] for k in LEGACY_PULL_FIELDS), p.get("took")) for p in cs.pulls]
         else:
             unseeded.append(name)
         if cs.removal_hold is not None and not valid_hold(cs.removal_hold, name):
@@ -746,12 +748,14 @@ def load_state(data: dict, config: Config) -> State:
     return state
 
 
-def pull_entry(at: str, result: str, published: int, added: int | None, removed: int | None) -> dict:
-    return dict(zip(PULL_FIELDS, (at, result, published, added, removed)))
+def pull_entry(at: str, result: str, published: int, added: int | None, removed: int | None,
+               took: int | None = None) -> dict:
+    return dict(zip(PULL_FIELDS, (at, result, published, added, removed, took)))
 
 
 def valid_pulls(pulls: object) -> bool:
-    """A list of at most MAX_PULLS entries, each exactly PULL_FIELDS in order, in ascending `at` order."""
+    """A list of at most MAX_PULLS entries, each exactly PULL_FIELDS (or the untimed legacy fields) in order,
+    in ascending `at` order."""
     if not isinstance(pulls, list) or len(pulls) > MAX_PULLS:
         return False
 
@@ -760,11 +764,12 @@ def valid_pulls(pulls: object) -> bool:
 
     times = []
     for p in pulls:
-        if not isinstance(p, dict) or tuple(p) != PULL_FIELDS:
+        if not isinstance(p, dict) or tuple(p) not in (PULL_FIELDS, LEGACY_PULL_FIELDS):
             return False
         at = iso_time(p["at"])
         if at is None or p["result"] not in PULL_RESULTS or not count(p["published"], False) \
-                or not count(p["added"], True) or not count(p["removed"], True):
+                or not count(p["added"], True) or not count(p["removed"], True) \
+                or not count(p.get("took"), True):
             return False
         times.append(at)
     return all(a <= b for a, b in zip(times, times[1:]))
@@ -972,6 +977,25 @@ def age_text(age: dt.timedelta) -> str:
     return f"{minutes // 1440}d ago"
 
 
+def took_text(seconds: int) -> str:
+    """Roughly how long a pull took: exact under 10 s, then to 5 s, then to half a minute, then to a minute."""
+    s = max(0, int(seconds))
+    if s < 10:
+        return f"{s} s"
+    if s < 58:
+        return f"~{int(s / 5 + 0.5) * 5} s"
+    if s < 600:
+        return f"~{int(s / 30 + 0.5) / 2:g} min"
+    return f"~{int(s / 60 + 0.5)} min"
+
+
+def took_html(took: object) -> str:
+    """The time a pull took, after its outcome; nothing for untimed entries."""
+    if not isinstance(took, int) or isinstance(took, bool):
+        return ""
+    return f' <span class="tk"><span class="vh">in </span>{took_text(took)}</span>'
+
+
 def ist_text(when: dt.datetime) -> str:
     when = when.astimezone(IST)
     return f"{when.day} {MON[when.month - 1]} {when:%H:%M} IST"
@@ -1028,7 +1052,10 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
     rows = []
     meter = '<span class="ch-m" aria-hidden="true">' + "<i></i>" * METER_CELLS + "</span>"
     for n, h in enumerate(sources, 1):
-        attempt = (f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + outcome_html(h.attempt)
+        cs = state.companies[h.company]
+        last = cs.pulls[-1] if cs.pulls and cs.pulls[-1]["at"] == cs.last_attempt else None
+        attempt = ((f"{time_html(h.attempt_at)} · " if h.attempt_at else "") + outcome_html(h.attempt)
+                   + took_html(last["took"] if last else None))
         data = (f'{time_html(h.success_at)} <span class="age">{age_text(h.age)}</span>'
                 if h.success_at and h.age is not None else "None yet")
         rows.append(f'<li class="ch" data-h="{h.state}"><span class="ch-n" aria-hidden="true">CH{n:02d}</span>'
@@ -1067,7 +1094,8 @@ def pulls_html(pulls: list) -> str:
             delta = f' · <span class="pd">{" · ".join(parts)}</span>' if parts else ' · <span class="nc">no change</span>'
         else:
             delta = ""
-        items.append(f'<li>{time_html(at)} · {outcome_html(p["result"])}{delta} · {int(p["published"])} total</li>')
+        items.append(f'<li>{time_html(at)} · {outcome_html(p["result"])}{took_html(p.get("took"))}{delta} · '
+                     f'{int(p["published"])} total</li>')
     n = len(pulls)
     return (f'<details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>'
             f'last {n} pull{"" if n == 1 else "s"}</summary><ol class="pl-list">' + "".join(items) + "</ol></details>")
@@ -2499,6 +2527,7 @@ class Outcome:
     after: int
     added: list
     removed: list
+    took_s: float | None = None   # wall time of the source run; None when it never started
 
 
 def removal_verdict(hold: dict | None, removed: list[str], rows: list[Row], res: SourceResult,
@@ -2644,18 +2673,23 @@ def run_refresh(state: State, config: Config, excluded: dict, now: dt.datetime,
             continue
         later = live_sources[live_sources.index(company) + 1:]
         budget = source_budget(cfg, run_deadline - clock(), sum(source_floor(config.sources[c]) for c in later))
+        started = clock()
+        took = None
         try:
             if budget < source_floor(cfg):     # e.g. ZS cannot finish its listing at the crawl delay
                 res = held(company, "run time budget exhausted")
             else:
-                res = RUNNERS[cfg["mode"]](cfg, rows, factory(company, {**cfg, "budget_s": budget}), now, cs,
-                                           excluded.get(company, frozenset()), config)
+                try:
+                    res = RUNNERS[cfg["mode"]](cfg, rows, factory(company, {**cfg, "budget_s": budget}), now, cs,
+                                               excluded.get(company, frozenset()), config)
+                finally:
+                    took = max(0.0, clock() - started)
         except Exception as exc:  # noqa: BLE001 - one source must never break the others
             res = held(company, f"source error ({type(exc).__name__})")
         new_rows, companies[company], removed = apply_result(rows, cs, res, now)
         added = [r.job_id for r in new_rows if r.job_id not in {x.job_id for x in rows}]
         outcomes.append(Outcome(company, "ok" if companies[company].status == "ok" else "held",
-                                companies[company].detail, len(rows), len(new_rows), added, removed))
+                                companies[company].detail, len(rows), len(new_rows), added, removed, took))
         all_rows += new_rows
     final, dropped = finalize(all_rows, today, config, excluded)
     for company, jid, why in dropped:
@@ -2685,7 +2719,8 @@ def record_pulls(state: State, config: Config, outcomes: list[Outcome]) -> None:
         result = attempt_outcome(cs.status, cs.last_success, cs.last_attempt, counts[o.company])
         if result not in PULL_RESULTS:
             raise AssertionError("unreachable: an attempted source has a recorded outcome")
-        entry = pull_entry(cs.last_attempt, result, counts[o.company], len(o.added), len(o.removed))
+        entry = pull_entry(cs.last_attempt, result, counts[o.company], len(o.added), len(o.removed),
+                           None if o.took_s is None else int(o.took_s + 0.5))
         cs.pulls = (list(cs.pulls) + [entry])[-MAX_PULLS:]
 
 
