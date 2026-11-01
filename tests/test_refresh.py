@@ -3972,10 +3972,11 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("font:600 15px/1.35 var(--font-sans)", rules[("h1",)])          # no display-size hero
         self.assertNotIn("clamp(", rules[("h1",)])
         self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
-        # Phone header is two rows: the mark + a short LIVE badge (" · automated" hidden) that fills the rest of
-        # the row, then both bracket buttons together on the second row, pushed to the right.
-        self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.live{flex:1 1 auto}.live+.th-m{margin-left:auto}"
-                                                    ".th-m:not([hidden])"))
+        # Phone header is a two-row grid: the mark + a short LIVE badge (" · automated" hidden) spanning the rest
+        # of row one, then both bracket buttons together on row two, pushed to the right.
+        self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.wm-row{display:grid;grid-template-columns:auto 1fr auto}"
+                                                    ".live{grid-column:2/4}.live+.th-m{grid-column:2;justify-self:end}"
+                                                    ".live+.th-m+.th-m{grid-column:3}.th-m:not([hidden])"))
         self.assertNotIn(".lv-x", base)
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
