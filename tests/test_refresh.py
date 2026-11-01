@@ -4112,15 +4112,15 @@ class SourceHealthTests(unittest.TestCase):
             self.assertTrue(times, decl)
             self.assertLess(max(secs(t) for t in times), 0.6, decl)
         for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink", "glitch-x",
-                     "glitch-a", "glitch-b", "nv-on", "nv-flash", "nv-grain", "nv-type", "nv-cut", "nv-acq", "nv-lock",
-                     "nv-off", "nv-off2"):
+                     "glitch-a", "glitch-b", "nv-on", "nv-flash", "nv-grain", "nv-type", "nv-cut", "nv-off", "nv-off2"):
             self.assertIn(f"@keyframes {name}{{", style)
-        self.assertEqual(style.count("@keyframes"), 19)
+        self.assertEqual(style.count("@keyframes"), 17)
         # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
         # terminal's four output blocks stagger by 90ms and all finish within .7s.
         self.assertEqual(re.findall(r"animation-delay:([^;}]+)", effects), ["calc(var(--i)*40ms)",
                                                                             "calc(var(--d)*90ms)"])
-        # Splash: a violet night-vision scope that powers on, scans the mark in, locks and powers off. It is an
+        # Splash: a violet night-vision scope that powers on, types its HUD readouts, locks and powers off (no
+        # big mark in the middle: the reticle is the centre). It is an
         # overlay (the page is complete underneath), finite (every run ends by 1.8s, a 2.2s script ceiling
         # removes it regardless), shown once per session (decided in the head before first paint), skippable by
         # tap or key, and never shown under reduced motion. Nothing in it is infinite.
@@ -4154,13 +4154,14 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn('try{if(sessionStorage.getItem("k9boot"))document.documentElement.dataset.noboot=""}catch(e){}</script>', head)
         self.assertIn('<a class="skip" href="#main" target="_self">Skip to the page</a>\n<div class="nv" id="boot" aria-hidden="true">'
                       '<div class="nv-s"><div class="nv-g"></div><div class="nv-sl"></div><div class="nv-v"></div>'
-                      '<div class="nv-m"><pre class="nv-lf"></pre></div><div class="nv-hud">', doc)
+                      '<div class="nv-hud">', doc)
+        for gone in ("nv-m", "nv-lf", "nv-acq", "nv-lock", "--nvs"):
+            self.assertNotIn(gone, doc, gone)
         self.assertIn('<p class="nv-r nv-r1">K9 · nv scope</p><p class="nv-r nv-r2">', doc)
         self.assertRegex(doc, r'<p class="nv-r nv-r2">\d+ openings</p><p class="nv-r nv-r3"><span class="nv-t1">acquiring signal'
                               r'</span><span class="nv-t2">target locked</span></p><p class="nv-r nv-r4">tap to skip</p></div></div>'
                               r'<div class="nv-f"></div></div>\n<main id="main" class="container boot-in">')
-        self.assertEqual(doc.count('class="nv-lf"'), 1)                       # the mark text is cloned by script
-        for snippet in ('const boot=$("#boot");if(boot){boot.querySelector(".nv-lf").textContent=lf0.textContent;let done=false;',
+        for snippet in ('const boot=$("#boot");if(boot){let done=false;',
                         'const bye=()=>{if(done)return;done=true;boot.remove();try{sessionStorage.setItem("k9boot","1")}catch(e){}'
                         'glitch()},skip=()=>{if(!done)boot.classList.add("nv-x")};',
                         'if(RM.matches||document.hidden||getComputedStyle(boot).display==="none")bye();',
