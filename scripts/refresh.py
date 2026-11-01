@@ -1041,10 +1041,16 @@ def pulls_html(pulls: list) -> str:
         if at is None or p["result"] not in PULL_RESULTS:
             raise ValueError("render: invalid pull entry")
         added, removed = p["added"], p["removed"]
-        delta = (f' · <span class="pd"><span class="pa">+{int(added)}</span> <span class="pr">−{int(removed)}</span></span>'
-                 if isinstance(added, int) and isinstance(removed, int) else "")
+        # Lead with what changed, then the total. Zero counts are not spelled out: a run that changed
+        # nothing says so once; a seeded entry (counts unknown) shows only the total.
+        if isinstance(added, int) and isinstance(removed, int):
+            parts = ([f'<b class="pa">+{int(added)} new</b>'] if added else []) + \
+                    ([f'<span class="pr">−{int(removed)} removed</span>'] if removed else [])
+            delta = f' · <span class="pd">{" · ".join(parts)}</span>' if parts else ' · <span class="nc">no change</span>'
+        else:
+            delta = ""
         items.append(f'<li>{time_html(at)} · <span class="oc" data-o="{ROLLUP_OF[p["result"]]}">'
-                     f'{ATTEMPT_TEXT[p["result"]]}</span> · <b>{int(p["published"])}</b> published{delta}</li>')
+                     f'{ATTEMPT_TEXT[p["result"]]}</span>{delta} · {int(p["published"])} total</li>')
     n = len(pulls)
     return (f'<details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>'
             f'last {n} pull{"" if n == 1 else "s"}</summary><ol class="pl-list">' + "".join(items) + "</ol></details>")

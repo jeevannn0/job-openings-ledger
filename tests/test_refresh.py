@@ -1766,31 +1766,39 @@ class PullHistoryTests(unittest.TestCase):
         self.state.checked_at = "2026-10-31T22:47+05:30"
         self.state.companies["Siemens"].pulls = [
             pull("2026-10-31T05:53+05:30", "first_empty", 0, 0, 0),
-            pull("2026-10-31T11:53+05:30", "held", 4, 0, 0),
+            pull("2026-10-31T11:53+05:30", "held", 4, 0, 2),
             pull("2026-10-31T17:53+05:30", "accepted", 9, 3, 1)]
         self.state.companies["IQVIA"].pulls = [pull("2026-10-31T16:38+05:30", "accepted", 5, None, None)]
+        self.state.companies["ZS"].pulls = [pull("2026-10-31T17:53+05:30", "accepted", 3, 2, 0)]
         doc = R.render(self.state, self.template, self.config)
-        delta = '<span class="pd"><span class="pa">+{}</span> <span class="pr">−{}</span></span>'
+        # Each line leads with what changed and ends with the total; zero counts are never spelled out.
         self.assertIn(
             '</dl><details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>last 3 pulls</summary>'
             '<ol class="pl-list">'
             '<li><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST</time> · '
-            '<span class="oc" data-o="accepted">Successful refresh</span> · <b>9</b> published · '
-            + delta.format(3, 1) + '</li>'
+            '<span class="oc" data-o="accepted">Successful refresh</span> · <span class="pd"><b class="pa">+3 new</b> · '
+            '<span class="pr">−1 removed</span></span> · 9 total</li>'
             '<li><time datetime="2026-10-31T11:53:00+05:30">31 Oct 11:53 IST</time> · '
-            '<span class="oc" data-o="held">Refresh held, cached data kept</span> · <b>4</b> published · '
-            + delta.format(0, 0) + '</li>'
+            '<span class="oc" data-o="held">Refresh held, cached data kept</span> · <span class="pd">'
+            '<span class="pr">−2 removed</span></span> · 4 total</li>'
             '<li><time datetime="2026-10-31T05:53:00+05:30">31 Oct 05:53 IST</time> · '
-            '<span class="oc" data-o="failed">No successful automated refresh yet</span> · <b>0</b> published · '
-            + delta.format(0, 0) + '</li></ol></details></li>', channel_row(doc, "Siemens"))
-        # A seeded entry has no added/removed counts, so it renders without the delta span.
+            '<span class="oc" data-o="failed">No successful automated refresh yet</span> · '
+            '<span class="nc">no change</span> · 0 total</li></ol></details></li>', channel_row(doc, "Siemens"))
+        self.assertIn('<span class="pd"><b class="pa">+2 new</b></span> · 3 total</li>', channel_row(doc, "ZS"))
+        # A seeded entry has no added/removed counts, so it shows only the total.
         self.assertIn('last 1 pull</summary><ol class="pl-list"><li><time datetime="2026-10-31T16:38:00+05:30">'
                       '31 Oct 16:38 IST</time> · <span class="oc" data-o="accepted">Successful refresh</span> · '
-                      '<b>5</b> published</li></ol></details></li>', channel_row(doc, "IQVIA"))
-        self.assertNotIn('class="pd"', channel_row(doc, "IQVIA"))
-        for company in ("JPMorganChase", "GE HealthCare", "GE Vernova", "ZS"):
+                      '5 total</li></ol></details></li>', channel_row(doc, "IQVIA"))
+        iqvia_pulls = channel_row(doc, "IQVIA").split("<details")[1]
+        for gone in ('class="pd"', 'class="nc"', "published"):
+            self.assertNotIn(gone, iqvia_pulls, gone)
+        for company in ("Siemens", "IQVIA", "ZS"):       # zero deltas are never spelled out (visible text only)
+            text = re.sub(r"<[^>]+>", "", channel_row(doc, company).split("<details")[1])
+            self.assertNotIn("+0 new", text, company)
+            self.assertNotIn("−0 removed", text, company)
+        for company in ("JPMorganChase", "GE HealthCare", "GE Vernova"):
             self.assertTrue(channel_row(doc, company).endswith('</dl><p class="pulls-none">No pull history yet</p></li>'))
-        self.assertEqual(doc.count('<details class="pulls">'), 2)
+        self.assertEqual(doc.count('<details class="pulls">'), 3)
         self.assertNotIn("<details", page_outside_dialog(doc))
         # Re-aging reads only .h-data times; pull times stay as rendered.
         self.assertNotIn(".pulls", main_script(doc))
