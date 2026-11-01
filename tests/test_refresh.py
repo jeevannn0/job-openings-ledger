@@ -3438,15 +3438,17 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(re.findall(r"::backdrop\{([^}]*)\}", style), ["background:hsl(var(--void-deep)/.72)",
                                                                        "animation:overlay-fade-in .2s ease-out",
                                                                        "animation:none!important"])
-        # Brand mark: an original half-block pixel guard dog in text (no image, no external asset), decorative.
-        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><pre class="lf la">', doc)
+        # Brand mark: the guard-dog silhouette converted to shade-block text (no image, no external asset), decorative.
+        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><pre class="lf">', doc)
         self.assertEqual(doc.count("job signal"), 1)             # header wordmark only; no Ledger card
         for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<img", "<svg"):
             self.assertNotIn(gone, doc, gone)
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
-        self.assertIn("width:calc(42ch * .18);height:36px;overflow:hidden;font:10px/10px var(--font-mono)",
+        self.assertIn("width:calc(72ch * .21);height:34px;overflow:hidden;font:10px/10px var(--font-mono)",
                       rules[(".logo",)])
-        self.assertIn("transform:scale(.18);transform-origin:0 0", rules[(".lf",)])
+        self.assertIn("transform:scale(.21);transform-origin:0 0", rules[(".lf",)])
+        for gone in (".lc{", ".lk{", ".lb{", ".lf b{"):
+            self.assertNotIn(gone, style, gone)
         # Chamfered panels and buttons with a signal hairline; the header status panel is gone.
         self.assertIn("clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%)", rules[(".panel",)])
         self.assertIn("clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))",
@@ -3664,7 +3666,7 @@ class SourceHealthTests(unittest.TestCase):
                         'if(e.textContent!==s)e.textContent=s};'):
             self.assertIn(snippet, script, snippet)
         self.assertLess(script.index('put("total",'), script.index("announce(visibleJobs.length"))
-        self.assertEqual(script.count("setTimeout("), 2)        # the live-region debounce and the one-off bark
+        self.assertEqual(script.count("setTimeout("), 2)        # the live-region debounce and the first logo glitch
         # The search-panel counters are the only visible copy; the left-aside mirrors are gone.
         for gone in ("-side", "week-side", "in the last 7 days"):
             self.assertNotIn(gone, doc, gone)
@@ -3923,16 +3925,17 @@ class SourceHealthTests(unittest.TestCase):
                       'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
                       '[ requests ]</button></div>', doc)
         logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><span class="wm">', doc, re.S).group(1)
-        frames = re.findall(r'<pre class="lf (la|lb)">(.*?)</pre>', logo, re.S)
-        self.assertEqual([f[0] for f in frames], ["la", "lb"])
-        for _cls, body in frames:
-            text = re.sub(r"<[^>]+>", "", body)
-            self.assertEqual(text.count("\n"), 19)                               # 20 half-block rows
-            self.assertTrue(all(len(line) <= 42 for line in text.split("\n")))
-            self.assertEqual(set(text) - set("█▀▄ \n"), set())                # block glyphs and spaces only
-            self.assertEqual(body.count('<b class="lc">'), 2)                   # the spiked collar rows
-        self.assertNotIn('class="lk"', frames[0][1])                            # closed mouth: no bark marks
-        self.assertEqual(frames[1][1].count('<b class="lk">'), 4)              # open mouth: bark arcs
+        # One static frame: a straight image-to-ASCII conversion of the K9 mark (72 columns x 16 rows of shade
+        # blocks), plain text in the steel colour with no inline markup.
+        frames = re.findall(r'<pre class="lf">(.*?)</pre>', logo, re.S)
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(logo.count("<pre"), 1)
+        text = frames[0]
+        self.assertNotIn("<", text)
+        self.assertEqual(text.count("\n"), 15)                                   # 16 rows
+        self.assertTrue(all(len(line) <= 72 for line in text.split("\n")))
+        self.assertEqual(set(text) - set("█▓▒░ \n"), set())                     # shade blocks and spaces only
+        self.assertTrue(all(not line.endswith(" ") for line in text.split("\n")))
         # Two short lines on desktop; both are visually hidden (still read out) on phones.
         self.assertIn('<h1><span class="h1a">New openings every six hours</span><span class="h1b"> · 0–2 years · '
                       'Bengaluru · Kochi</span></h1>\n<p class="lede">First-party employer portals · deduplicated · '
@@ -3945,7 +3948,7 @@ class SourceHealthTests(unittest.TestCase):
                                 '&gt;_</span> Requests</button></div>\n</header>')
         for gone in ('class="panel', "status", '<pre class="pre"', 'id="st-', "Details", "Status key", "signal status"):
             self.assertNotIn(gone, header, gone)
-        self.assertEqual(header.count("<pre"), 2)                 # only the two logo frames
+        self.assertEqual(header.count("<pre"), 1)                 # only the logo
         # No `$ signal …` command text, status block or status key outside the dialog.
         outside = page_outside_dialog(doc)
         text = re.sub(r"<[^>]+>", "", outside)
@@ -4017,25 +4020,42 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("blink .5s steps(1) 6", anims)
         self.assertIn("pxin .24s steps(3) backwards", anims)
         self.assertIn("@keyframes blink{50%{opacity:0}}", style)
-        # The logo barks three times (two frames swapped with steps), on load and again on hover/focus; the
-        # class is removed when the run ends and never added under reduced motion.
-        self.assertIn("bark-a .36s steps(1) 3", anims)
-        self.assertIn("bark-b .36s steps(1) 3", anims)
-        self.assertIn("@keyframes bark-a{50%{opacity:0}}@keyframes bark-b{50%{opacity:1}}", style)
-        self.assertIn('bark=()=>{if(RM.matches||logo.classList.contains("bark"))return;logo.classList.add("bark")}',
-                      main_script(doc))
-        self.assertIn('logo.addEventListener("animationend",()=>logo.classList.remove("bark"))', main_script(doc))
-        self.assertIn('logo.addEventListener("mouseenter",bark);$(".wm-row").addEventListener("focusin",bark);'
-                      'setTimeout(bark,600);', main_script(doc))
+        # The logo glitches: two script-cloned ghost layers (clipped away at rest) show displaced slices for a
+        # few stepped frames while the base layer jitters by a pixel; one .5s run on load, on hover/focus and
+        # every fourth LED pulse (8s, no timer loop), never under reduced motion or in a hidden tab. No frames
+        # swap and the mark itself stays put.
+        for gone in ("bark", 'class="lf la"', 'class="lf lb"', ".lb{", ".lk{"):
+            self.assertNotIn(gone, doc, gone)
+        self.assertIn("glitch-x .5s steps(1) 1", anims)
+        self.assertIn("glitch-a .5s steps(1) 1", anims)
+        self.assertIn("glitch-b .5s steps(1) 1", anims)
+        self.assertIn(".g1,.g2{clip-path:inset(0 0 100% 0)}.g1{color:hsl(var(--steel))}.g2{color:hsl(var(--signal)/.55)}",
+                      style)
+        self.assertIn(".lf{position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal));",
+                      style)
+        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{transform:scale(.21);opacity:1}",
+                   "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);transform:scale(.21)}",
+                   "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);transform:scale(.21)}"):
+            self.assertIn(kf, style, kf)
+        script = main_script(doc)
+        self.assertIn('const logo=$("#logo"),lf0=logo.firstElementChild;["g1","g2"].forEach(c=>{const k=lf0.cloneNode(true);'
+                      'k.classList.add(c);logo.appendChild(k)});', script)
+        self.assertIn('const glitch=()=>{if(RM.matches||document.hidden||logo.classList.contains("glitch"))return;'
+                      'logo.classList.add("glitch")};', script)
+        self.assertIn('logo.addEventListener("animationend",()=>logo.classList.remove("glitch"));'
+                      'logo.addEventListener("mouseenter",glitch);$(".wm-row").addEventListener("focusin",glitch);'
+                      'setTimeout(glitch,600);let gi=0;$(".live .led").addEventListener("animationiteration",()=>{if(++gi%4===0)'
+                      'glitch()});', script)
         for decl in anims:
             if "infinite" in decl:
                 continue
             times = re.findall(r"(?<![\w.])\d*\.?\d+m?s\b", decl)
             self.assertTrue(times, decl)
             self.assertLess(max(secs(t) for t in times), 0.6, decl)
-        for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink", "bark-a",
-                     "bark-b"):
+        for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink", "glitch-x",
+                     "glitch-a", "glitch-b"):
             self.assertIn(f"@keyframes {name}{{", style)
+        self.assertEqual(style.count("@keyframes"), 10)
         # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
         # terminal's four output blocks stagger by 90ms and all finish within .7s.
         self.assertEqual(re.findall(r"animation-delay:([^;}]+)", effects), ["calc(var(--i)*40ms)",
