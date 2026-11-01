@@ -125,13 +125,13 @@ footer .ft{margin:0;padding:16px 0 32px;border-top:1px solid hsl(var(--hull));fo
 <div class="tb" style="--d:1"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal sources --verbose</p>
 <section class="health" id="health"{{HEALTH_REF}} aria-labelledby="src-h"><h2 class="vh" id="src-h">Source health: {{SOURCE_COUNT}} automated sources</h2>
 <p class="hs">{{HEALTH_SUMMARY}}</p>
-<p class="h-scope">Statuses describe this ledger’s automated source connectors and cached data, not employer site availability. Freshness and the latest refresh outcome are shown separately.</p>
+<p class="h-scope">Status of this ledger’s connectors and cached data, not of the employer sites.</p>
 {{HEALTH_ROWS}}
 </section></div>
 <div class="tb" style="--d:2"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal sources --help</p>
-<h3 class="vh">What the freshness statuses mean</h3><dl class="h-key">{{HEALTH_KEY}}</dl><p class="h-note">Data counts as fresh for {{FRESH_LIMIT}} after its last successful check; the next scheduled time is not guaranteed.</p></div>
+<h3 class="vh">What the freshness statuses mean</h3><dl class="h-key">{{HEALTH_KEY}}</dl><p class="h-note">Fresh = checked within {{FRESH_LIMIT}}. Scheduled times are approximate.</p></div>
 <div class="tb" style="--d:3"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal schedule</p>
-<p class="kv">every 6 h · cron {{CRON}} UTC · no refresh history kept; only the latest recorded attempt is shown</p></div>
+<p class="kv">every 6 h · cron {{CRON}} UTC · last 6 pulls kept per source</p></div>
 <div class="tb" style="--d:4"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> <span class="caret" aria-hidden="true"></span></p></div>
 </div></div></dialog>
 <button class="thm" id="theme" type="button" hidden><span class="thm-g" aria-hidden="true">◐</span><span class="thm-l">Light mode</span></button>

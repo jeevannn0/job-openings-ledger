@@ -3213,7 +3213,7 @@ class SourceHealthTests(unittest.TestCase):
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
         self.assertIn('<dt>Next run</dt><dd><time id="h-next" datetime="2026-10-31T23:53:00+05:30">'
-                      '31 Oct 23:53 IST</time><span id="h-late"></span> · scheduled, not guaranteed</dd>', block)
+                      '31 Oct 23:53 IST</time><span id="h-late"></span> · approx.</dd>', block)
         self.assertIn('<dt>Last refresh</dt><dd><time id="st-at" datetime="2026-10-31T22:47:00+05:30">'
                       '31 Oct 22:47 IST</time> <span class="age" id="st-age">0m ago</span></dd>', block)
         self.assertNotIn("04:47", section + block)  # last_attempt + 6h
@@ -3225,7 +3225,7 @@ class SourceHealthTests(unittest.TestCase):
             self.set_company(name, last_success=None, last_attempt=None)
         doc = R.render(self.state, self.template, self.config)
         block = status_block(doc)
-        self.assertIn("<dt>Next run</dt><dd>05:53, 11:53, 17:53, 23:53 IST · scheduled, not guaranteed</dd>", block)
+        self.assertIn("<dt>Next run</dt><dd>05:53, 11:53, 17:53, 23:53 IST · approx.</dd>", block)
         self.assertIn("<dt>Last refresh</dt><dd>Auto-check pending</dd>", block)
         for frag in ('id="h-next"', 'id="h-late"', 'id="st-at"', 'id="st-age"'):
             self.assertNotIn(frag, doc, frag)
@@ -3298,7 +3298,7 @@ class SourceHealthTests(unittest.TestCase):
         for m in glyphs:      # every decorative glyph sits alone inside an aria-hidden span
             self.assertTrue(section[:m.start()].endswith('<span class="g" aria-hidden="true">'))
             self.assertTrue(section[m.end():].startswith("</span>"))
-        self.assertIn('<dt>Freshness</dt><dd>worst <span class="st st-failed">', status_block(doc))
+        self.assertIn('<dt>Freshness</dt><dd><span class="st st-failed">', status_block(doc))
         self.assertNotIn('class="hc"', section)
         self.assertRegex(chs["GE Vernova"][1], r'<time datetime="[^"]+">[^<]+</time> · <span class="oc" '
                                                r'data-o="failed">No successful automated refresh yet, snapshot '
@@ -3310,7 +3310,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("<dd>None yet</dd>", chs["IQVIA"][1])
         # Every channel names its fields with dt/dd pairs, so each value has a programmatic label.
         for company, (_s, rest) in chs.items():
-            self.assertEqual(re.findall(r"<dt>([^<]+)</dt>", rest), ["Published", "Latest attempt", "Last good data"],
+            self.assertEqual(re.findall(r"<dt>([^<]+)</dt>", rest), ["Published", "Last pull", "Good data"],
                              company)
         self.assertIn('<ol class="ch-list" aria-label="Automated source connectors">', section)
         for value in re.findall(r'<time[^>]* datetime="([^"]+)"', section):
@@ -3398,14 +3398,13 @@ class SourceHealthTests(unittest.TestCase):
     def test_scope_note_contextualises_failed(self):
         doc = R.render(self.state, self.template, self.config)
         section = health_section(doc)
-        self.assertIn('<p class="h-scope">Statuses describe this ledger’s automated source connectors and cached '
-                      'data, not employer site availability. Freshness and the latest refresh outcome are shown '
-                      'separately.</p>', section)
+        self.assertIn('<p class="h-scope">Status of this ledger’s connectors and cached data, not of the employer '
+                      'sites.</p>', section)
         self.assertLess(section.index('class="h-scope"'), section.index('<ol class="ch-list"'))
         self.assertEqual(R.HEALTH_LABELS["failed"], "FAILED")
         self.assertEqual(R.FRESHNESS_THRESHOLD, dt.timedelta(hours=6, minutes=30))
         dialog = api_dialog(doc)
-        self.assertIn("no refresh history kept; only the latest recorded attempt is shown", dialog)
+        self.assertIn("last 6 pulls kept per source", dialog)
         # The key lives once, in the Requests terminal's `signal sources --help` block, after the source rows.
         self.assertEqual(doc.count('<dl class="h-key">'), 1)
         self.assertNotIn("h-key", page_outside_dialog(doc))
@@ -3414,15 +3413,20 @@ class SourceHealthTests(unittest.TestCase):
         card = dialog[dialog.index("signal sources --help</p>"):]
         card = card[:card.index("</div>", card.index('<p class="h-note">'))]
         self.assertIn('<h3 class="vh">What the freshness statuses mean</h3><dl class="h-key">', card)
-        self.assertIn('<p class="h-note">Data counts as fresh for 6h 30m after its last successful check; the next '
-                      'scheduled time is not guaranteed.</p>', card)
+        self.assertIn('<p class="h-note">Fresh = checked within 6h 30m. Scheduled times are approximate.</p>', card)
         self.assertEqual(doc.count("every 6"), 1)
         key = re.search(r'<dl class="h-key">(.*?)</dl>', card, re.S).group(1)
         self.assertEqual(re.findall(r'<div data-s="([a-z]+)"><dt>', key), list(R.HEALTH_STATES))
         for s in R.HEALTH_STATES:
             self.assertIn(f'{R.badge_html(s)}</dt><dd>{R.HEALTH_MEANINGS[s].format(limit="6h 30m")}</dd>', key)
-        self.assertIn("FAILED</span></dt><dd>Refresh was attempted, but no successful automated refresh is recorded "
-                      "yet.", key)
+        self.assertIn("FAILED</span></dt><dd>No successful refresh yet.", key)
+        self.assertEqual(R.HEALTH_MEANINGS, {
+            "live": "Refresh succeeded; data under {limit} old.",
+            "degraded": "Refresh held; cached data under {limit} old.",
+            "stale": "Good data older than {limit}.",
+            "failed": "No successful refresh yet.",
+            "unknown": "No automated check yet (snapshot or static source).",
+        })
         self.assertEqual(key.count("6h 30m"), 3)                       # live, degraded, stale
 
     def test_source_order_matches_config(self):
@@ -3516,8 +3520,8 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="h-scope">', '<div class="ch-head"',
                  '<ol class="ch-list"', prompt + "signal sources --help</p>", '<dl class="h-key">',
                  '<p class="h-note">', prompt + "signal schedule</p>",
-                 '<p class="kv">every 6 h · cron 23 */6 * * * UTC · no refresh history kept; only the latest recorded '
-                 'attempt is shown</p>', prompt + '<span class="caret" aria-hidden="true"></span></p>']
+                 '<p class="kv">every 6 h · cron 23 */6 * * * UTC · last 6 pulls kept per source</p>',
+                 prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb" style="--d:(\d)">', dialog), list("01234"))
         self.assertIn('<div class="tb" style="--d:0">' + prompt + 'signal status</p>\n<dl class="kvs">', dialog)
@@ -3721,7 +3725,7 @@ class SourceHealthTests(unittest.TestCase):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
         summary, block = health_summary(doc), status_block(doc)
-        self.assertIn('<dt>Freshness</dt><dd>worst <span class="st st-failed">'
+        self.assertIn('<dt>Freshness</dt><dd><span class="st st-failed">'
                       '<span class="g" aria-hidden="true">×</span> FAILED</span></dd>', block)
         # Per-state counts live only in the rows; the summary carries no count spans.
         self.assertNotIn('class="hc"', summary)
@@ -3729,20 +3733,20 @@ class SourceHealthTests(unittest.TestCase):
             self.assertNotIn(cls, hidden_selectors(style_of(doc)), cls)
         # The terminal sheet wraps the summary and the status block at any width; their text is fixed wording.
         records = sum(R.published_counts(self.state, self.config).values())
-        self.assertEqual(re.sub(r"<[^>]+>", "", summary), f"// 01 Source array{records} records")
+        self.assertEqual(re.sub(r"<[^>]+>", "", summary), f"// 6 sources{records} records")
         new_today = sum(1 for r in self.state.jobs if r.first_seen == self.state.as_of.isoformat()
                         and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
-                         "Result2/6 sources accepted · 2 held · 1 failed · 1 pending"
+                         "Result2/6 ✓accepted · 2 held · 1 failed · 1 pending"
                          f"Openings{records} published · {new_today} new today"
-                         "Freshnessworst × FAILED"
-                         "Next run31 Oct 23:53 IST · scheduled, not guaranteed")
+                         "Freshness× FAILED"
+                         "Next run31 Oct 23:53 IST · approx.")
 
     def test_last_good_data_has_visual_separator(self):
         self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
         section = health_section(R.render(self.state, self.template, self.config))
-        self.assertRegex(section, r'<div class="h-data"><dt>Last good data</dt><dd><time datetime="[^"]+">'
+        self.assertRegex(section, r'<div class="h-data"><dt>Good data</dt><dd><time datetime="[^"]+">'
                                   r'[^<]+</time> <span class="age">0m ago</span></dd></div>')
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style_of(R.render(
             self.state, self.template, self.config)))[0]))
@@ -3794,12 +3798,11 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn('<span class="age">20h 0m ago</span>', section)
         # The terminal status block and the search-panel LED carry the same worst state.
         frags = dashboard_fragments(doc)
-        self.assertIn("<dt>Freshness</dt><dd>worst " + R.badge_html("stale") + "</dd>", frags["summary"])
+        self.assertIn("<dt>Freshness</dt><dd>" + R.badge_html("stale") + "</dd>", frags["summary"])
         self.assertIn('data-s="stale"', frags["led"])
         # A silent scheduler leaves an old page up: the browser re-ages it and flags the late update right
         # after the next-run time in the status block.
-        self.assertTrue(frags["summary"].endswith('</time><span id="h-late"></span> · scheduled, not guaranteed'
-                                                  '</dd></div>'))
+        self.assertTrue(frags["summary"].endswith('</time><span id="h-late"></span> · approx.</dd></div>'))
         script = main_script(doc)
         self.assertIn('$("#src-led").dataset.s=worst;', script)
         for gone in ("#srcs", ".sr-n", ".sr-s", "src-led-text", "#pulse"):
@@ -3880,14 +3883,21 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 1})
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/6 sources accepted · <span data-o="held">'
-                      '<b>2</b> held</span> · <span data-o="failed"><b>1</b> failed</span> · <span data-o="pending">'
-                      '<b>1</b> pending</span></dd></div>', block)
-        self.assertEqual(doc.count("sources accepted"), 1)               # status block only
+        # "N/M ✓" (the word stays for screen readers), then only the non-zero holds/failures/pendings.
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/6 <span aria-hidden="true">✓</span>'
+                      '<span class="vh">accepted</span> · <span data-o="held"><b>2</b> held</span> · <span data-o="failed">'
+                      '<b>1</b> failed</span> · <span data-o="pending"><b>1</b> pending</span></dd></div>', block)
+        self.assertNotIn("sources accepted", doc)
+        for c in self.config.companies:
+            self.set_company(c, status="ok", last_success=iso(REF), last_attempt=iso(REF))
+        clean = status_block(R.render(self.state, self.template, self.config))
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">6</b>/6 <span aria-hidden="true">✓</span>'
+                      '<span class="vh">accepted</span></dd></div>', clean)                      # no "0 held · 0 failed"
+        self.assertNotIn("<b>0</b>", clean)
         for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/6"):
             self.assertNotIn(gone, section, gone)
         self.assertNotIn("Worst", doc)
-        self.assertEqual(block.count("worst "), 1)                       # Freshness row badge only
+        self.assertNotIn("worst", block)                                 # the Freshness row is the badge alone
         self.assertEqual(sum(R.attempt_rollup(sources).values()), len(self.config.companies))
         self.assertEqual(set(R.ROLLUP_OF), set(R.ATTEMPT_TEXT))
 
@@ -4019,8 +4029,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
         self.assertRegex(status_block(doc), r'<div><dt>Next run</dt><dd><time id="h-next" datetime="[^"]+">'
-                                            r'31 Oct 23:53 IST</time><span id="h-late"></span> · scheduled, not '
-                                            r'guaranteed</dd></div>$')
+                                            r'31 Oct 23:53 IST</time><span id="h-late"></span> · approx\.</dd></div>$')
         # The search panel shows only the checked time; its LED takes the worst freshness state.
         self.assertEqual(dashboard_fragments(doc)["led"],
                          '<p class="label-sys src-led" id="src-led" data-s="failed"><span class="led" aria-hidden="true">'

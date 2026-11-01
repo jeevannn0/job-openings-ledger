@@ -856,11 +856,11 @@ CONNECTOR_LABELS = {
 }
 # Plain-language meaning of each freshness state; {limit} is the freshness threshold.
 HEALTH_MEANINGS = {
-    "live": "Latest refresh succeeded and its data is under {limit} old.",
-    "degraded": "Latest refresh was held; cached data under {limit} old is shown.",
-    "stale": "Last successful data is older than {limit}.",
-    "failed": "Refresh was attempted, but no successful automated refresh is recorded yet.",
-    "unknown": "No automated check is recorded yet (snapshot or static source).",
+    "live": "Refresh succeeded; data under {limit} old.",
+    "degraded": "Refresh held; cached data under {limit} old.",
+    "stale": "Good data older than {limit}.",
+    "failed": "No successful refresh yet.",
+    "unknown": "No automated check yet (snapshot or static source).",
 }
 LATE_TEXT = " · update not yet published"      # next slot + grace has passed with no newer page
 STALE_PREFIX = "stale since "                  # company label once cached data passes the threshold
@@ -1023,7 +1023,7 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
     total = sum(h.published for h in sources)
     # Summary: title and records only. Last refresh, result rollup, worst freshness and next run are
     # shown once, in the status block (status_block_html); per-source states live in the rows below.
-    parts = ['<span class="hs-t"><span class="sl" aria-hidden="true">// 01 </span>Source array</span>',
+    parts = [f'<span class="hs-t"><span class="sl" aria-hidden="true">// </span>{len(sources)} source{"" if len(sources) == 1 else "s"}</span>',
              f'<span class="hs-r">{total} record{"" if total == 1 else "s"}</span>']
     rows = []
     meter = '<span class="ch-m" aria-hidden="true">' + "<i></i>" * METER_CELLS + "</span>"
@@ -1036,8 +1036,8 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
                     f'<span class="ch-c"><span class="vh">, source connector </span>'
                     f'{html.escape(connector_label(config, h.company))}</span></span>{badge_html(h.state)}{meter}'
                     f'<dl class="ch-d"><div class="ch-p"><dt>Published</dt><dd class="num">{h.published}</dd></div>'
-                    f'<div class="ch-a"><dt>Latest attempt</dt><dd>{attempt}</dd></div>'
-                    f'<div class="h-data"><dt>Last good data</dt><dd>{data}</dd></div></dl>'
+                    f'<div class="ch-a"><dt>Last pull</dt><dd>{attempt}</dd></div>'
+                    f'<div class="h-data"><dt>Good data</dt><dd>{data}</dd></div></dl>'
                     f'{pulls_html(state.companies[h.company].pulls)}</li>')
     # Visual column header for the terminal's source grid; each row still labels its own fields with dt/dd.
     head = ('<div class="ch-head" aria-hidden="true">' + "".join(f"<span>{c}</span>" for c in CHANNEL_COLUMNS)
@@ -1046,7 +1046,7 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
         '\n<ol class="ch-list" aria-label="Automated source connectors">\n' + "\n".join(rows) + "\n</ol>"
 
 
-CHANNEL_COLUMNS = ("CH", "Source / connector", "Freshness", "Published", "Latest attempt", "Last good data")
+CHANNEL_COLUMNS = ("CH", "Source / connector", "Freshness", "Published", "Last pull", "Good data")
 
 
 def pulls_html(pulls: list) -> str:
@@ -1086,22 +1086,23 @@ def status_block_html(state: State, config: Config) -> str:
         last = f'{at} <span class="age" id="st-age">{age_text(reference - checked)}</span>'
     else:
         last = "Auto-check pending"
-    result = (f'<b data-o="accepted">{roll["accepted"]}</b>/{len(sources)} sources {ROLLUP_LABELS["accepted"]} · '
-              + " · ".join(f'<span data-o="{k}"><b>{roll[k]}</b> {ROLLUP_LABELS[k]}</span>'
-                           for k in ROLLUP_KEYS if k != "accepted"))
+    result = " · ".join([f'<b data-o="accepted">{roll["accepted"]}</b>/{len(sources)} <span aria-hidden="true">✓</span>'
+                         f'<span class="vh">{ROLLUP_LABELS["accepted"]}</span>']
+                        + [f'<span data-o="{k}"><b>{roll[k]}</b> {ROLLUP_LABELS[k]}</span>'
+                           for k in ROLLUP_KEYS if k != "accepted" and roll[k]])
     published = sum(published_counts(state, config).values())
     today = state.as_of.isoformat()
     new_today = sum(1 for r in state.jobs if r.first_seen == today and
                     max(0, (state.as_of - dt.date.fromisoformat(r.posted_date)).days) <= config.max_age_days)
     openings = f"<b>{published}</b> published · <b>{new_today}</b> new today"
-    worst = f"worst {badge_html(worst_state(h.state for h in sources))}"
+    worst = badge_html(worst_state(h.state for h in sources))
     if reference:
         # #h-next and #h-late live once, here; the browser flags a late update.
         nxt = time_html(next_scheduled(reference), ' id="h-next"') + '<span id="h-late"></span>'
     else:
         nxt = schedule_slots_text()
     rows = (("Last refresh", last), ("Result", result), ("Openings", openings), ("Freshness", worst),
-            ("Next run", f"{nxt} · scheduled, not guaranteed"))
+            ("Next run", f"{nxt} · approx."))
     return "".join(f"<div><dt>{k}</dt><dd>{v}</dd></div>" for k, v in rows)
 
 
