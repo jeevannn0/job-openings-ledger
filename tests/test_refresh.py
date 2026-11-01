@@ -332,6 +332,24 @@ class SeedAndRenderTests(unittest.TestCase):
         self.assertIn('"IQVIA":"stale since Oct 30"', doc)
         self.assertIn('"ZS":"not auto-checked"', doc)
 
+    def test_counted_nouns_agree_with_their_numbers(self):
+        """The live region and the Informational heading say "1 opening" / "1 company", not "1 openings"."""
+        config, _e, state, template = env()
+        doc = R.render(state, template, config)
+        n = len(state.empty_companies)
+        self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {n} companies</span>', doc)
+        total = sum(R.published_counts(state, config).values())
+        self.assertIn('<div class="readout vh" role="status" aria-live="polite">Showing <span id="status-total">'
+                      f'{total}</span> <span id="status-n">openings</span> across <span id="status-companies">', doc)
+        self.assertIn('<span id="status-c">companies</span>. Filter: <span id="status-filter">30 DAYS</span></div>', doc)
+        self.assertIn('$("#status-n").textContent=t===1?"opening":"openings";', doc)
+        self.assertIn('$("#status-c").textContent=c===1?"company":"companies";', doc)
+        state.empty_companies = state.empty_companies[:1]
+        one = R.render(state, template, config)
+        self.assertIn('<span class="label-sys" id="empty-h">Informational · 1 company</span>', one)
+        self.assertNotIn("1 companies", one)
+        self.assertEqual(template.count("{{EMPTY_NOUN}}"), 1)
+
     def test_malicious_title_is_inert(self):
         config, _e, state, template = env()
         evil = '</script><script>alert(1)</script><!-- \u2028\u2029 "q" \'s\''

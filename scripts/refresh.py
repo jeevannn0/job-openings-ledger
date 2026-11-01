@@ -1188,6 +1188,7 @@ def render(state: State, template: str, config: Config) -> str:
         "AS_OF_JS": js_json(state.as_of.isoformat()),
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),
         "EMPTY_COUNT": str(len(state.empty_companies)),
+        "EMPTY_NOUN": "company" if len(state.empty_companies) == 1 else "companies",
         "HEALTH_REF": health_ref,
         "HEALTH_SUMMARY": health_summary,
         "HEALTH_ROWS": health_rows,
