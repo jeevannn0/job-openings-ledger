@@ -3439,14 +3439,17 @@ class SourceHealthTests(unittest.TestCase):
                                                                        "animation:overlay-fade-in .2s ease-out",
                                                                        "animation:none!important"])
         # Brand mark: the guard-dog silhouette converted to shade-block text (no image, no external asset), decorative.
-        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><pre class="lf">', doc)
+        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><span class="ls"><pre class="lf">', doc)
         self.assertEqual(doc.count("job signal"), 1)             # header wordmark only; no Ledger card
         for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<img", "<svg"):
             self.assertNotIn(gone, doc, gone)
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
         self.assertIn("width:calc(72ch * .21);height:34px;overflow:hidden;font:10px/10px var(--font-mono)",
                       rules[(".logo",)])
-        self.assertIn("transform:scale(.21);transform-origin:0 0", rules[(".lf",)])
+        # The scale sits on a static wrapper; the text layers inside carry no transform (Safari mis-renders
+        # transformed elements whose transform-related properties animate).
+        self.assertEqual(rules[(".ls",)], "position:absolute;top:0;left:0;transform:scale(.21);transform-origin:0 0")
+        self.assertEqual(rules[(".lf",)], "position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal))")
         for gone in (".lc{", ".lk{", ".lb{", ".lf b{"):
             self.assertNotIn(gone, style, gone)
         # Chamfered panels and buttons with a signal hairline; the header status panel is gone.
@@ -3919,7 +3922,7 @@ class SourceHealthTests(unittest.TestCase):
     def test_header_has_only_the_requests_button(self):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('</pre></span><span class="wm">job signal</span><span class="label-sys-bright live"><span '
+        self.assertIn('</pre></span></span><span class="wm">job signal</span><span class="label-sys-bright live"><span '
                       'class="led led-pulse" aria-hidden="true"></span>live · automated</span><button class="th-m" '
                       'id="theme-m" type="button" aria-label="Switch to light mode" hidden>[ theme ]</button><button '
                       'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
@@ -4031,25 +4034,27 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("glitch-b .5s steps(1) 1", anims)
         self.assertIn(".g1,.g2{clip-path:inset(0 0 100% 0)}.g1{color:hsl(var(--steel))}.g2{color:hsl(var(--signal)/.55)}",
                       style)
-        self.assertIn(".lf{position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal));",
+        self.assertIn(".lf{position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal))}",
                       style)
-        # The scale is never animated (Safari drops it when keyframe transform lists differ, which blew the mark
-        # up to full size on phones); the glitch moves layers with the standalone `translate` property only.
-        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{translate:0 0;opacity:1}8%{translate:1px -1px;opacity:.85}",
-                   "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);translate:0 0}8%{clip-path:inset(12% 0 64% 0);"
-                   "translate:-3px 0}",
-                   "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);translate:0 0}14%{clip-path:inset(40% 0 36% 0);"
-                   "translate:3px 0}"):
+        # Nothing transform-related is ever animated: the scale lives on the static .ls wrapper and the layers
+        # are offset with left/top in the wrapper's (unscaled) space. iOS Safari blew the mark up to full size
+        # for the length of the glitch when the scaled element itself animated transform or translate.
+        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{left:0;top:0;opacity:1}8%{left:4px;top:-3px;opacity:.85}",
+                   "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);left:0}8%{clip-path:inset(12% 0 64% 0);"
+                   "left:-16px}",
+                   "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);left:0}14%{clip-path:inset(40% 0 36% 0);"
+                   "left:14px}"):
             self.assertIn(kf, style, kf)
         for name in ("glitch-x", "glitch-a", "glitch-b"):
             body = re.search(r"@keyframes %s\{(.*?)\}\}" % name, style).group(1)
-            self.assertNotIn("transform", body, name)
-        self.assertEqual(style.count("scale(.21)"), 1)                       # only the static .lf rule
+            for gone in ("transform", "translate", "scale", "rotate"):
+                self.assertNotIn(gone, body, (name, gone))
+        self.assertEqual(style.count("scale(.21)"), 1)                       # only the static .ls rule
         self.assertIn(".logo{position:relative;display:inline-block;flex:none;width:calc(72ch * .21);height:34px;overflow:hidden;"
                       "font:10px/10px var(--font-mono);cursor:default;contain:paint}", style)   # the box always clips
         script = main_script(doc)
-        self.assertIn('const logo=$("#logo"),lf0=logo.firstElementChild;["g1","g2"].forEach(c=>{const k=lf0.cloneNode(true);'
-                      'k.classList.add(c);logo.appendChild(k)});', script)
+        self.assertIn('const logo=$("#logo"),ls=logo.firstElementChild,lf0=ls.firstElementChild;["g1","g2"].forEach(c=>{'
+                      'const k=lf0.cloneNode(true);k.classList.add(c);ls.appendChild(k)});', script)
         self.assertIn('const glitch=()=>{if(RM.matches||document.hidden||logo.classList.contains("glitch"))return;'
                       'logo.classList.add("glitch")};', script)
         self.assertIn('logo.addEventListener("animationend",()=>logo.classList.remove("glitch"));'
