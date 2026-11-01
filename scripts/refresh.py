@@ -839,9 +839,10 @@ def checked_html(state: State) -> str:
 # scheduler runs cron slots hours late at busy times and sometimes drops them outright (two of the four
 # six-hourly slots on 1 Nov 2026 never ran). A run that finds nothing new is cheap and says "no change".
 FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # two schedule slots plus slack: one dropped slot never goes stale
-SCHEDULE_CRON = "23 */3 * * *"          # UTC; must match .github/workflows/refresh.yml
-SCHEDULE_UTC_MINUTE = 23
-SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # 05:53, 08:53, 11:53, 14:53, 17:53, 20:53, 23:53, 02:53 IST
+# Minute 30 UTC is on the hour in IST (UTC+5:30), and off the top-of-the-hour rush GitHub's scheduler warns about.
+SCHEDULE_CRON = "30 */3 * * *"          # UTC; must match .github/workflows/refresh.yml
+SCHEDULE_UTC_MINUTE = 30
+SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 IST
 HEALTH_STATES = ("live", "degraded", "stale", "failed", "unknown")     # display order
 HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least to most severe
 HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",

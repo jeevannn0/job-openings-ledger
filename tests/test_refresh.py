@@ -1380,7 +1380,7 @@ class WorkflowTests(unittest.TestCase):
         return m.group(1)
 
     def test_triggers(self):
-        self.assertRegex(self.text, r'(?m)^  schedule:\n(?:    #[^\n]*\n)*    - cron: "23 \*/3 \* \* \*"')
+        self.assertRegex(self.text, r'(?m)^  schedule:\n(?:    #[^\n]*\n)*    - cron: "30 \*/3 \* \* \*"')
         self.assertEqual(R.REFRESH_CADENCE, dt.timedelta(hours=6))   # removal-hold confirmation spacing
         self.assertRegex(self.text, r"(?m)^  workflow_dispatch:\s*$")
         self.assertRegex(self.text, r"(?m)^  push:\s*$")                     # publish-only path, see below
@@ -3343,39 +3343,40 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(R.age_text(dt.timedelta(days=3, hours=1)), "3d ago")
 
     def test_schedule_slots_and_date_boundaries(self):
-        self.assertEqual(R.SCHEDULE_CRON, "23 */3 * * *")
+        self.assertEqual(R.SCHEDULE_CRON, "30 */3 * * *")
         workflow = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
         self.assertIn(f'cron: "{R.SCHEDULE_CRON}"', workflow)
         self.assertEqual(R.SCHEDULE_UTC_HOURS, tuple(range(0, 24, 3)))
         # Twice the cadence the freshness window needs, so one dropped slot never shows STALE.
         self.assertGreaterEqual(R.FRESHNESS_THRESHOLD, 2 * dt.timedelta(hours=3) + dt.timedelta(minutes=30))
-        self.assertEqual(R.schedule_slots_text(), "02:53, 05:53, 08:53, 11:53, 14:53, 17:53, 20:53, 23:53 IST")
+        # On the hour in IST: minute 30 UTC plus the 5:30 offset.
+        self.assertEqual(R.schedule_slots_text(), "00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 IST")
         ist = lambda *a: dt.datetime(*a, tzinfo=R.IST)   # noqa: E731
         cases = [
-            (ist(2026, 10, 31, 5, 52), ist(2026, 10, 31, 5, 53)),
-            (ist(2026, 10, 31, 5, 53), ist(2026, 10, 31, 8, 53)),      # strictly after a slot
-            (ist(2026, 10, 31, 11, 53, 1), ist(2026, 10, 31, 14, 53)),
-            (ist(2026, 10, 31, 17, 53), ist(2026, 10, 31, 20, 53)),
-            (ist(2026, 10, 31, 22, 47), ist(2026, 10, 31, 23, 53)),
-            (ist(2026, 10, 31, 23, 53), ist(2026, 11, 1, 2, 53)),       # IST date rolls over
-            (ist(2026, 12, 31, 23, 54), ist(2027, 1, 1, 2, 53)),        # year rolls over
-            (ist(2026, 11, 1, 0, 0), ist(2026, 11, 1, 2, 53)),
-            (dt.datetime(2026, 11, 1, 0, 23, tzinfo=dt.timezone.utc), ist(2026, 11, 1, 8, 53)),
+            (ist(2026, 10, 31, 5, 59), ist(2026, 10, 31, 6, 0)),
+            (ist(2026, 10, 31, 6, 0), ist(2026, 10, 31, 9, 0)),        # strictly after a slot
+            (ist(2026, 10, 31, 12, 0, 1), ist(2026, 10, 31, 15, 0)),
+            (ist(2026, 10, 31, 18, 0), ist(2026, 10, 31, 21, 0)),
+            (ist(2026, 10, 31, 22, 47), ist(2026, 11, 1, 0, 0)),        # IST date rolls over
+            (ist(2026, 10, 31, 23, 59), ist(2026, 11, 1, 0, 0)),
+            (ist(2026, 12, 31, 23, 54), ist(2027, 1, 1, 0, 0)),         # year rolls over
+            (ist(2026, 11, 1, 0, 0), ist(2026, 11, 1, 3, 0)),
+            (dt.datetime(2026, 11, 1, 0, 30, tzinfo=dt.timezone.utc), ist(2026, 11, 1, 9, 0)),
         ]
         for ref, expected in cases:
             with self.subTest(ref):
                 got = R.next_scheduled(ref)
                 self.assertEqual(got, expected)
                 self.assertEqual(got.utcoffset(), dt.timedelta(hours=5, minutes=30))
-        self.assertEqual({f"{R.next_scheduled(ist(2026, 10, 31, h, 0)):%H:%M}" for h in (1, 4, 7, 10, 13, 16, 19, 22)},
-                         {"02:53", "05:53", "08:53", "11:53", "14:53", "17:53", "20:53", "23:53"})
+        self.assertEqual({f"{R.next_scheduled(ist(2026, 10, 31, h, 30)):%H:%M}" for h in (0, 3, 6, 9, 12, 15, 18, 21)},
+                         {"03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00", "00:00"})
 
     def test_next_scheduled_uses_cron_not_last_attempt(self):
         self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
-        self.assertIn('<dt>Next run</dt><dd><time id="h-next" datetime="2026-10-31T23:53:00+05:30">'
-                      '31 Oct 23:53 IST</time><span id="h-late"></span> · approx.</dd>', block)
+        self.assertIn('<dt>Next run</dt><dd><time id="h-next" datetime="2026-11-01T00:00:00+05:30">'
+                      '1 Nov 00:00 IST</time><span id="h-late"></span> · approx.</dd>', block)
         self.assertIn('<dt>Last refresh</dt><dd><time id="st-at" datetime="2026-10-31T22:47:00+05:30">'
                       '31 Oct 22:47 IST</time> <span class="age" id="st-age">0m ago</span></dd>', block)
         self.assertNotIn("04:47", section + block)  # last_attempt + 6h
@@ -3387,7 +3388,7 @@ class SourceHealthTests(unittest.TestCase):
             self.set_company(name, last_success=None, last_attempt=None)
         doc = R.render(self.state, self.template, self.config)
         block = status_block(doc)
-        self.assertIn("<dt>Next run</dt><dd>02:53, 05:53, 08:53, 11:53, 14:53, 17:53, 20:53, 23:53 IST · approx.</dd>", block)
+        self.assertIn("<dt>Next run</dt><dd>00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 IST · approx.</dd>", block)
         self.assertIn("<dt>Last refresh</dt><dd>Auto-check pending</dd>", block)
         for frag in ('id="h-next"', 'id="h-late"', 'id="st-at"', 'id="st-age"'):
             self.assertNotIn(frag, doc, frag)
@@ -3686,7 +3687,7 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="h-scope">', '<div class="ch-head"',
                  '<ol class="ch-list"', prompt + "signal sources --help</p>", '<dl class="h-key">',
                  '<p class="h-note">', prompt + "signal schedule</p>",
-                 '<p class="kv">every 3 h · cron 23 */3 * * * UTC · last 6 pulls kept per source</p>',
+                 '<p class="kv">every 3 h on the hour IST · cron 30 */3 * * * UTC · last 6 pulls kept per source</p>',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb" style="--d:(\d)">', dialog), list("01234"))
@@ -3907,7 +3908,7 @@ class SourceHealthTests(unittest.TestCase):
                          "Result2/6 ✓accepted · 2 held · 1 failed · 1 pending"
                          f"Openings{records} published · {new_today} new today"
                          "Freshness× FAILED"
-                         "Next run31 Oct 23:53 IST · approx.")
+                         "Next run1 Nov 00:00 IST · approx.")
 
     def test_last_good_data_has_visual_separator(self):
         self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
@@ -3939,7 +3940,7 @@ class SourceHealthTests(unittest.TestCase):
                 R.render(self.state, self.template.replace("</footer>", "{{" + name + "}}</footer>"), self.config)
         doc = R.render(self.state, self.template, self.config)
         self.assertIn("{{CRON}}", self.template)
-        self.assertIn("· cron 23 */3 * * * UTC ·", api_dialog(doc))
+        self.assertIn("· cron 30 */3 * * * UTC ·", api_dialog(doc))
         self.assertEqual(doc.count(f"cron {R.SCHEDULE_CRON} UTC"), 1)
         self.assertIsNone(R.PLACEHOLDER.search(doc))
         for name in sorted(names):
@@ -4216,7 +4217,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
         self.assertRegex(status_block(doc), r'<div><dt>Next run</dt><dd><time id="h-next" datetime="[^"]+">'
-                                            r'31 Oct 23:53 IST</time><span id="h-late"></span> · approx\.</dd></div>$')
+                                            r'1 Nov 00:00 IST</time><span id="h-late"></span> · approx\.</dd></div>$')
         # The search panel shows only the checked time; its LED takes the worst freshness state.
         self.assertEqual(dashboard_fragments(doc)["led"],
                          '<p class="label-sys src-led" id="src-led" data-s="failed"><span class="led" aria-hidden="true">'
