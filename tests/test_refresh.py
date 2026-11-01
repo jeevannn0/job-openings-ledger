@@ -4505,6 +4505,10 @@ class SourceHealthTests(unittest.TestCase):
                         'if(onlyNew)on.push(["new","New today"]);if(af.value!=="30")on.push(["age",af.value==="0"?"Posted today":'
                         '`Posted ≤${af.value} days`]);',
                         'if(b.dataset.k==="new"){onlyNew=false;render();$("#only-today").focus();return}',
+                        # Removing a select's chip puts focus on that select, or on the Filters toggle when the
+                        # phone panel hiding it is collapsed (a hidden select cannot take focus).
+                        '(b.dataset.k==="company"?ci.querySelector(".ci"):el.closest("#fsel")&&cmd.hasAttribute("data-fc")'
+                        '?ftog:el).focus()});',
                         'q.value.trim()||onlyNew||+af.value<30',
                         'clf.value="";onlyNew=false;render();q.focus()};',
                         '<p class="c-m">${nw===0?\'<span class="nw">New</span>\':""}<span class="bd" data-b="${esc(b)}">'):
