@@ -4033,10 +4033,20 @@ class SourceHealthTests(unittest.TestCase):
                       style)
         self.assertIn(".lf{position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal));",
                       style)
-        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{transform:scale(.21);opacity:1}",
-                   "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);transform:scale(.21)}",
-                   "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);transform:scale(.21)}"):
+        # The scale is never animated (Safari drops it when keyframe transform lists differ, which blew the mark
+        # up to full size on phones); the glitch moves layers with the standalone `translate` property only.
+        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{translate:0 0;opacity:1}8%{translate:1px -1px;opacity:.85}",
+                   "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);translate:0 0}8%{clip-path:inset(12% 0 64% 0);"
+                   "translate:-3px 0}",
+                   "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);translate:0 0}14%{clip-path:inset(40% 0 36% 0);"
+                   "translate:3px 0}"):
             self.assertIn(kf, style, kf)
+        for name in ("glitch-x", "glitch-a", "glitch-b"):
+            body = re.search(r"@keyframes %s\{(.*?)\}\}" % name, style).group(1)
+            self.assertNotIn("transform", body, name)
+        self.assertEqual(style.count("scale(.21)"), 1)                       # only the static .lf rule
+        self.assertIn(".logo{position:relative;display:inline-block;flex:none;width:calc(72ch * .21);height:34px;overflow:hidden;"
+                      "font:10px/10px var(--font-mono);cursor:default;contain:paint}", style)   # the box always clips
         script = main_script(doc)
         self.assertIn('const logo=$("#logo"),lf0=logo.firstElementChild;["g1","g2"].forEach(c=>{const k=lf0.cloneNode(true);'
                       'k.classList.add(c);logo.appendChild(k)});', script)
