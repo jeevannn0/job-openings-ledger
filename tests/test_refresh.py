@@ -3924,7 +3924,7 @@ class SourceHealthTests(unittest.TestCase):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
         self.assertIn('</pre></span></span><span class="wm">job signal</span><span class="label-sys-bright live"><span '
-                      'class="led led-pulse" aria-hidden="true"></span>live · automated</span><button class="th-m" '
+                      'class="led led-pulse" aria-hidden="true"></span>live<span class="lv-x"> · automated</span></span><button class="th-m" '
                       'id="theme-m" type="button" aria-label="Switch to light mode" hidden>[ theme ]</button><button '
                       'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
                       '[ requests ]</button></div>', doc)
@@ -3969,6 +3969,10 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("font:600 15px/1.35 var(--font-sans)", rules[("h1",)])          # no display-size hero
         self.assertNotIn("clamp(", rules[("h1",)])
         self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
+        # Phone header is two rows: logo + wordmark + a short LIVE badge (" · automated" hidden so it fits),
+        # then both bracket buttons pushed together to the right.
+        self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.live+.th-m{margin-left:auto}.th-m:not([hidden])"))
+        self.assertNotIn(".lv-x", base)
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
         self.assertRegex(status_block(doc), r'<div><dt>Next run</dt><dd><time id="h-next" datetime="[^"]+">'
