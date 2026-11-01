@@ -3438,13 +3438,15 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(re.findall(r"::backdrop\{([^}]*)\}", style), ["background:hsl(var(--void-deep)/.72)",
                                                                        "animation:overlay-fade-in .2s ease-out",
                                                                        "animation:none!important"])
-        # Blank brand marks: empty bordered boxes, no glyph or image.
-        self.assertIn('<span class="wm">job signal</span><span class="mark" aria-hidden="true"></span>', doc)
+        # Brand mark: an original half-block pixel guard dog in text (no image, no external asset), decorative.
+        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><pre class="lf la">', doc)
         self.assertEqual(doc.count("job signal"), 1)             # header wordmark only; no Ledger card
-        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary"):
+        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<img", "<svg"):
             self.assertNotIn(gone, doc, gone)
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
-        self.assertIn("width:100px;height:13px;border:1px dashed hsl(var(--hull))", rules[(".mark",)])
+        self.assertIn("width:calc(42ch * .18);height:36px;overflow:hidden;font:10px/10px var(--font-mono)",
+                      rules[(".logo",)])
+        self.assertIn("transform:scale(.18);transform-origin:0 0", rules[(".lf",)])
         # Chamfered panels and buttons with a signal hairline; the header status panel is gone.
         self.assertIn("clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%)", rules[(".panel",)])
         self.assertIn("clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))",
@@ -3662,7 +3664,7 @@ class SourceHealthTests(unittest.TestCase):
                         'if(e.textContent!==s)e.textContent=s};'):
             self.assertIn(snippet, script, snippet)
         self.assertLess(script.index('put("total",'), script.index("announce(visibleJobs.length"))
-        self.assertEqual(script.count("setTimeout("), 1)
+        self.assertEqual(script.count("setTimeout("), 2)        # the live-region debounce and the one-off bark
         # The search-panel counters are the only visible copy; the left-aside mirrors are gone.
         for gone in ("-side", "week-side", "in the last 7 days"):
             self.assertNotIn(gone, doc, gone)
@@ -3915,11 +3917,22 @@ class SourceHealthTests(unittest.TestCase):
     def test_header_has_only_the_requests_button(self):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('<div class="wm-row"><span class="wm">job signal</span><span class="mark" aria-hidden="true">'
-                      '</span><span class="label-sys-bright live"><span class="led led-pulse" aria-hidden="true">'
-                      '</span>live · automated</span><button class="th-m" id="theme-m" type="button" aria-label="Switch '
-                      'to light mode" hidden>[ theme ]</button><button class="th-m" id="req-btn-m" type="button" '
-                      'aria-haspopup="dialog" aria-controls="api" hidden>[ requests ]</button></div>', doc)
+        self.assertIn('</pre></span><span class="wm">job signal</span><span class="label-sys-bright live"><span '
+                      'class="led led-pulse" aria-hidden="true"></span>live · automated</span><button class="th-m" '
+                      'id="theme-m" type="button" aria-label="Switch to light mode" hidden>[ theme ]</button><button '
+                      'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
+                      '[ requests ]</button></div>', doc)
+        logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><span class="wm">', doc, re.S).group(1)
+        frames = re.findall(r'<pre class="lf (la|lb)">(.*?)</pre>', logo, re.S)
+        self.assertEqual([f[0] for f in frames], ["la", "lb"])
+        for _cls, body in frames:
+            text = re.sub(r"<[^>]+>", "", body)
+            self.assertEqual(text.count("\n"), 19)                               # 20 half-block rows
+            self.assertTrue(all(len(line) <= 42 for line in text.split("\n")))
+            self.assertEqual(set(text) - set("█▀▄ \n"), set())                # block glyphs and spaces only
+            self.assertEqual(body.count('<b class="lc">'), 2)                   # the spiked collar rows
+        self.assertNotIn('class="lk"', frames[0][1])                            # closed mouth: no bark marks
+        self.assertEqual(frames[1][1].count('<b class="lk">'), 4)              # open mouth: bark arcs
         # Two short lines on desktop; both are visually hidden (still read out) on phones.
         self.assertIn('<h1><span class="h1a">New openings every six hours</span><span class="h1b"> · 0–2 years · '
                       'Bengaluru · Kochi</span></h1>\n<p class="lede">First-party employer portals · deduplicated · '
@@ -3930,8 +3943,9 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(right, '<div class="hdr-r"><button class="chamfer-btn req" id="req-btn" type="button" '
                                 'aria-haspopup="dialog" aria-controls="api" hidden><span class="gl" aria-hidden="true">'
                                 '&gt;_</span> Requests</button></div>\n</header>')
-        for gone in ('class="panel', "status", "<pre", 'id="st-', "Details", "Status key", "signal status"):
+        for gone in ('class="panel', "status", '<pre class="pre"', 'id="st-', "Details", "Status key", "signal status"):
             self.assertNotIn(gone, header, gone)
+        self.assertEqual(header.count("<pre"), 2)                 # only the two logo frames
         # No `$ signal …` command text, status block or status key outside the dialog.
         outside = page_outside_dialog(doc)
         text = re.sub(r"<[^>]+>", "", outside)
@@ -4003,13 +4017,24 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("blink .5s steps(1) 6", anims)
         self.assertIn("pxin .24s steps(3) backwards", anims)
         self.assertIn("@keyframes blink{50%{opacity:0}}", style)
+        # The logo barks three times (two frames swapped with steps), on load and again on hover/focus; the
+        # class is removed when the run ends and never added under reduced motion.
+        self.assertIn("bark-a .36s steps(1) 3", anims)
+        self.assertIn("bark-b .36s steps(1) 3", anims)
+        self.assertIn("@keyframes bark-a{50%{opacity:0}}@keyframes bark-b{50%{opacity:1}}", style)
+        self.assertIn('bark=()=>{if(RM.matches||logo.classList.contains("bark"))return;logo.classList.add("bark")}',
+                      main_script(doc))
+        self.assertIn('logo.addEventListener("animationend",()=>logo.classList.remove("bark"))', main_script(doc))
+        self.assertIn('logo.addEventListener("mouseenter",bark);$(".wm-row").addEventListener("focusin",bark);'
+                      'setTimeout(bark,600);', main_script(doc))
         for decl in anims:
             if "infinite" in decl:
                 continue
             times = re.findall(r"(?<![\w.])\d*\.?\d+m?s\b", decl)
             self.assertTrue(times, decl)
             self.assertLess(max(secs(t) for t in times), 0.6, decl)
-        for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink"):
+        for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink", "bark-a",
+                     "bark-b"):
             self.assertIn(f"@keyframes {name}{{", style)
         # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
         # terminal's four output blocks stagger by 90ms and all finish within .7s.
@@ -4054,7 +4079,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("min-width:44px;height:44px", wide[(".thm:not([hidden])",)])
         sheet = dict((tuple(s), b) for s, b in css_rules(blocks[SHEET_MQ]))
         self.assertGreaterEqual(px(sheet[(".th-m:not([hidden])",)], "min-height"), 28)
-        for gone in (".lk", ".go", ".cta"):
+        for gone in (".lk{display:flex", ".go{", ".cta{"):       # the old Quick-views rows, card links and CTA stack
             self.assertNotIn(gone, style, gone)
         # On phones the card title link covers the whole card.
         self.assertIn('.job:after{content:"";position:absolute;inset:0}', blocks[PHONE_MQ])
