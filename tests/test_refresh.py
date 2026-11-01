@@ -4200,9 +4200,18 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("byNew=(x,y)=>x[5]-y[5]||oi(x[0])-oi(y[0]),byClose=(x,y)=>{const a=daysToClose(x[9]),"
                       "b=daysToClose(y[9]);return a===b?byNew(x,y):a===null?1:b===null?-1:a-b}", script)
         self.assertIn('jobs.filter(match).sort(sortBy==="close"?byClose:byNew)', script)
-        self.assertIn('<div class="tgl" role="group" aria-label="Sort openings"><button class="ob" id="sort-new" '
+        # Toolbar: a Today filter toggle ahead of the sort pair. It drives the "Posted within" select (0 = today)
+        # so the chips, Reset and the select itself all stay in sync, and render() mirrors the select back into
+        # the button's pressed state.
+        self.assertIn('<div class="tgl"><button class="ob" id="only-today" type="button" aria-pressed="false"><span class="vh">'
+                      'Show only openings posted </span>Today</button>'
+                      '<div class="tgl" role="group" aria-label="Sort openings"><button class="ob" id="sort-new" '
                       'type="button" aria-pressed="true">Newest</button><button class="ob" id="sort-close" type="button" '
-                      'aria-pressed="false">Closing soon</button></div>', doc)
+                      'aria-pressed="false">Closing soon</button></div></div>', doc)
+        self.assertIn('$("#only-today").addEventListener("click",()=>{af.value=af.value==="0"?"30":"0";render()});', script)
+        self.assertIn('put("today",today);$("#only-today").setAttribute("aria-pressed",String(af.value==="0"));', script)
+        self.assertIn(".tgl{display:flex;gap:6px}.tgl>.tgl{margin-left:6px}", style_of(doc))
+        self.assertIn('<option value="0">Today</option>', doc)
         self.assertIn('$("#sort-l").textContent=sortBy==="close"?"· closing soon":"· newest first"', script)
         # Company chips: "All companies" plus one per configured company, kept in sync with #company, which is a
         # non-visible state holder placed just before the phone Filters toggle and the three visible filters.
