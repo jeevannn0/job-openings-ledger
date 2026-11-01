@@ -3972,11 +3972,14 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("font:600 15px/1.35 var(--font-sans)", rules[("h1",)])          # no display-size hero
         self.assertNotIn("clamp(", rules[("h1",)])
         self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
-        # Phone header is a two-row grid: the mark + a short LIVE badge (" · automated" hidden) spanning the rest
-        # of row one, then both bracket buttons together on row two, pushed to the right.
+        # Phone header is two aligned columns: the mark on the left, centred across both rows; on the right the
+        # short LIVE badge (" · automated" hidden) above the two bracket buttons, all flush to the right edge.
+        # On 320px phones the buttons cannot fit beside the mark and take the whole second row instead.
         self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.wm-row{display:grid;grid-template-columns:auto 1fr auto}"
-                                                    ".live{grid-column:2/4}.live+.th-m{grid-column:1/3;justify-self:end}"
-                                                    ".live+.th-m+.th-m{grid-column:3}.th-m:not([hidden])"))
+                                                    ".logo{grid-row:1/3}.live{grid-column:2/4;justify-self:end}"
+                                                    ".live+.th-m{grid-column:2;justify-self:end}.live+.th-m+.th-m{grid-column:3}"
+                                                    ".th-m:not([hidden])"))
+        self.assertEqual(blocks["(max-width:359px)"], ".logo{grid-row:auto}.live+.th-m{grid-column:1/3}")
         self.assertNotIn(".lv-x", base)
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
