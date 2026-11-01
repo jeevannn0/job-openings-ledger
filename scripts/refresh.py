@@ -135,12 +135,41 @@ COMPANY_SPECS = {
                            r"[A-Za-z0-9-]+_(R\d{6,8})(?:-\d{1,3})?",
                            {"gehc_workday_cxs"}, {"gehc.wd5.myworkdayjobs.com"}),
     "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", {"zs_jibe_api"}, {"jobs.zs.com"}),
+    "Accenture": _spec(r"https://www\.accenture\.com/in-en/careers/jobdetails\?id=([A-Za-z0-9-]{6,40})_en",
+                       {"accenture_findjobs_api"}, {"www.accenture.com"}),
+    "Lilly": _spec(r"https://lilly\.wd115\.myworkdayjobs\.com/LLY/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
+                   r"_(R-\d{5,7})(?:-\d{1,3})?", {"workday_cxs"}, {"lilly.wd115.myworkdayjobs.com"}),
+    "AstraZeneca": _spec(r"https://careers\.astrazeneca\.com/job/[^/\s\"]+/[^/\s\"]+/\d{3,6}/(\d{6,14})",
+                         {"astrazeneca_talentbrew_html"}, {"careers.astrazeneca.com"}),
+    "Shell": _spec(r"https://shell\.wd3\.myworkdayjobs\.com/ShellCareers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
+                   r"_(R\d{5,8})(?:-\d{1,3})?", {"workday_cxs"}, {"shell.wd3.myworkdayjobs.com"}),
+    "GE Aerospace": _spec(r"https://geaerospace\.wd5\.myworkdayjobs\.com/GE_ExternalSite/job/(?:[A-Za-z0-9._~%-]+/)?"
+                          r"[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?", {"workday_cxs"}, {"geaerospace.wd5.myworkdayjobs.com"}),
+    "Fractal": _spec(r"https://fractal\.wd1\.myworkdayjobs\.com/Careers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
+                     r"_(SR-\d{4,7})(?:-\d{1,3})?", {"workday_cxs"}, {"fractal.wd1.myworkdayjobs.com"}),
+    "D. E. Shaw India": _spec(r"https://www\.deshawindia\.com/careers/[A-Za-z0-9-]+-(\d{3,7})",
+                              {"deshaw_nextdata_html"}, {"www.deshawindia.com"}),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
     "IQVIA": re.compile(r"R\d{6,8}"), "JPMorganChase": re.compile(r"\d{6,12}"),
     "GE HealthCare": re.compile(r"R\d{6,8}"), "ZS": re.compile(r"\d{3,8}"),
+    "Accenture": re.compile(r"(?:AIOC-S\d{6,10}|ATCI-\d{5,9}-S\d{5,9}|R\d{6,10}|\d{6,10})"),
+    "Lilly": re.compile(r"R-\d{5,7}"), "AstraZeneca": re.compile(r"\d{6,14}"), "Shell": re.compile(r"R\d{5,8}"),
+    "GE Aerospace": re.compile(r"R\d{6,9}"), "Fractal": re.compile(r"SR-\d{4,7}"),
+    "D. E. Shaw India": re.compile(r"\d{3,7}"),
 }
+
+# Target regions. A posting qualifies when any of its locations names one of these terms; the two region
+# keys are what the config and the page speak of, the terms are how employers actually write the places
+# (Kerala postings mostly name the city, so the state's cities are listed too).
+REGION_TERMS = {
+    "bengaluru": ("bengaluru", "bangalore"),
+    "kerala": ("kerala", "kochi", "cochin", "ernakulam", "kakkanad", "infopark", "thiruvananthapuram", "trivandrum",
+               "technopark", "kozhikode", "calicut", "thrissur", "kollam", "kannur", "palakkad", "alappuzha", "kottayam",
+               "malappuram"),
+}
+REGION_LABELS = {"bengaluru": "Bengaluru", "kerala": "Kerala"}
 
 SIEMENS_BASE = "https://jobs.siemens.com"
 SIEMENS_SEARCH = SIEMENS_BASE + "/en_US/externaljobs/SearchJobs"
@@ -206,10 +235,51 @@ ZS_DETAIL = ZS_FRONT + "?lang=en-us"
 ZS_PAGE = 10
 ZS_MIN_DELAY_S = 5.0       # jobs.zs.com robots.txt: crawl-delay: 5
 
-# Wall-clock cap for one whole refresh run, so the six sources together stay well inside the
-# workflow's 25-minute job timeout. load_config rejects source budgets that sum to more than this.
+# Other Workday tenants read through the same CXS API as IQVIA and GE HealthCare: (API base, public site base,
+# externalPath pattern). Each site's robots.txt allows its site folder and disallows only /refreshFacet/.
+WORKDAY_SITES = {
+    "Lilly": ("https://lilly.wd115.myworkdayjobs.com/wday/cxs/lilly/LLY", "https://lilly.wd115.myworkdayjobs.com/LLY",
+              re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(R-\d{5,7})(?:-\d{1,3})?")),
+    "Shell": ("https://shell.wd3.myworkdayjobs.com/wday/cxs/shell/ShellCareers",
+              "https://shell.wd3.myworkdayjobs.com/ShellCareers",
+              re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(R\d{5,8})(?:-\d{1,3})?")),
+    "GE Aerospace": ("https://geaerospace.wd5.myworkdayjobs.com/wday/cxs/geaerospace/GE_ExternalSite",
+                     "https://geaerospace.wd5.myworkdayjobs.com/GE_ExternalSite",
+                     re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?")),
+    "Fractal": ("https://fractal.wd1.myworkdayjobs.com/wday/cxs/fractal/Careers", "https://fractal.wd1.myworkdayjobs.com/Careers",
+                re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(SR-\d{4,7})(?:-\d{1,3})?")),
+}
+
+# AstraZeneca: TalentBrew, server-rendered. The India search (location facet 1269750) lists 15 postings a page
+# with the total in its heading; each job page carries a schema.org JobPosting with the exact posting date.
+AZ_BASE = "https://careers.astrazeneca.com"
+AZ_LIST = AZ_BASE + "/search-jobs?l=India&lp=1269750&lt=2"
+AZ_PAGE = 15
+AZ_TOTAL = re.compile(r"([\d,]+) results? for your search")
+AZ_LINK = re.compile(r'href="(/job/[^"/\s]+/[^"/\s]+/\d{3,6}/(\d{6,14}))"')
+AZ_LD = re.compile(r'<script\s+type="application/ld\+json">(.*?)</script>', re.I | re.S)
+
+# Accenture: the careers site's own search service (form-encoded POST, newest first, 100 a page, exact total
+# with an over-cap flag). Records carry the requisition ID, title, cities, the portal's experience bucket and
+# a day-resolution posting age, so a new row needs no further request. The location facet names the cities
+# the portal uses; the ones inside the target regions are selected at run time.
+ACN_API = "https://www.accenture.com/api/accenture/elastic/findjobs"
+ACN_FRONT = "https://www.accenture.com/in-en/careers/jobdetails?id={id}_en"
+ACN_PAGE = 100
+ACN_EXPERIENCE = "Experience: 0-2 years"     # the portal's own entry-level bucket (see refresh_accenture)
+ACN_POSTED = re.compile(r"posted\s+(?:(today)|(yesterday|1 day ago)|(\d{1,3})\s+days?\s+ago)", re.I)
+
+# D. E. Shaw India: the careers page embeds its whole catalogue (Next.js page data). No posting date is
+# published, so rows from this source are dated from the day the ledger first sees them (SEEN_BASIS_MODES).
+DESHAW_PAGE = "https://www.deshawindia.com/careers"
+DESHAW_FRONT = "https://www.deshawindia.com/careers/{slug}"
+DESHAW_NEXT = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+SEEN_BASIS_MODES = frozenset({"deshaw_nextdata_html"})
+
+# Wall-clock cap for one whole refresh run, so the thirteen sources together stay well inside the
+# workflow's 40-minute job timeout. load_config rejects source budgets that sum to more than this.
 # A source that would start with less than the floor is held.
-RUN_BUDGET_S = 1200.0
+RUN_BUDGET_S = 2100.0
 MIN_SOURCE_BUDGET_S = 30.0  # default floor; source_floor() uses each mode's own schema minimum
 
 # --------------------------------------------------------------------------- public boundary
@@ -410,7 +480,8 @@ class HostPolicy:
 class Config:
     max_age_days: int
     max_years: float
-    cities: tuple
+    regions: tuple            # REGION_TERMS keys, in config order
+    cities: tuple             # every place term of those regions, lower case
     hosts: dict
     companies: tuple          # ordered company names (page order)
     sources: dict             # company -> dict (mode + tunables)
@@ -437,6 +508,11 @@ _TUNABLES = {
     # ZS: robots.txt crawl-delay 5s means even robots + one listing page + one job page take > 15s
     # (with jitter); 60s is the floor that still covers a small listing.
     "zs_jibe_api": {"budget_s": (60, 600), "max_total": (10, 500), "max_new_checks": (0, 20)},
+    # Other Workday tenants (WORKDAY_SITES). A search term of "*" means the whole site, paginated in full.
+    "workday_cxs": {"budget_s": (30, 600), "search_terms": "terms", "max_total": (20, 3000), "max_new_details": (0, 60)},
+    "astrazeneca_talentbrew_html": {"budget_s": (30, 600), "max_total": (10, 500), "max_new_details": (0, 40)},
+    "accenture_findjobs_api": {"budget_s": (30, 600), "max_total": (50, 5000), "max_new_rows": (0, 500)},
+    "deshaw_nextdata_html": {"budget_s": (30, 600), "max_total": (10, 1000)},
     "static": {},
 }
 SIEMENS_MIN_DELAY_S = 2.0
@@ -456,11 +532,12 @@ def load_config(data: dict) -> Config:
     _check(set(data) == {"schema", "timezone", "filters", "hosts", "companies"}, "config: unexpected keys")
     _check(data["timezone"] == "Asia/Kolkata", "config: timezone must be Asia/Kolkata")
     f = data["filters"]
-    _check(isinstance(f, dict) and set(f) == {"max_age_days", "max_years", "cities"}, "config: bad filters")
+    _check(isinstance(f, dict) and set(f) == {"max_age_days", "max_years", "regions"}, "config: bad filters")
     _check(isinstance(f["max_age_days"], int) and 1 <= f["max_age_days"] <= 60, "config: max_age_days")
     _check(_num(f["max_years"]) and 0 <= f["max_years"] <= 10, "config: max_years")
-    _check(isinstance(f["cities"], list) and f["cities"] and
-           all(isinstance(c, str) and re.fullmatch(r"[a-z]{3,30}", c) for c in f["cities"]), "config: cities")
+    _check(isinstance(f["regions"], list) and f["regions"] and len(set(f["regions"])) == len(f["regions"]) and
+           all(isinstance(r, str) and r in REGION_TERMS for r in f["regions"]), "config: regions")
+    cities = tuple(dict.fromkeys(term for r in f["regions"] for term in REGION_TERMS[r]))
 
     hosts: dict[str, HostPolicy] = {}
     _check(isinstance(data["hosts"], dict), "config: hosts")
@@ -490,8 +567,8 @@ def load_config(data: dict) -> Config:
             if rule == "term":
                 _check(isinstance(v, str) and _TERM.fullmatch(v) is not None, f"config: {name}.{key}")
             elif rule == "terms":
-                _check(isinstance(v, list) and 1 <= len(v) <= 5 and
-                       all(isinstance(t, str) and _TERM.fullmatch(t) for t in v), f"config: {name}.{key}")
+                _check(isinstance(v, list) and 1 <= len(v) <= 5 and len(set(v)) == len(v) and
+                       all(isinstance(t, str) and (t == "*" or _TERM.fullmatch(t)) for t in v), f"config: {name}.{key}")
             else:
                 lo, hi = rule
                 _check(isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi, f"config: {name}.{key}")
@@ -511,7 +588,7 @@ def load_config(data: dict) -> Config:
     # Budgets must not oversubscribe the run, or late sources would always be cut short.
     _check(sum(s["budget_s"] for s in sources.values() if s["mode"] != "static") <= RUN_BUDGET_S,
            "config: source budgets must sum to at most the run budget")
-    return Config(f["max_age_days"], float(f["max_years"]), tuple(f["cities"]), hosts, tuple(companies), sources)
+    return Config(f["max_age_days"], float(f["max_years"]), tuple(f["regions"]), cities, hosts, tuple(companies), sources)
 
 
 def load_excluded(data: dict, config: Config) -> dict[str, frozenset]:
@@ -867,6 +944,10 @@ CONNECTOR_LABELS = {
     "iqvia_workday_cxs": "Workday CXS API",
     "gevernova_paradox_api": "Paradox Jobs API",
     "zs_jibe_api": "Jibe Jobs API",
+    "workday_cxs": "Workday CXS API",
+    "astrazeneca_talentbrew_html": "TalentBrew HTML",
+    "accenture_findjobs_api": "Careers search API",
+    "deshaw_nextdata_html": "Careers page data",
     "static": "Static snapshot",
 }
 # Plain-language meaning of each freshness state; {limit} is the freshness threshold.
@@ -1169,7 +1250,9 @@ def render(state: State, template: str, config: Config) -> str:
         validate_row(r, config)
     # Row 10: days since the ledger first saw the posting (0 = new today). This is what the feed's "New today"
     # toggle, the New tag on cards and the terminal's "+N new" all mean; the posting's own date is row 5.
-    rows = [r.js_row(state.as_of) + [days_since(r.first_seen, state.as_of)] for r in state.jobs]
+    # Row 11: 1 when the source publishes no posting date, so row 5 counts from first sight (SEEN_BASIS_MODES).
+    rows = [r.js_row(state.as_of) + [days_since(r.first_seen, state.as_of),
+                                     int(config.sources[r.company]["mode"] in SEEN_BASIS_MODES)] for r in state.jobs]
     visible = [r for r in rows if r[5] <= config.max_age_days]
     companies = len({r[0] for r in visible})
     day = long_date(state.as_of)
@@ -1190,6 +1273,8 @@ def render(state: State, template: str, config: Config) -> str:
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),
         "EMPTY_COUNT": str(len(state.empty_companies)),
         "EMPTY_NOUN": "company" if len(state.empty_companies) == 1 else "companies",
+        "EMPTY_HIDDEN": "" if state.empty_companies else " hidden",
+        "REGIONS": html.escape(" · ".join(REGION_LABELS[r] for r in config.regions)),
         "HEALTH_REF": health_ref,
         "HEALTH_SUMMARY": health_summary,
         "HEALTH_ROWS": health_rows,
@@ -1634,12 +1719,21 @@ def make_row(company: str, jid: str, title: str, exp: str, location: str, url: s
     return row
 
 
+def _place_city(place: str, config: Config) -> str:
+    """The city segment of a place: 'Bengaluru, Karnataka, India' (Oracle, Jibe), 'Bangalore - Karnataka - India'
+    (Avature) and 'India, Bengaluru' (Lilly's Workday) all show as their city; other places show their first
+    segment."""
+    segments = [s.strip() for s in re.split(r",| - ", place) if s.strip()]
+    for s in segments:
+        if any(c in s.lower() for c in config.cities):
+            return s
+    return segments[0] if segments else place.strip()
+
+
 def target_places(places: Iterable[str], config: Config) -> list[str]:
     hits = [p for p in places if any(c in p.lower() for c in config.cities)]
     rest = [p for p in places if p not in hits]
-    # 'Bengaluru, Karnataka, India' (Oracle, Jibe) and 'Bangalore - Karnataka - India' (Avature) both
-    # show as their city.
-    return [re.split(r",| - ", p, maxsplit=1)[0].strip() for p in hits + rest]
+    return [_place_city(p, config) for p in hits + rest]
 
 
 # --------------------------------------------------------------------------- sources
@@ -1829,9 +1923,9 @@ def _wd_search(fetcher: Fetcher, term: str, max_total: int, api: str = IQVIA_API
     return posts, total
 
 
-def _wd_id(posting: object) -> tuple[str, str] | None:
+def _wd_id(posting: object, path_re: re.Pattern = WD_PATH) -> tuple[str, str] | None:
     path = posting.get("externalPath") if isinstance(posting, dict) else None
-    m = WD_PATH.fullmatch(path) if isinstance(path, str) else None
+    m = path_re.fullmatch(path) if isinstance(path, str) else None
     return (m.group(1), path) if m else None
 
 
@@ -2261,10 +2355,14 @@ def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, 
 # -- GE HealthCare: Workday CXS, whole-site listing filtered to target cities locally
 
 def _gehc_detail(fetcher: Fetcher, path: str, jid: str) -> tuple[str, dict | None]:
+    return _wd_posting(fetcher, GEHC_API, path, jid)
+
+
+def _wd_posting(fetcher: Fetcher, api: str, path: str, jid: str) -> tuple[str, dict | None]:
     """'live' needs posted and canApply both true; 410 is 'gone'; explicit false is 'closed' (with the
     record); 404 is 'missing'; throttling, outages, maintenance and non-JSON pages are 'blocked';
     anything else is 'unknown'."""
-    resp = fetcher.request(GEHC_API + path, accept="json")
+    resp = fetcher.request(api + path, accept="json")
     if resp.status == 410:
         return "gone", None
     if _is_blocked(resp):
@@ -2301,19 +2399,37 @@ def _gehc_place(place: str, config: Config) -> str:
 
 def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
                  excluded: frozenset, config: Config) -> SourceResult:
+    return _refresh_workday("GE HealthCare", GEHC_API, GEHC_FRONT, WD_PATH, [""], cfg, rows, fetcher, now, cs,
+                            excluded, config)
+
+
+def refresh_workday(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                    excluded: frozenset, config: Config) -> SourceResult:
+    """Any tenant in WORKDAY_SITES; the configured search terms are unioned ("*" is the whole site)."""
+    api, front, path_re = WORKDAY_SITES[cfg["company"]]
+    terms = ["" if term == "*" else term for term in cfg["search_terms"]]
+    return _refresh_workday(cfg["company"], api, front, path_re, terms, cfg, rows, fetcher, now, cs, excluded, config)
+
+
+def _refresh_workday(company: str, api: str, front: str, path_re: re.Pattern, terms: list, cfg: dict,
+                     rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState, excluded: frozenset,
+                     config: Config) -> SourceResult:
     today = now.astimezone(IST).date()
-    found = _wd_search(fetcher, "", cfg["max_total"], GEHC_API)
-    if found is None:
-        return held("GE HealthCare", "workday listing incomplete or unavailable")
-    posts, total = found
     listing: dict[str, dict] = {}
     paths: dict[str, str] = {}
-    for p in posts:
-        ident = _wd_id(p)
-        if ident:
-            listing.setdefault(ident[0], p)
-            paths.setdefault(*ident)
-    res = SourceResult("GE HealthCare", True, f"listing {total}", listing_complete=True, listing_total=total,
+    total = 0
+    for term in terms:
+        found = _wd_search(fetcher, term, cfg["max_total"], api)
+        if found is None:
+            return held(company, "workday listing incomplete or unavailable")
+        posts, n = found
+        total += n
+        for p in posts:
+            ident = _wd_id(p, path_re)
+            if ident:
+                listing.setdefault(ident[0], p)
+                paths.setdefault(*ident)
+    res = SourceResult(company, True, f"listing {total}", listing_complete=True, listing_total=total,
                        listed=set(paths), absence_scope=set())
     states: dict[str, str] = {}
     streak = contradictory = 0
@@ -2323,8 +2439,8 @@ def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime,
             if r.job_id in paths:
                 res.live.add(r.job_id)        # detail not tried, but listed in the complete listing
             continue
-        path = paths.get(r.job_id) or r.canonical_url[len(GEHC_FRONT):]
-        st, info = _gehc_detail(fetcher, path, r.job_id)
+        path = paths.get(r.job_id) or r.canonical_url[len(front):]
+        st, info = _wd_posting(fetcher, api, path, r.job_id)
         streak = streak + 1 if st == "blocked" else 0
         states[r.job_id] = st
         if st == "gone" or (st == "closed" and r.job_id not in paths):
@@ -2341,7 +2457,7 @@ def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime,
         elif st == "missing":
             res.absence_scope.add(r.job_id)   # exact 404 and absent from the complete listing
     if rows and not any(v in ("live", "closed", "gone", "missing") for v in states.values()):
-        return held("GE HealthCare", "detail endpoint unavailable")
+        return held(company, "detail endpoint unavailable")
     existing = {r.job_id for r in rows}
     fresh: list[tuple[bool, str, str]] = []
     for jid, p in listing.items():
@@ -2349,8 +2465,8 @@ def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime,
             continue
         loc = str(p.get("locationsText") or "")
         direct = any(c in loc.lower() for c in config.cities)
-        if not direct and not WD_MULTI.fullmatch(loc.strip()):
-            continue                          # single non-target location
+        if not direct and not WD_MULTI.fullmatch(loc.strip()) and loc.strip():
+            continue                          # single non-target location (no text at all: ask the detail)
         fp = _wd_fingerprint(p)
         if _unscreened(jid, fp, cs):
             fresh.append((direct, jid, fp))
@@ -2359,7 +2475,7 @@ def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime,
     for _direct, jid, fp in fresh[:cfg["max_new_details"]]:
         checked += 1
         mark = screened_entry(today, fp)
-        st, info = _gehc_detail(fetcher, paths[jid], jid)
+        st, info = _wd_posting(fetcher, api, paths[jid], jid)
         if st == "blocked":
             break
         if st in ("closed", "gone", "missing"):
@@ -2376,7 +2492,7 @@ def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime,
             res.screened[jid] = mark
             continue
         shown = [_gehc_place(p, config) for p in target_places(places, config)]
-        row = make_row("GE HealthCare", jid, title, exp, join_places(shown), GEHC_FRONT + paths[jid], band,
+        row = make_row(company, jid, title, exp, join_places(shown), front + paths[jid], band,
                        workday_closing(info.get("endDate")), posted, today, config)
         if row:
             res.added.append(row)
@@ -2387,6 +2503,329 @@ def refresh_gehc(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime,
     res.counts = {"listed": len(listing), "live": len(res.live), "closed": len(res.closed),
                   "contradictory": contradictory, "new_checked": checked, "unscreened": len(fresh),
                   "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
+# -- AstraZeneca: TalentBrew search pages plus JobPosting JSON-LD on each job page
+
+def _az_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
+    """{job id: path} for every India posting, or why the listing cannot be trusted."""
+    links: dict[str, str] = {}
+    total: int | None = None
+    page = 1
+    while True:
+        resp = fetcher.request(AZ_LIST + (f"&p={page}" if page > 1 else ""))
+        if not html_ok(resp):
+            return "search page unavailable"
+        text = resp.text()
+        m = AZ_TOTAL.search(text)
+        if not m:
+            return "search total not found"
+        n = int(m.group(1).replace(",", ""))
+        if n > cfg["max_total"]:
+            return "listing total invalid"
+        if total is None:
+            total = n
+        elif n != total:
+            return "listing changed during pagination"
+        found = AZ_LINK.findall(text)
+        if not found and len(links) < total:
+            return "partial pagination"
+        for path, jid in found:
+            links.setdefault(jid, html.unescape(path))
+        if page * AZ_PAGE >= total:
+            break
+        page += 1
+    if len(links) < total:
+        return "partial pagination"
+    return links, total
+
+
+def _ld_places(data: dict) -> list[str]:
+    places = []
+    for item in data.get("jobLocation") or []:
+        address = item.get("address") if isinstance(item, dict) else None
+        if isinstance(address, dict):
+            parts = [str(address.get(k) or "").strip() for k in ("addressLocality", "addressRegion", "addressCountry")]
+            place = ", ".join(p for p in parts if p)
+            if place:
+                places.append(place)
+    return places
+
+
+def _az_detail(fetcher: Fetcher, path: str, jid: str) -> tuple[str, dict | None]:
+    """'live' with the JobPosting JSON-LD of a page that names the ID; 'gone' on an exact 404/410; 'blocked'
+    for throttling, outages and challenges; otherwise 'unknown'."""
+    resp = fetcher.request(AZ_BASE + path)
+    if _is_blocked(resp) or is_challenge(resp) or is_maintenance(resp):
+        return "blocked", None
+    if resp.status in (404, 410) and not resp.error:
+        return "gone", None
+    if not html_ok(resp) or jid not in resp.text():
+        return "unknown", None
+    for m in AZ_LD.finditer(resp.text()):
+        try:
+            data = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("@type") == "JobPosting":
+            return "live", data
+    return "unknown", None
+
+
+def refresh_astrazeneca(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                        excluded: frozenset, config: Config) -> SourceResult:
+    today = now.astimezone(IST).date()
+    got = _az_listing(cfg, fetcher)
+    if isinstance(got, str):
+        return held("AstraZeneca", got)
+    listing, total = got
+    res = SourceResult("AstraZeneca", True, f"listing {total}", listing_complete=True, listing_total=total,
+                       listed=set(listing), absence_scope=set())
+    streak = 0
+    for r in rows:
+        if r.job_id in listing:
+            res.live.add(r.job_id)
+            continue
+        if streak >= BLOCK_TRIP:
+            continue
+        st, _data = _az_detail(fetcher, urllib.parse.urlsplit(r.canonical_url).path, r.job_id)
+        streak = streak + 1 if st == "blocked" else 0
+        if st == "gone":
+            res.absence_scope.add(r.job_id)   # exact 404 and unlisted: counts toward removal
+        # a readable page for an unlisted ID is ambiguous: the row stays, unconfirmed
+    existing = {r.job_id for r in rows}
+    fresh = [(jid, path) for jid, path in sorted(listing.items(), reverse=True)
+             if jid not in existing and jid not in excluded and _unscreened(jid, _fingerprint(path), cs)]
+    checked = invalid = 0
+    for jid, path in fresh[:cfg["max_new_details"]]:
+        checked += 1
+        mark = screened_entry(today, _fingerprint(path))
+        st, data = _az_detail(fetcher, path, jid)
+        if st == "blocked":
+            break
+        if st == "gone":
+            res.screened[jid] = mark
+            continue
+        if st != "live" or data is None:
+            continue
+        title = clean_text(data.get("title"), 160)
+        places = _ld_places(data)
+        posted = parse_any_date(data.get("datePosted"))
+        ok, band, exp = qualifies(title, strip_html(str(data.get("description") or "")), posted, places, today, config)
+        if not ok:
+            res.screened[jid] = mark
+            continue
+        row = make_row("AstraZeneca", jid, title, exp, join_places(target_places(places, config)), AZ_BASE + path,
+                       band, generic_closing(data.get("validThrough")), posted, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            invalid += 1
+    res.counts = {"listed": len(listing), "live": len(res.live), "new_checked": checked, "unscreened": len(fresh),
+                  "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
+# -- Accenture: the careers site's search service
+
+def _acn_page(fetcher: Fetcher, filters: list, start: int, size: int = ACN_PAGE) -> dict | None:
+    fields = [("startIndex", str(start)), ("maxResultSize", str(size)), ("jobKeyword", ""), ("jobCountry", "India"),
+              ("jobLanguage", "en"), ("countrySite", "in-en"), ("sortBy", "1"), ("searchType", "vectorSearch"),
+              ("enableQueryBoost", "true"), ("minScore", "0"), ("getFeedbackJudgmentEnabled", "true"),
+              ("useCleanEmbedding", "true"), ("score", "true"), ("totalHits", "true"), ("debugQuery", "false"),
+              ("jobFilters", json.dumps(filters))]
+    data = fetcher.request(ACN_API, "POST", body=urllib.parse.urlencode(fields).encode(),
+                           headers={"Content-Type": "application/x-www-form-urlencoded"}, accept="json").json_obj()
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        return None
+    return data
+
+
+def _acn_total(data: dict) -> int | None:
+    hits = data.get("totalHits")
+    total = hits.get("total") if isinstance(hits, dict) else None
+    if not _count(total) or str(hits.get("overMaxHits", "")).lower() == "true":
+        return None
+    return total
+
+
+def _acn_cities(data: dict, config: Config) -> list[str]:
+    """The portal's own city names, from its location facet, that fall inside the target regions."""
+    for agg in data.get("aggregations") or []:
+        if isinstance(agg, dict) and agg.get("fieldName") == "location.keyword":
+            return sorted({str(i.get("term")) for i in agg.get("items") or [] if isinstance(i, dict)
+                           and any(c in str(i.get("term") or "").lower() for c in config.cities)})
+    return []
+
+
+def _acn_posted(text: object, today: dt.date) -> dt.date | None:
+    """A day-resolution posting date from 'Posted N days ago'; None for 'more than 1 month ago' and the rest."""
+    m = ACN_POSTED.search(str(text or ""))
+    if not m:
+        return None
+    if m.group(1):
+        return today
+    if m.group(2):
+        return today - dt.timedelta(days=1)
+    return today - dt.timedelta(days=int(m.group(3)))
+
+
+def _acn_listing(cfg: dict, fetcher: Fetcher, config: Config) -> tuple[dict, int] | str:
+    experience = [{"fieldName": "yearsOfExperience.keyword", "items": [ACN_EXPERIENCE], "multiSelect": False}]
+    first = _acn_page(fetcher, experience, 0, 1)
+    if first is None:
+        return "search unavailable or malformed"
+    cities = _acn_cities(first, config)
+    if not cities:
+        return "no target city in the location facet"
+    filters = [{"fieldName": "location.keyword", "items": cities, "multiSelect": False}] + experience
+    jobs: dict[str, dict] = {}
+    unique: set[str] = set()
+    total: int | None = None
+    start = 0
+    while True:
+        page = _acn_page(fetcher, filters, start)
+        if page is None:
+            return "search unavailable or malformed"
+        n = _acn_total(page)
+        if n is None or n > cfg["max_total"]:
+            return "listing total invalid"
+        if total is None:
+            total = n
+        elif n != total:
+            return "listing changed during pagination"
+        if not page["data"] and start < total:
+            return "partial pagination"
+        for j in page["data"]:
+            rid = j.get("requisitionId") if isinstance(j, dict) else None
+            unique.add(str(rid))
+            if isinstance(rid, str) and JOB_ID_RE["Accenture"].fullmatch(rid):
+                jobs.setdefault(rid, j)
+        start += ACN_PAGE
+        if start >= total:
+            break
+    if len(unique) < total:
+        return "partial pagination"
+    return jobs, total
+
+
+def refresh_accenture(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                      excluded: frozenset, config: Config) -> SourceResult:
+    """Accenture classifies every posting into an experience bucket; the ledger takes its 0-2 years bucket,
+    which is the page's own headline, rather than reading thousands of near-identical descriptions."""
+    today = now.astimezone(IST).date()
+    got = _acn_listing(cfg, fetcher, config)
+    if isinstance(got, str):
+        return held("Accenture", got)
+    listing, total = got
+    # The listing is complete, so a row it no longer shows counts toward removal on its own (two runs).
+    res = SourceResult("Accenture", True, f"listing {total}", listing_complete=True, listing_total=total,
+                       listed=set(listing))
+    for r in rows:
+        if r.job_id in listing:
+            res.live.add(r.job_id)
+    existing = {r.job_id for r in rows}
+    added = invalid = 0
+    for rid, j in sorted(listing.items(), key=lambda kv: (str(kv[1].get("updateDate") or ""), kv[0]), reverse=True):
+        if added >= cfg["max_new_rows"]:
+            break
+        if rid in existing or rid in excluded:
+            continue
+        loc = j.get("location")
+        places = [str(p) for p in (loc if isinstance(loc, list) else [loc]) if p]
+        fp = _fingerprint(j.get("title"), j.get("yearsOfExperience"), *places)
+        if not _unscreened(rid, fp, cs):
+            continue
+        mark = screened_entry(today, fp)
+        title = clean_text(j.get("title"), 160)
+        posted = _acn_posted(j.get("postedDateText"), today)
+        ok, band, exp = qualifies(title, clean_text(j.get("yearsOfExperience"), 60), posted, places, today, config)
+        if not ok:
+            res.screened[rid] = mark
+            continue
+        row = make_row("Accenture", rid, title, exp, join_places(target_places(places, config)),
+                       ACN_FRONT.format(id=rid), band, None, posted, today, config)
+        if row:
+            res.added.append(row)
+            added += 1
+        else:
+            invalid += 1
+    res.counts = {"listed": len(listing), "live": len(res.live), "added": added, "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
+# -- D. E. Shaw India: the catalogue embedded in the careers page
+
+def _deshaw_catalog(fetcher: Fetcher) -> list | str:
+    resp = fetcher.request(DESHAW_PAGE)
+    if not html_ok(resp):
+        return "careers page unavailable"
+    m = DESHAW_NEXT.search(resp.text())
+    if not m:
+        return "careers page data not found"
+    try:
+        data = json.loads(m.group(1))
+    except ValueError:
+        return "careers page data malformed"
+    props = data.get("props") if isinstance(data, dict) else None
+    page = props.get("pageProps") if isinstance(props, dict) else None
+    jobs = page.get("regularJobs") if isinstance(page, dict) else None
+    if not isinstance(jobs, list):
+        return "careers page data malformed"
+    return jobs
+
+
+def refresh_deshaw(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                   excluded: frozenset, config: Config) -> SourceResult:
+    today = now.astimezone(IST).date()
+    jobs = _deshaw_catalog(fetcher)
+    if isinstance(jobs, str):
+        return held("D. E. Shaw India", jobs)
+    if len(jobs) > cfg["max_total"]:
+        return held("D. E. Shaw India", "catalogue too large")
+    listing: dict[str, dict] = {}
+    for j in jobs:
+        d = j.get("data") if isinstance(j, dict) else None
+        jid = str(d.get("id")) if isinstance(d, dict) and _count(d.get("id")) else ""
+        if JOB_ID_RE["D. E. Shaw India"].fullmatch(jid):
+            listing.setdefault(jid, j)
+    res = SourceResult("D. E. Shaw India", True, f"catalogue {len(listing)}", listing_complete=True,
+                       listing_total=len(listing), listed=set(listing))
+    for r in rows:
+        if r.job_id in listing:
+            res.live.add(r.job_id)
+    existing = {r.job_id for r in rows}
+    invalid = 0
+    for jid, j in sorted(listing.items(), key=lambda kv: int(kv[0]), reverse=True):
+        d = j["data"]
+        meta = d.get("jobMetadata") if isinstance(d.get("jobMetadata"), dict) else {}
+        if jid in existing or jid in excluded or meta.get("isExploratory") or d.get("activeOnJobsListing") is False:
+            continue                          # "All positions in ..." entries collect applications, not a role
+        places = [str(o.get("name") or "") for o in (j.get("office") or []) if isinstance(o, dict)]
+        fp = _fingerprint(d.get("displayName"), d.get("jobUrl"), *places)
+        if not _unscreened(jid, fp, cs):
+            continue
+        mark = screened_entry(today, fp)
+        desc = d.get("jobDescription") if isinstance(d.get("jobDescription"), dict) else {}
+        text = strip_html(" ".join(str(desc.get(k) or "")
+                                   for k in ("websiteDescription", "responsibilities", "peopleWeAreLookingForStr")))
+        title = clean_text(d.get("displayName") or j.get("displayName"), 160)
+        # No posting date is published; the role is dated from today, the day the ledger first saw it.
+        ok, band, exp = qualifies(title, text, today, places, today, config)
+        if not ok:
+            res.screened[jid] = mark
+            continue
+        row = make_row("D. E. Shaw India", jid, title, exp, join_places(target_places(places, config)),
+                       DESHAW_FRONT.format(slug=str(d.get("jobUrl") or "")), band, None, today, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            invalid += 1
+    res.counts = {"listed": len(listing), "live": len(res.live), "added": len(res.added), "invalid_rows": invalid}
     res.detail = _with_invalid(res.detail, invalid)
     return res
 
@@ -2525,6 +2964,10 @@ RUNNERS = {
     "jpm_oracle_ce": refresh_jpm,
     "gehc_workday_cxs": refresh_gehc,
     "zs_jibe_api": refresh_zs,
+    "workday_cxs": refresh_workday,
+    "astrazeneca_talentbrew_html": refresh_astrazeneca,
+    "accenture_findjobs_api": refresh_accenture,
+    "deshaw_nextdata_html": refresh_deshaw,
 }
 
 
@@ -2642,8 +3085,10 @@ def finalize(rows: list[Row], today: dt.date, config: Config, excluded: dict) ->
             dropped.append((r.company, r.job_id, "excluded"))
         elif r.closing_date and dt.date.fromisoformat(r.closing_date) < today:
             dropped.append((r.company, r.job_id, "deadline passed"))
-        elif (today - posted).days > config.max_age_days:
+        elif (today - posted).days > config.max_age_days and config.sources[r.company]["mode"] not in SEEN_BASIS_MODES:
             dropped.append((r.company, r.job_id, "older than window"))
+        # A seen-basis row (dated from first sight) stays while the source lists it; the page already hides
+        # rows past the window, and re-adding it later would wrongly make it "new" again.
         else:
             keep.append(r)
     return sort_rows(keep, config), dropped

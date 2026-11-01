@@ -4,7 +4,7 @@
   "filters": {
     "max_age_days": 30,
     "max_years": 2,
-    "cities": ["bengaluru", "bangalore", "kochi"]
+    "regions": ["bengaluru", "kerala"]
   },
   "hosts": {
     "jobs.siemens.com": {"fetch": true, "robots": true, "min_delay_s": 2.0},
@@ -13,7 +13,14 @@
     "iqvia.wd1.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "jpmc.fa.oraclecloud.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "gehc.wd5.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
-    "jobs.zs.com": {"fetch": true, "robots": true, "min_delay_s": 5.0}
+    "jobs.zs.com": {"fetch": true, "robots": true, "min_delay_s": 5.0},
+    "www.accenture.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "lilly.wd115.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "careers.astrazeneca.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "shell.wd3.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "geaerospace.wd5.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "fractal.wd1.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "www.deshawindia.com": {"fetch": true, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
     {
@@ -62,6 +69,58 @@
       "budget_s": 180,
       "max_total": 180,
       "max_new_checks": 5
+    },
+    {
+      "company": "Accenture",
+      "mode": "accenture_findjobs_api",
+      "budget_s": 270,
+      "max_total": 4000,
+      "max_new_rows": 400
+    },
+    {
+      "company": "Lilly",
+      "mode": "workday_cxs",
+      "budget_s": 90,
+      "search_terms": ["Bengaluru", "Bangalore", "Kochi"],
+      "max_total": 100,
+      "max_new_details": 20
+    },
+    {
+      "company": "AstraZeneca",
+      "mode": "astrazeneca_talentbrew_html",
+      "budget_s": 120,
+      "max_total": 300,
+      "max_new_details": 20
+    },
+    {
+      "company": "Shell",
+      "mode": "workday_cxs",
+      "budget_s": 120,
+      "search_terms": ["*"],
+      "max_total": 300,
+      "max_new_details": 20
+    },
+    {
+      "company": "GE Aerospace",
+      "mode": "workday_cxs",
+      "budget_s": 90,
+      "search_terms": ["Bengaluru", "Bangalore", "Kochi"],
+      "max_total": 100,
+      "max_new_details": 20
+    },
+    {
+      "company": "Fractal",
+      "mode": "workday_cxs",
+      "budget_s": 150,
+      "search_terms": ["Bengaluru", "Bangalore", "Kochi"],
+      "max_total": 200,
+      "max_new_details": 30
+    },
+    {
+      "company": "D. E. Shaw India",
+      "mode": "deshaw_nextdata_html",
+      "budget_s": 60,
+      "max_total": 600
     }
   ]
 }

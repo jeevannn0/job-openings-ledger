@@ -25,7 +25,7 @@ jobs:
     # Pushes never refresh sources; they take the publish job instead.
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     permissions:
       contents: write   # persist state/jobs.json and index.html
     steps:

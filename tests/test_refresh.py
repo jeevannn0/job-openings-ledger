@@ -247,9 +247,10 @@ class SeedAndRenderTests(unittest.TestCase):
         legacy = R.read_text(LEGACY_PAGE)
         legacy_lines = set(re.search(r"\nconst jobs=\[\n(.*?)\n\];", legacy, re.S).group(1).split(",\n"))
         new_lines = set(re.search(r"\nconst jobs=\[\n(.*?)\n\];", first, re.S).group(1).split(",\n"))
-        # Rows gained an 11th field (days since first seen) after the legacy page; the first ten still match.
+        # Rows gained an 11th field (days since first seen) and a 12th (seen-basis flag) after the legacy page;
+        # the first ten still match.
         trimmed = {R.js_json(json.loads(line)[:10]) for line in new_lines}
-        self.assertTrue(all(len(json.loads(line)) == 11 for line in new_lines))
+        self.assertTrue(all(len(json.loads(line)) == 12 and json.loads(line)[11] == 0 for line in new_lines))
         self.assertEqual(trimmed, legacy_lines)
 
     def test_committed_index_matches_committed_state(self):
@@ -281,7 +282,8 @@ class SeedAndRenderTests(unittest.TestCase):
         self.assertIn(".grid{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;margin-top:24px}", base)
         self.assertIn(".grid{grid-template-columns:minmax(0,1fr)}.feed{order:1}.ar{order:2}", blocks[COMPACT_MQ])
         self.assertEqual(blocks[WIDE_MQ],
-                         ".grid{grid-template-columns:minmax(0,1fr) 300px}.feed{grid-column:1}.ar{grid-column:2;"
+                         ".grid{grid-template-columns:minmax(0,1fr) 300px}.grid:has(.ar[hidden]){grid-template-columns:"
+                         "minmax(0,1fr)}.feed{grid-column:1}.ar{grid-column:2;"
                          "position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;"
                          "max-height:calc(100dvh - 2rem)}.ar-in{overflow-y:auto}")
         self.assertFalse([c for c in blocks if "1279px" in c or "1280px" in c])
@@ -1088,6 +1090,73 @@ class PlaceAndExperienceTextTests(unittest.TestCase):
         self.assertEqual(summary, "2 years of experience")
 
 
+# --------------------------------------------------------------------------- new-source helpers
+
+class NewSourceHelperTests(unittest.TestCase):
+    """The small pure functions behind the seven sources added on 1 Nov; the fixture dry run covers each
+    connector's happy path, these pin the edges."""
+
+    def test_region_terms_pick_the_city_segment_of_any_hierarchy(self):
+        config, _e, _s, _t = env()
+        # Lilly writes 'India, Bengaluru'; Shell writes the building; Kerala postings mostly name the city.
+        self.assertEqual(R.target_places(["India, Bengaluru"], config), ["Bengaluru"])
+        self.assertEqual(R.target_places(["Bangalore RMZ-ECO WORLD"], config), ["Bangalore RMZ-ECO WORLD"])
+        self.assertEqual(R.target_places(["Kochi, India", "Thiruvananthapuram", "Infopark Kakkanad", "Chennai, India"],
+                                         config), ["Kochi", "Thiruvananthapuram", "Infopark Kakkanad", "Chennai"])
+        self.assertEqual(R.target_places(["Mumbai, India", "Kozhikode - Kerala - India"], config), ["Kozhikode", "Mumbai"])
+        for term in ("kochi", "cochin", "ernakulam", "kakkanad", "infopark", "thiruvananthapuram", "trivandrum",
+                     "technopark", "kozhikode", "calicut", "thrissur", "kollam", "kannur", "palakkad", "alappuzha",
+                     "kottayam", "malappuram", "kerala", "bengaluru", "bangalore"):
+            self.assertIn(term, config.cities, term)
+
+    def test_workday_tenant_ids_follow_each_site_pattern(self):
+        for company, path, jid in (("Lilly", "/job/India-Bengaluru/Associate---Clinical-Data_R-113171", "R-113171"),
+                                   ("Lilly", "/job/Associate---Clinical-Data_R-113171-1", "R-113171"),   # no location
+                                   ("Shell", "/job/Bangalore-RMZ-ECO-WORLD/Finance-Analyst_R208550", "R208550"),
+                                   ("GE Aerospace", "/job/Bengaluru/Junior-Engineer_R5099001-1", "R5099001"),
+                                   ("Fractal", "/job/Bengaluru/Data-Analyst_SR-49001", "SR-49001")):
+            self.assertEqual(R._wd_id({"externalPath": path}, R.WORKDAY_SITES[company][2]), (jid, path), company)
+        lilly = R.WORKDAY_SITES["Lilly"][2]
+        for bad in ("/job/Bengaluru/Role_R1580001", "/job/Bengaluru/Role_R-113171/extra", "job/Bengaluru/Role_R-113171"):
+            self.assertIsNone(R._wd_id({"externalPath": bad}, lilly), bad)
+        self.assertIsNone(R._wd_id({"externalPath": None}, lilly))
+        self.assertIsNone(R._wd_id("not a posting", lilly))
+        for company, (api, front, _re) in R.WORKDAY_SITES.items():
+            for url in (api, front):
+                self.assertIsNone(R.check_url(url, R.COMPANY_SPECS[company].hosts), url)
+
+    def test_accenture_posted_age_is_day_resolution(self):
+        today = dt.date(2026, 10, 31)
+        self.assertEqual(R._acn_posted("Posted today", today), today)
+        self.assertEqual(R._acn_posted("Posted yesterday", today), dt.date(2026, 10, 30))
+        self.assertEqual(R._acn_posted("Posted 1 day ago", today), dt.date(2026, 10, 30))
+        self.assertEqual(R._acn_posted("Posted 2 days ago", today), dt.date(2026, 10, 29))
+        self.assertEqual(R._acn_posted("posted 30 DAYS AGO", today), dt.date(2026, 10, 1))
+        for text in ("Posted more than 1 month ago", "Posted 3 weeks ago", "", None, 12, "2026-10-29"):
+            self.assertIsNone(R._acn_posted(text, today), text)
+        self.assertEqual(R.ACN_EXPERIENCE, "Experience: 0-2 years")
+
+    def test_seen_basis_rows_stay_past_the_window_while_other_rows_age_out(self):
+        config, excluded, state, _t = env()
+        self.assertEqual(R.SEEN_BASIS_MODES, frozenset({"deshaw_nextdata_html"}))
+        old = (TODAY - dt.timedelta(days=config.max_age_days + 15)).isoformat()
+        siemens = dataclasses.replace(rows_of(state, "Siemens")[0], posted_date=old, first_seen=old, closing_date=None)
+        deshaw = dataclasses.replace(siemens, company="D. E. Shaw India", job_id="7299",
+                                     canonical_url="https://www.deshawindia.com/careers/Analyst-7299")
+        expired = dataclasses.replace(deshaw, job_id="7300", closing_date=(TODAY - dt.timedelta(days=1)).isoformat())
+        kept, dropped = R.finalize([siemens, deshaw, expired], TODAY, config, excluded)
+        self.assertEqual([r.job_id for r in kept], ["7299"])              # listed without a date: kept, not re-added later
+        self.assertEqual(dropped, [("Siemens", siemens.job_id, "older than window"),
+                                   ("D. E. Shaw India", "7300", "deadline passed")])
+        # The page still hides it past the window, and marks the row as dated from first sight.
+        state.jobs.append(deshaw)
+        doc = R.render(state, _t, config)
+        rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
+        row = next(r for r in rows if r[1] == "7299")
+        self.assertEqual((row[5], row[11]), (config.max_age_days + 15, 1))
+        self.assertTrue(all(r[11] == 0 for r in rows if r[0] != "D. E. Shaw India"))
+
+
 # --------------------------------------------------------------------------- IQVIA discovery
 
 class IqviaDiscoveryTests(unittest.TestCase):
@@ -1246,13 +1315,25 @@ class ConfigTests(unittest.TestCase):
 
     def test_repo_config_is_valid(self):
         config = self.load(lambda d: None)
-        self.assertEqual(config.companies, ("Siemens", "JPMorganChase", "GE HealthCare", "GE Vernova", "IQVIA", "ZS"))
+        self.assertEqual(config.companies, ("Siemens", "JPMorganChase", "GE HealthCare", "GE Vernova", "IQVIA", "ZS",
+                                            *NEW_SOURCES))
         self.assertEqual(config.fetch_hosts, {"jobs.siemens.com", "careers.gevernova.com", "jobs.iqvia.com",
                                               "iqvia.wd1.myworkdayjobs.com", "jpmc.fa.oraclecloud.com",
-                                              "gehc.wd5.myworkdayjobs.com", "jobs.zs.com"})
+                                              "gehc.wd5.myworkdayjobs.com", "jobs.zs.com", "www.accenture.com",
+                                              "lilly.wd115.myworkdayjobs.com", "careers.astrazeneca.com",
+                                              "shell.wd3.myworkdayjobs.com", "geaerospace.wd5.myworkdayjobs.com",
+                                              "fractal.wd1.myworkdayjobs.com", "www.deshawindia.com"})
         self.assertEqual({c: config.sources[c]["mode"] for c in config.companies}, {
             "Siemens": "siemens_avature_html", "JPMorganChase": "jpm_oracle_ce", "GE HealthCare": "gehc_workday_cxs",
-            "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api"})
+            "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api",
+            "Accenture": "accenture_findjobs_api", "Lilly": "workday_cxs", "AstraZeneca": "astrazeneca_talentbrew_html",
+            "Shell": "workday_cxs", "GE Aerospace": "workday_cxs", "Fractal": "workday_cxs",
+            "D. E. Shaw India": "deshaw_nextdata_html"})
+        # Two regions; the place terms behind them are what employers actually write.
+        self.assertEqual(config.regions, ("bengaluru", "kerala"))
+        self.assertEqual(config.cities[:3], ("bengaluru", "bangalore", "kerala"))
+        self.assertTrue({"kochi", "thiruvananthapuram", "trivandrum", "kozhikode", "thrissur"} <= set(config.cities))
+        self.assertEqual(R.REGION_LABELS, {"bengaluru": "Bengaluru", "kerala": "Kerala"})
         self.assertNotIn("careers.gehealthcare.com", config.link_hosts)     # stale Phenom aliases stay out
 
     def test_endpoints_stay_on_company_hosts(self):
@@ -1288,6 +1369,12 @@ class ConfigTests(unittest.TestCase):
             "sub-daily discovery": lambda d: d["companies"][0].__setitem__("discovery_interval_h", 6),
             "url in config": lambda d: d["companies"][0].__setitem__("url", "https://evil.example"),
             "huge cap": lambda d: d["companies"][0].__setitem__("max_new_details", 2000),
+            # Regions are the only place filter: known keys, at least one, no repeats, no free-text city list.
+            "unknown region": lambda d: d["filters"]["regions"].append("kollam"),
+            "no regions": lambda d: d["filters"].__setitem__("regions", []),
+            "repeated region": lambda d: d["filters"].__setitem__("regions", ["kerala", "kerala"]),
+            "city list": lambda d: (d["filters"].pop("regions"), d["filters"].__setitem__("cities", ["Bengaluru"])),
+            "budgets over run": lambda d: d["companies"][6].__setitem__("budget_s", 2000),
         }
         for name, mutate in mutations.items():
             with self.subTest(name), self.assertRaises(R.ConfigError):
@@ -1427,8 +1514,7 @@ class WorkflowTests(unittest.TestCase):
     def test_concurrency_timeouts_runner(self):
         self.assertRegex(self.text, r"(?m)^concurrency:\n  group: job-ledger-refresh\n  cancel-in-progress: false$")
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(len(timeouts), 3)
-        self.assertTrue(all(t <= 25 for t in timeouts))
+        self.assertEqual(timeouts, [40, 10, 10])          # refresh (thirteen sources), publish, deploy
         self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 3)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
@@ -1783,7 +1869,7 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         after = R.load_all(tmp)[1]
         added = {r.job_id: r for r in after.jobs} .keys() - {r.job_id for r in state.jobs}
-        self.assertEqual(added, {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999"})
+        self.assertEqual(added, FIXTURE_ADDED)
         new = {r.job_id: r for r in after.jobs}
         self.assertEqual(new["R1580001"].closing_date, "2026-11-15")   # Workday endDate 2026-11-16 is exclusive
         self.assertEqual(new["R5060001"].closing_date, "2026-11-20")
@@ -1805,9 +1891,20 @@ class DryRunTests(unittest.TestCase):
             self.assertEqual([r.closing_date for r in rows_of(after, company) if r.job_id in
                               {x.job_id for x in rows_of(state, company)}],
                              [r.closing_date for r in rows_of(state, company)], company)
-        self.assertEqual({c: s.status for c, s in after.companies.items()},
-                         {"Siemens": "ok", "JPMorganChase": "ok", "GE HealthCare": "ok",
-                          "GE Vernova": "ok", "IQVIA": "ok", "ZS": "ok"})
+        self.assertEqual({c: s.status for c, s in after.companies.items()}, {c: "ok" for c in config.companies})
+        # The new sources' fixture roles: Workday tenants, the TalentBrew page, the Accenture search service and
+        # the D. E. Shaw catalogue each yield one Bengaluru row; D. E. Shaw's is dated from first sight.
+        self.assertEqual(new["R-199001"].location, "Bengaluru")           # 'India, Bengaluru' shows as its city
+        self.assertEqual(new["R-199001"].closing_date, "2026-11-15")
+        self.assertEqual(new["R299001"].location, "Bangalore")            # 'Bangalore RMZ-ECO WORLD'
+        self.assertEqual(new["999000001"].posted_date, "2026-10-29")
+        self.assertEqual((new["999000001"].location, new["999000001"].closing_date), ("Bangalore", "2026-11-20"))
+        self.assertEqual(new["AIOC-S01699001"].posted_date, "2026-10-29")  # "Posted 2 days ago" on 31 Oct
+        self.assertEqual(new["AIOC-S01699001"].experience_text, "0-2 years")   # the bucket's own wording
+        self.assertEqual(new["AIOC-S01699001"].canonical_url,
+                         "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01699001_en")
+        self.assertEqual((new["9001"].posted_date, new["9001"].first_seen), ("2026-10-31", "2026-10-31"))
+        self.assertNotIn("2781", ids)                             # exploratory "All positions in ..." entry
         self.assertEqual(R.read_text(os.path.join(tmp, "index.html")), R.render(after, template, config))
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
@@ -2060,7 +2157,9 @@ class PullHistoryTests(unittest.TestCase):
 # --------------------------------------------------------------------------- phone alerts (dist/alerts.json)
 
 LEDGER = "https://example-owner.github.io/job-openings-ledger/"   # synthetic owner; CI derives the real one
-FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999"}
+FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999",
+                 "AIOC-S01699001", "R-199001", "999000001", "R299001", "R5099001", "SR-49001", "9001"}
+NEW_SOURCES = ("Accenture", "Lilly", "AstraZeneca", "Shell", "GE Aerospace", "Fractal", "D. E. Shaw India")
 
 
 def outcome_for(state, added=(), removed=0, run_at="2026-10-31T18:00+05:30", mode="fixtures"):
@@ -2138,12 +2237,17 @@ class AlertTests(unittest.TestCase):
         after = R.load_all(root)[1]
         rows = {r.job_id: r for r in after.jobs}
         self.assertEqual(a["new_count"], len(FIXTURE_ADDED))
-        self.assertEqual({j["job_id"] for j in a["new_jobs"]}, FIXTURE_ADDED)
+        listed = {j["job_id"] for j in a["new_jobs"]}
+        self.assertEqual(len(listed), R.ALERT_MAX_NEW)                        # the phone gets the first 8 ...
+        self.assertTrue(listed <= FIXTURE_ADDED)
+        self.assertEqual(a["remaining_new_count"], len(FIXTURE_ADDED) - R.ALERT_MAX_NEW)   # ... plus a count
+        self.assertEqual([j["job_id"] for j in a["new_jobs"]],
+                         [r.job_id for r in R.load_all(root)[1].jobs if r.job_id in FIXTURE_ADDED][:R.ALERT_MAX_NEW])
         for j in a["new_jobs"]:
             r = rows[j["job_id"]]
             self.assertEqual(j, {"company": r.company, "job_id": r.job_id, "title": r.title,
                                  "canonical_url": r.canonical_url})
-        self.assertEqual(a["notification_title"], "6 new job openings")
+        self.assertEqual(a["notification_title"], "13 new job openings")
         self.assertTrue(a["notification_body"].startswith("New: Siemens 1, JPMorganChase 1, GE HealthCare 1, "))
         self.assertNotIn("mode", a)                                           # run mode stays internal
         for title in {j["title"] for j in a["new_jobs"]}:
@@ -3118,6 +3222,18 @@ def source_minimum(company, config, state):
     if company == "ZS":
         n = 1 + pages(cfg["max_total"], R.ZS_PAGE) + rows + cfg["max_new_checks"]
         return n * _per_request(config, "jobs.zs.com")
+    if company == "Accenture":           # robots, the facet probe, every listing page; rows need no request
+        n = 1 + 1 + pages(cfg["max_total"], R.ACN_PAGE)
+        return n * _per_request(config, "www.accenture.com")
+    if company in R.WORKDAY_SITES:       # robots, every page of every search term, one detail per row, new details
+        host = R.WORKDAY_SITES[company][0].split("/")[2]
+        n = 1 + len(cfg["search_terms"]) * pages(cfg["max_total"], R.WD_PAGE) + rows + cfg["max_new_details"]
+        return n * _per_request(config, host)
+    if company == "AstraZeneca":         # robots, every search page, one page per unlisted row, new details
+        n = 1 + pages(cfg["max_total"], R.AZ_PAGE) + rows + cfg["max_new_details"]
+        return n * _per_request(config, "careers.astrazeneca.com")
+    if company == "D. E. Shaw India":    # robots and the one careers page
+        return 2 * _per_request(config, "www.deshawindia.com")
     raise AssertionError(company)
 
 
@@ -3449,7 +3565,7 @@ class SourceHealthTests(unittest.TestCase):
         doc = R.render(self.state, self.template, self.config)
         section = health_section(doc)
         expected = {"Siemens": "live", "JPMorganChase": "degraded", "GE HealthCare": "stale",
-                    "GE Vernova": "failed", "IQVIA": "unknown", "ZS": "stale"}
+                    "GE Vernova": "failed", "IQVIA": "unknown", "ZS": "stale", **{c: "unknown" for c in NEW_SOURCES}}
         chs = channels(section)
         self.assertEqual({c: s for c, (s, _r) in chs.items()}, expected)
         for s, (glyph, label) in {"live": ("■", "LIVE"), "degraded": ("▲", "DEGRADED/CACHED"), "stale": ("◷", "STALE"),
@@ -3485,7 +3601,7 @@ class SourceHealthTests(unittest.TestCase):
             self.assertIsNotNone(dt.datetime.fromisoformat(value))
         words = re.findall(r'<dt>Last pull</dt><dd><span class="oc" data-o="[a-z]+">'
                            r'(?:<span aria-hidden="true">✓</span><span class="vh">)?([A-Za-z ,;]+)<', section)
-        self.assertEqual(len(words), 6)                      # one outcome per source; IQVIA's is "No attempt recorded"
+        self.assertEqual(len(words), len(self.config.companies))   # one outcome per source; seeds read "No attempt recorded"
         for word in words:
             self.assertIn(word, R.ATTEMPT_TEXT.values())
         # A success shows as a tick with its words kept for screen readers; nothing else gets a glyph.
@@ -3508,6 +3624,7 @@ class SourceHealthTests(unittest.TestCase):
             "IQVIA": "not auto-checked",                       # seed snapshot
             "GE HealthCare": "not auto-checked",               # static
             "ZS": "stale since Oct 28",                        # held, data older than 6h30
+            **{c: "not auto-checked" for c in NEW_SOURCES},    # seeded, awaiting their first run
         })
         self.assertEqual(labels, R.stale_labels(self.state, self.config))
         rows = {c: s for c, (s, _r) in channels(health_section(doc)).items()}
@@ -3900,12 +4017,12 @@ class SourceHealthTests(unittest.TestCase):
             self.assertNotIn(cls, hidden_selectors(style_of(doc)), cls)
         # The terminal sheet wraps the summary and the status block at any width; their text is fixed wording.
         records = sum(R.published_counts(self.state, self.config).values())
-        self.assertEqual(re.sub(r"<[^>]+>", "", summary), f"// 6 sources{records} records")
+        self.assertEqual(re.sub(r"<[^>]+>", "", summary), f"// {len(self.config.companies)} sources{records} records")
         new_today = sum(1 for r in self.state.jobs if r.first_seen == self.state.as_of.isoformat()
                         and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
-                         "Result2/6 ✓accepted · 2 held · 1 failed · 1 pending"
+                         "Result2/13 ✓accepted · 2 held · 1 failed · 8 pending"
                          f"Openings{records} published · {new_today} new today"
                          "Freshness× FAILED"
                          "Next run1 Nov 00:00 IST · approx.")
@@ -3947,7 +4064,7 @@ class SourceHealthTests(unittest.TestCase):
             with self.subTest(name), self.assertRaises(ValueError):
                 R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
         self.assertNotIn("Companies checked", doc)
-        self.assertIn('<h2 class="vh" id="src-h">Source health: 6 automated sources</h2>', doc)
+        self.assertIn('<h2 class="vh" id="src-h">Source health: 13 automated sources</h2>', doc)
         self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {len(self.state.empty_companies)} '
                       'companies</span>', doc)
         self.assertIn('<dl class="info-dl" id="empty-list"></dl>', doc)
@@ -3960,7 +4077,7 @@ class SourceHealthTests(unittest.TestCase):
             self.set_company(name, status="stale", last_success=iso(last), last_attempt=iso(REF))
         doc = R.render(self.state, self.template, self.config)
         section = health_section(doc)
-        self.assertEqual(re.findall(r'<li class="ch" data-h="([a-z]+)">', section), ["stale"] * 6)
+        self.assertEqual(re.findall(r'<li class="ch" data-h="([a-z]+)">', section), ["stale"] * len(self.config.companies))
         self.assertNotIn("Worst", section)
         self.assertIn('<span class="age">20h 0m ago</span>', section)
         # The terminal status block and the search-panel LED carry the same worst state.
@@ -4009,7 +4126,8 @@ class SourceHealthTests(unittest.TestCase):
         a = R.build_alert(self.state, outcome, self.config, "https://example-owner.github.io/job-openings-ledger/")
         self.assertEqual(tuple(a), R.ALERT_FIELDS)
         self.assertEqual(a["source_status"], {"Siemens": "ok", "JPMorganChase": "stale", "GE HealthCare": "ok",
-                                              "GE Vernova": "stale", "IQVIA": "static", "ZS": "stale"})
+                                              "GE Vernova": "stale", "IQVIA": "static", "ZS": "stale",
+                                              **{c: "static" for c in NEW_SOURCES}})
 
     def test_committed_index_health_matches_state(self):
         config, state, template = R.load_all(ROOT)
@@ -4029,10 +4147,15 @@ class SourceHealthTests(unittest.TestCase):
             "siemens_avature_html": "Avature HTML", "jpm_oracle_ce": "Oracle Careers API",
             "gehc_workday_cxs": "Workday CXS API", "iqvia_workday_cxs": "Workday CXS API",
             "gevernova_paradox_api": "Paradox Jobs API", "zs_jibe_api": "Jibe Jobs API",
+            "workday_cxs": "Workday CXS API", "astrazeneca_talentbrew_html": "TalentBrew HTML",
+            "accenture_findjobs_api": "Careers search API", "deshaw_nextdata_html": "Careers page data",
             "static": "Static snapshot"})
         section = health_section(R.render(self.state, self.template, self.config))
         expected = {"Siemens": "Avature HTML", "JPMorganChase": "Oracle Careers API", "GE HealthCare": "Workday CXS API",
-                    "GE Vernova": "Paradox Jobs API", "IQVIA": "Workday CXS API", "ZS": "Jibe Jobs API"}
+                    "GE Vernova": "Paradox Jobs API", "IQVIA": "Workday CXS API", "ZS": "Jibe Jobs API",
+                    "AstraZeneca": "TalentBrew HTML", "Lilly": "Workday CXS API", "Shell": "Workday CXS API",
+                    "GE Aerospace": "Workday CXS API", "Fractal": "Workday CXS API",
+                    "Accenture": "Careers search API", "D. E. Shaw India": "Careers page data"}
         for company, (_s, rest) in channels(section).items():
             self.assertTrue(rest.startswith(f'<span class="ch-c"><span class="vh">, source connector </span>'
                                             f'{expected[company]}</span></span>'), company)
@@ -4047,21 +4170,21 @@ class SourceHealthTests(unittest.TestCase):
     def test_latest_refresh_rollup_counts(self):
         self.all_states_state()
         sources = R.source_health(self.state, self.config, R.health_reference(self.state))
-        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 1})
+        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 8})
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
         # "N/M ✓" (the word stays for screen readers), then only the non-zero holds/failures/pendings.
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/6 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/13 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span> · <span data-o="held"><b>2</b> held</span> · <span data-o="failed">'
-                      '<b>1</b> failed</span> · <span data-o="pending"><b>1</b> pending</span></dd></div>', block)
+                      '<b>1</b> failed</span> · <span data-o="pending"><b>8</b> pending</span></dd></div>', block)
         self.assertNotIn("sources accepted", doc)
         for c in self.config.companies:
             self.set_company(c, status="ok", last_success=iso(REF), last_attempt=iso(REF))
         clean = status_block(R.render(self.state, self.template, self.config))
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">6</b>/6 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">13</b>/13 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span></dd></div>', clean)                      # no "0 held · 0 failed"
         self.assertNotIn("<b>0</b>", clean)
-        for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/6"):
+        for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/13"):
             self.assertNotIn(gone, section, gone)
         self.assertNotIn("Worst", doc)
         self.assertNotIn("worst", block)                                 # the Freshness row is the badge alone
@@ -4176,7 +4299,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertTrue(all(not line.endswith(" ") for line in text.split("\n")))
         # Two short lines on desktop; both are visually hidden (still read out) on phones.
         self.assertIn('<h1><span class="h1a">New openings every three hours</span><span class="h1b"> · 0–2 years · '
-                      'Bengaluru · Kochi</span></h1>\n<p class="lede">First-party employer portals · deduplicated · '
+                      'Bengaluru · Kerala</span></h1>\n<p class="lede">First-party employer portals · deduplicated · '
                       'last 30 days</p>', doc)
         self.assertNotIn("A public ledger of fresh roles", doc)
         header = re.search(r'<header class="hdr">.*?</header>', doc, re.S).group(0)
@@ -4465,20 +4588,42 @@ class SourceHealthTests(unittest.TestCase):
         doc = R.render(self.state, self.template, self.config)
         script = main_script(doc)
         # One flat stream of cards; only the first 12 animate, and only on the first render.
-        for snippet in ('const card=(r,i)=>{const[c,id,t,e,d,a,l,u,b,cd,nw]=r,', 'anim=!booted&&i<12',
-                        '<article class="card${anim?" reveal":""}"${anim?` style="--i:${i}"`:""}>',
+        for snippet in ('const card=(r,i,more,g,open,sub)=>{const[c,id,t,e,d,a,l,u,b,cd,nw,sb]=r,', 'anim=!booted&&i<12',
                         '<span class="av" aria-hidden="true">${esc(ini(c))}</span>',
-                        '<h3 class="c-l"><span class="c-co">${esc(c)}</span> posted <a class="job" href="${esc(u)}" '
-                        'rel="noopener noreferrer">${esc(t)}</a></h3>',
+                        '<h3 class="c-l"><span class="c-co">${esc(c)}</span> ${sb?"lists":"posted"} <a class="job" '
+                        'href="${esc(u)}" rel="noopener noreferrer">${esc(t)}</a></h3>',
                         'ini=c=>{const w=c.split(/\\s+/).filter(Boolean);return(w.length>1?w[0][0]+w[1][0]:c.slice(0,2))'
                         '.toUpperCase()}',
                         'const BAND={n:"No number",1:"≤ 1 year",2:"≤ 2 years"}',
                         '${ns?"":`<p class="c-x"><span class="vh">Minimum experience stated: </span>${esc(e)}</p>`}',
                         '<span class="vh">Job ID </span>${esc(id)}</span>${cd?',
                         '</p>`}</div></div></article>`};',
-                        'out.innerHTML=visibleJobs.map(card).join("")||\'<p class="none">No openings match these '
-                        'filters.</p>\''):
+                        # Identical openings (same company, title, location and band) collapse into one card whose
+                        # "+N more" button expands the others in place, so every opening stays reachable; the stats
+                        # and chips still count every opening.
+                        'const gm=new Map(),cards=[];for(const r of visibleJobs){const g=`${r[0]}|${r[2].toLowerCase()'
+                        '.replace(/[^a-z0-9]+/g," ").trim()}|${r[6].toLowerCase()}|${r[8]}`,e=gm.get(g);if(e)e.push(r);'
+                        'else{const n=[r,g];gm.set(g,n);cards.push(n)}}let ki=0;out.innerHTML=cards.map(([r,g,...rest])=>'
+                        '{const open=xg.has(g);return card(r,ki++,rest.length,g,open)+(open?rest.map(x=>card(x,ki++,0,g,false,1))'
+                        '.join(""):"")}).join("")||\'<p class="none">No openings match these filters.</p>\'',
+                        '${more?`<button class="mo" type="button" data-g="${esc(g)}" aria-expanded="${open}">${open?"−":"+"}'
+                        '${more} more<span class="vh"> openings with this title, ${open?"hide them":"show them"}</span></button>`:""}</p>',
+                        'const xg=new Set();out.addEventListener("click",e=>{const b=e.target.closest(".mo");if(!b)return;'
+                        'const g=b.dataset.g;xg.has(g)?xg.delete(g):xg.add(g);render();const n=out.querySelector(`.mo[data-g="${CSS.escape(g)}"]`);'
+                        'if(n)n.focus()});',
+                        '<article class="card${sub?" sub":""}${anim?" reveal":""}"${anim?` style="--i:${i}"`:""}>',
+                        # Sources without posting dates read "lists" / "seen N days ago" (row 11 = 1).
+                        '<span class="c-co">${esc(c)}</span> ${sb?"lists":"posted"} <a class="job"',
+                        'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
+                        '<span class="vh">${sb?"First seen":"Posted"} ${esc(d)}, </span>${ago}</span>'):
             self.assertIn(snippet, script, snippet)
+        # The button keeps its own box inside the overflow-hidden meta line (so focusing it cannot scroll the line)
+        # and widens its hit area with a pseudo-element.
+        self.assertIn(".mo{padding:0;border:0;background:none;font:inherit;letter-spacing:inherit;text-transform:inherit;"
+                      "font-weight:600;color:hsl(var(--steel));text-decoration:underline dotted;text-underline-offset:2px;"
+                      'cursor:pointer}.mo:after{content:"";position:absolute;inset:-8px -4px}'
+                      ".mo:hover,.mo[aria-expanded=true]{color:hsl(var(--signal))}"
+                      ".sub{border-left:2px solid hsl(var(--signal)/.45)}", style_of(doc))
         for gone in ('class="sec"', "groups.set(", "<ol class=\"rows\">", 'class="c-f"', 'class="tags"', 'class="tg',
                      'class="go"', "open ↗", "slug", "lb=STALE"):
             self.assertNotIn(gone, script, gone)
@@ -4521,7 +4666,7 @@ class SourceHealthTests(unittest.TestCase):
         # Row 10 of the job data is days since first seen, and the stats "New today" counts the published rows
         # where it is 0.
         rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
-        self.assertTrue(all(len(r) == 11 and isinstance(r[10], int) and r[10] >= 0 for r in rows))
+        self.assertTrue(all(len(r) == 12 and isinstance(r[10], int) and r[10] >= 0 and r[11] in (0, 1) for r in rows))
         by_id = {r.job_id: r for r in self.state.jobs}
         for r in rows:
             first = dt.date.fromisoformat(by_id[r[1]].first_seen)
