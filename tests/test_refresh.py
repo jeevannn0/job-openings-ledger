@@ -3448,7 +3448,8 @@ class SourceHealthTests(unittest.TestCase):
                       rules[(".logo",)])
         # The scale sits on a static wrapper; the text layers inside carry no transform (Safari mis-renders
         # transformed elements whose transform-related properties animate).
-        self.assertEqual(rules[(".ls",)], "position:absolute;top:0;left:0;transform:scale(.21);transform-origin:0 0")
+        self.assertEqual(rules[(".ls",)], "position:absolute;top:0;left:0;width:72ch;height:160px;transform:scale(.21);"
+                                          "transform-origin:0 0")
         self.assertEqual(rules[(".lf",)], "position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal))")
         for gone in (".lc{", ".lk{", ".lb{", ".lf b{"):
             self.assertNotIn(gone, style, gone)
@@ -4036,10 +4037,11 @@ class SourceHealthTests(unittest.TestCase):
                       style)
         self.assertIn(".lf{position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal))}",
                       style)
-        # Nothing transform-related is ever animated: the scale lives on the static .ls wrapper and the layers
-        # are offset with left/top in the wrapper's (unscaled) space. iOS Safari blew the mark up to full size
-        # for the length of the glitch when the scaled element itself animated transform or translate.
-        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{left:0;top:0;opacity:1}8%{left:4px;top:-3px;opacity:.85}",
+        # Nothing the logo animates may be compositor-accelerated (no transform/translate/scale/rotate, no
+        # opacity, no filter): iOS WebKit rasterises composited layers under a CSS-scaled ancestor about 3x too
+        # big, and the mark stayed that way after the first glitch. The scale lives on the static .ls wrapper
+        # and the layers move with left/top (software-painted) plus clip-path.
+        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{left:0;top:0}8%{left:4px;top:-3px}48%{left:-5px;top:3px}}",
                    "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);left:0}8%{clip-path:inset(12% 0 64% 0);"
                    "left:-16px}",
                    "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);left:0}14%{clip-path:inset(40% 0 36% 0);"
@@ -4047,7 +4049,7 @@ class SourceHealthTests(unittest.TestCase):
             self.assertIn(kf, style, kf)
         for name in ("glitch-x", "glitch-a", "glitch-b"):
             body = re.search(r"@keyframes %s\{(.*?)\}\}" % name, style).group(1)
-            for gone in ("transform", "translate", "scale", "rotate"):
+            for gone in ("transform", "translate", "scale", "rotate", "opacity", "filter", "offset"):
                 self.assertNotIn(gone, body, (name, gone))
         self.assertEqual(style.count("scale(.21)"), 1)                       # only the static .ls rule
         self.assertIn(".logo{position:relative;display:inline-block;flex:none;width:calc(72ch * .21);height:34px;overflow:hidden;"
