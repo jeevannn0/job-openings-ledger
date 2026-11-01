@@ -3423,9 +3423,9 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotRegex(R.read_text(os.path.join(ROOT, R.TEMPLATE_PATH)), r"https?://")
         # Fonts are named and fall back to system faces; nothing is downloaded.
         fonts = dict(re.findall(r"--font-(sans|display|mono):([^;]+);", style))
-        self.assertEqual(set(fonts), {"sans", "display", "mono"})
+        self.assertEqual(set(fonts), {"sans", "mono"})                     # no display face since the wordmark went
         self.assertTrue(fonts["sans"].startswith('"IBM Plex Sans",system-ui'))
-        self.assertTrue(fonts["sans"].endswith("sans-serif") and fonts["display"].endswith("sans-serif"))
+        self.assertTrue(fonts["sans"].endswith("sans-serif"))
         self.assertTrue(fonts["mono"].startswith('"JetBrains Mono",ui-monospace') and fonts["mono"].endswith("monospace"))
         self.assertIn('font-feature-settings:"liga" 0,"calt" 0,"zero","ss01"', style)
         # Square corners everywhere except the round status LED.
@@ -3440,7 +3440,9 @@ class SourceHealthTests(unittest.TestCase):
                                                                        "animation:none!important"])
         # Brand mark: the guard-dog silhouette converted to shade-block text (no image, no external asset), decorative.
         self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><span class="ls"><pre class="lf">', doc)
-        self.assertEqual(doc.count("job signal"), 1)             # header wordmark only; no Ledger card
+        self.assertNotIn("job signal", doc)                       # the mark stands alone: no wordmark, no Ledger card
+        self.assertNotIn('class="wm"', doc)
+        self.assertNotIn("font-display", doc)
         for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<img", "<svg"):
             self.assertNotIn(gone, doc, gone)
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
@@ -3923,12 +3925,13 @@ class SourceHealthTests(unittest.TestCase):
     def test_header_has_only_the_requests_button(self):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('</pre></span></span><span class="wm">job signal</span><span class="label-sys-bright live"><span '
+        self.assertIn('</pre></span></span><span class="label-sys-bright live"><span '
                       'class="led led-pulse" aria-hidden="true"></span>live<span class="lv-x"> · automated</span></span><button class="th-m" '
                       'id="theme-m" type="button" aria-label="Switch to light mode" hidden>[ theme ]</button><button '
                       'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
                       '[ requests ]</button></div>', doc)
-        logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><span class="wm">', doc, re.S).group(1)
+        logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><span class="label-sys-bright live">',
+                         doc, re.S).group(1)
         # One static frame: a straight image-to-ASCII conversion of the K9 mark (72 columns x 16 rows of shade
         # blocks), plain text in the steel colour with no inline markup.
         frames = re.findall(r'<pre class="lf">(.*?)</pre>', logo, re.S)
@@ -3969,9 +3972,10 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("font:600 15px/1.35 var(--font-sans)", rules[("h1",)])          # no display-size hero
         self.assertNotIn("clamp(", rules[("h1",)])
         self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
-        # Phone header is two rows: logo + wordmark + a short LIVE badge (" · automated" hidden so it fits),
-        # then both bracket buttons pushed together to the right.
-        self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.live+.th-m{margin-left:auto}.th-m:not([hidden])"))
+        # Phone header is two rows: the mark + a short LIVE badge (" · automated" hidden) that fills the rest of
+        # the row, then both bracket buttons together on the second row, pushed to the right.
+        self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.live{flex:1 1 auto}.live+.th-m{margin-left:auto}"
+                                                    ".th-m:not([hidden])"))
         self.assertNotIn(".lv-x", base)
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
