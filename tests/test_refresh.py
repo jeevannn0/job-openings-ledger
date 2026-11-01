@@ -313,9 +313,11 @@ class SeedAndRenderTests(unittest.TestCase):
         state.companies["IQVIA"] = dataclasses.replace(state.companies["IQVIA"], status="stale",
                                                        last_success="2026-10-30T09:23+05:30")
         doc = R.render(state, template, config)
+        # The leading word is wrapped so phones can hide it and keep the stamp on the heading's line.
         self.assertRegex(doc, re.escape(led) + r'[a-z]+"><span class="led" aria-hidden="true"></span>'
-                              r'Checked 31 Oct 15:34 IST</p>')
-        self.assertEqual(doc.count("Checked 31 Oct 15:34 IST"), 1)
+                              r'<span class="ck-w">Checked </span>31 Oct 15:34 IST</p>')
+        self.assertEqual(doc.count("Checked </span>31 Oct 15:34 IST"), 1)
+        self.assertEqual(R.checked_text(state), "Checked 31 Oct 15:34 IST")
         self.assertIn('"IQVIA":"stale since Oct 30"', doc)
         self.assertIn('"ZS":"not auto-checked"', doc)
 
@@ -3925,13 +3927,13 @@ class SourceHealthTests(unittest.TestCase):
     def test_header_has_only_the_requests_button(self):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('</pre></span></span><span class="label-sys-bright live"><span '
-                      'class="led led-pulse" aria-hidden="true"></span>live<span class="lv-x"> · automated</span></span><button class="th-m" '
+        self.assertIn('</pre></span></span><button class="th-m" '
                       'id="theme-m" type="button" aria-label="Switch to light mode" hidden>[ theme ]</button><button '
                       'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
                       '[ requests ]</button></div>', doc)
-        logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><span class="label-sys-bright live">',
-                         doc, re.S).group(1)
+        logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><button class="th-m"', doc, re.S).group(1)
+        for gone in ('class="live"', "label-sys-bright live", "lv-x", "live · automated", ".live{"):
+            self.assertNotIn(gone, doc, gone)                                  # no live badge in the header
         # One static frame: a straight image-to-ASCII conversion of the K9 mark (72 columns x 16 rows of shade
         # blocks), plain text in the steel colour with no inline markup.
         frames = re.findall(r'<pre class="lf">(.*?)</pre>', logo, re.S)
@@ -3972,15 +3974,17 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("font:600 15px/1.35 var(--font-sans)", rules[("h1",)])          # no display-size hero
         self.assertNotIn("clamp(", rules[("h1",)])
         self.assertIn(".th-m:not([hidden]){display:inline-flex;", blocks[SHEET_MQ])
-        # Phone header is two aligned columns: the mark on the left, centred across both rows; on the right the
-        # short LIVE badge (" · automated" hidden) above the two bracket buttons, all flush to the right edge.
-        # On 320px phones the buttons cannot fit beside the mark and take the whole second row instead.
-        self.assertTrue(blocks[SHEET_MQ].startswith(".lv-x{display:none}.wm-row{display:grid;grid-template-columns:auto 1fr auto}"
-                                                    ".logo{grid-row:1/3}.live{grid-column:2/4;justify-self:end}"
-                                                    ".live+.th-m{grid-column:2;justify-self:end}.live+.th-m+.th-m{grid-column:3}"
+        # Phone header is one row: the mark on the left, both bracket buttons together on the right. Only on
+        # 320px phones do the buttons drop to their own row (still right-aligned). The search panel's heading
+        # and LED stamp share a line too: the word "Checked" is visually hidden there (still read out) and the
+        # stamp sits at the right edge, or left-aligned under the heading if a narrow phone wraps it.
+        self.assertTrue(blocks[SHEET_MQ].startswith(".logo{margin-right:auto}.ck-w{position:absolute;width:1px;height:1px;"
+                                                    "overflow:hidden;clip-path:inset(50%);white-space:nowrap}"
+                                                    ".srch-top{justify-content:space-between}.src-led{margin-left:0}"
                                                     ".th-m:not([hidden])"))
-        self.assertEqual(blocks["(max-width:359px)"], ".logo{grid-row:auto}.live+.th-m{grid-column:1/3}")
-        self.assertNotIn(".lv-x", base)
+        self.assertEqual(blocks["(max-width:359px)"], ".wm-row{justify-content:flex-end}.logo{width:100%}")
+        self.assertNotIn(".ck-w", base)
+        self.assertEqual(rules[(".src-led",)], "display:flex;align-items:center;gap:8px;margin-left:auto")
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
                       "white-space:nowrap}", blocks[SHEET_MQ])
         self.assertRegex(status_block(doc), r'<div><dt>Next run</dt><dd><time id="h-next" datetime="[^"]+">'
@@ -3989,7 +3993,7 @@ class SourceHealthTests(unittest.TestCase):
         # The search panel shows only the checked time; its LED takes the worst freshness state.
         self.assertEqual(dashboard_fragments(doc)["led"],
                          '<p class="label-sys src-led" id="src-led" data-s="failed"><span class="led" aria-hidden="true">'
-                         '</span>Checked 31 Oct 22:47 IST</p>')
+                         '</span><span class="ck-w">Checked </span>31 Oct 22:47 IST</p>')
         self.assertIn(".src-led .led{color:hsl(var(--sc))}", base)
         self.assertIn("[data-s=failed]{--sc:var(--bad)}", base)
         self.state.checked_at = None
@@ -4038,7 +4042,8 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("@keyframes blink{50%{opacity:0}}", style)
         # The logo glitches: two script-cloned ghost layers (clipped away at rest) show displaced slices for a
         # few stepped frames while the base layer jitters by a pixel; one .5s run on load, on hover/focus and
-        # every second LED pulse (4s, no timer loop), never under reduced motion or in a hidden tab. No frames
+        # every second pulse of the feed-toolbar LED (4s, no timer loop), never under reduced motion or in a
+        # hidden tab. No frames
         # swap and the mark itself stays put.
         for gone in ("bark", 'class="lf la"', 'class="lf lb"', ".lb{", ".lk{"):
             self.assertNotIn(gone, doc, gone)
@@ -4073,7 +4078,7 @@ class SourceHealthTests(unittest.TestCase):
                       'logo.classList.add("glitch")};', script)
         self.assertIn('logo.addEventListener("animationend",()=>logo.classList.remove("glitch"));'
                       'logo.addEventListener("mouseenter",glitch);$(".wm-row").addEventListener("focusin",glitch);'
-                      'setTimeout(glitch,600);let gi=0;$(".live .led").addEventListener("animationiteration",()=>{if(++gi%2===0)'
+                      'setTimeout(glitch,600);let gi=0;$(".tb-l .led").addEventListener("animationiteration",()=>{if(++gi%2===0)'
                       'glitch()});', script)
         for decl in anims:
             if "infinite" in decl:
@@ -4099,10 +4104,11 @@ class SourceHealthTests(unittest.TestCase):
                 part = re.sub(r"var\(--(dur-[a-z]+)\)", lambda m: durations[m.group(1)], part)
                 for t in re.findall(r"(?<![\w.])\d*\.?\d+m?s\b", part):
                     self.assertLessEqual(secs(t), 0.32, decl)
-        # Exactly two pulsing LEDs (header and feed toolbar), both in static markup.
+        # Exactly one pulsing LED (the feed toolbar), in static markup; the header badge is gone.
         markup = doc.replace(style, "")
-        self.assertEqual(markup.count("led-pulse"), 2)
-        self.assertEqual(markup.count('<span class="led led-pulse" aria-hidden="true"></span>'), 2)
+        self.assertEqual(markup.count("led-pulse"), 1)
+        self.assertEqual(markup.count('<span class="led led-pulse" aria-hidden="true"></span>'), 1)
+        self.assertIn('<h2 class="tb-l" id="feed-h" tabindex="-1"><span class="led led-pulse" aria-hidden="true"></span>', markup)
         self.assertNotIn("led-pulse", main_script(doc))
         self.assertNotIn("offsetWidth", doc)
         self.assertNotIn("getBoundingClientRect", doc)
@@ -4154,7 +4160,7 @@ class SourceHealthTests(unittest.TestCase):
         sources = R.source_health(self.state, self.config, R.health_reference(self.state))
         worst = R.worst_state(h.state for h in sources)
         self.assertEqual(frags["led"], f'<p class="label-sys src-led" id="src-led" data-s="{worst}"><span class="led" '
-                                       'aria-hidden="true"></span>Checked 31 Oct 22:47 IST</p>')
+                                       'aria-hidden="true"></span><span class="ck-w">Checked </span>31 Oct 22:47 IST</p>')
         # Outside the dialog, no connector names, per-source states or refresh counts are shown at all.
         outside = page_outside_dialog(doc)
         for needle in ("Avature", "Oracle Careers", "Workday", "Paradox", "Jibe", "Static snapshot", "accepted",

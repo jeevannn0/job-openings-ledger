@@ -809,6 +809,15 @@ def checked_text(state: State) -> str:
     return f"Checked {when.day} {MON[when.month - 1]} {when:%H:%M} IST"
 
 
+def checked_html(state: State) -> str:
+    """The search-panel LED label. The leading word is wrapped so phones can hide it (it is still read out)
+    and the stamp fits on the heading's line."""
+    text = html.escape(checked_text(state))
+    if text.startswith("Checked "):
+        return '<span class="ck-w">Checked </span>' + text[len("Checked "):]
+    return text
+
+
 # --------------------------------------------------------------------------- source health
 # The public health panel is a positive-allowlist projection. It reads only CompanyState.status,
 # last_success and last_attempt, plus the count of published rows, the configured mode's fixed
@@ -1120,7 +1129,7 @@ def render(state: State, template: str, config: Config) -> str:
     sources = source_health(state, config, reference)
     values = {
         "DAY": html.escape(day),
-        "CHECKED": html.escape(checked_text(state)),
+        "CHECKED": checked_html(state),
         "TOTAL": str(len(visible)),
         "COMPANIES_MATCHED": str(companies),
         "TODAY_COUNT": str(sum(1 for r in visible if r[5] == 0)),
