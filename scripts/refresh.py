@@ -549,8 +549,14 @@ def read_excluded(root: str, config: Config, environ: dict | None = None) -> dic
 ROW_FIELDS = ("company", "job_id", "title", "experience_text", "experience_band", "location", "canonical_url",
               "posted_date", "closing_date", "first_seen", "last_seen", "liveness", "absent_runs")
 COMPANY_FIELDS = ("status", "detail", "last_success", "last_attempt", "stale_since", "listing_total",
-                  "last_discovery_attempt", "screened", "removal_hold")
-LEGACY_COMPANY_FIELDS = COMPANY_FIELDS[:-1]     # state written before removal_hold existed
+                  "last_discovery_attempt", "screened", "removal_hold", "pulls")
+PRE_PULLS_COMPANY_FIELDS = COMPANY_FIELDS[:-1]  # state written before pulls existed (seeded on load)
+LEGACY_COMPANY_FIELDS = COMPANY_FIELDS[:-2]     # state written before removal_hold existed
+# Per-source pull history: the newest MAX_PULLS refresh attempts, oldest first. Each entry holds only
+# the attempt time, its ATTEMPT_TEXT key and three counts; never detail, URLs, hosts or job IDs.
+MAX_PULLS = 6
+PULL_FIELDS = ("at", "result", "published", "added", "removed")
+PULL_RESULTS = ("accepted", "held", "first_snapshot", "first_empty")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -591,10 +597,13 @@ class CompanyState:
     screened: dict = dataclasses.field(default_factory=dict)
     # A large removal seen once by a complete healthy run: {"at": ISO time, "ids": [sorted IDs]}.
     removal_hold: dict | None = None
+    # Newest MAX_PULLS refresh attempts, oldest first; each a dict with exactly PULL_FIELDS.
+    pulls: list = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = {k: getattr(self, k) for k in COMPANY_FIELDS}
         d["screened"] = dict(sorted(self.screened.items()))
+        d["pulls"] = [dict(p) for p in self.pulls]
         return d
 
 
@@ -677,10 +686,18 @@ def load_state(data: dict, config: Config) -> State:
     if not isinstance(comps, dict) or list(comps) != list(config.companies):
         raise ValueError("state: companies must match config order")
     companies: dict[str, CompanyState] = {}
+    unseeded: list[str] = []          # companies written before pulls existed; seeded once rows are loaded
     for name, raw in comps.items():
-        if not isinstance(raw, dict) or tuple(raw) not in (COMPANY_FIELDS, LEGACY_COMPANY_FIELDS):
+        if not isinstance(raw, dict) or tuple(raw) not in (COMPANY_FIELDS, PRE_PULLS_COMPANY_FIELDS,
+                                                           LEGACY_COMPANY_FIELDS):
             raise ValueError(f"state: {name} fields")
         cs = CompanyState(**raw)
+        if "pulls" in raw:
+            if not valid_pulls(cs.pulls):
+                raise ValueError(f"state: {name} pulls")
+            cs.pulls = [dict(p) for p in cs.pulls]
+        else:
+            unseeded.append(name)
         if cs.removal_hold is not None and not valid_hold(cs.removal_hold, name):
             raise ValueError(f"state: {name} removal_hold")
         if cs.status not in COMPANY_STATUSES or not isinstance(cs.detail, str) or len(cs.detail) > 120:
@@ -716,7 +733,40 @@ def load_state(data: dict, config: Config) -> State:
     keys = [(r.company, r.job_id) for r in jobs]
     if len(set(keys)) != len(keys):
         raise ValueError("state: duplicate rows")
-    return State(as_of, data["checked_at"], companies, [tuple(e) for e in empty], jobs)
+    state = State(as_of, data["checked_at"], companies, [tuple(e) for e in empty], jobs)
+    if unseeded:
+        counts = published_counts(state, config)
+        for name in unseeded:
+            cs = companies[name]
+            result = attempt_outcome(cs.status, cs.last_success, cs.last_attempt, counts[name])
+            # The one attempt older state recorded; its added/removed counts were never kept.
+            cs.pulls = ([pull_entry(cs.last_attempt, result, counts[name], None, None)]
+                        if cs.last_attempt is not None and result in PULL_RESULTS else [])
+    return state
+
+
+def pull_entry(at: str, result: str, published: int, added: int | None, removed: int | None) -> dict:
+    return dict(zip(PULL_FIELDS, (at, result, published, added, removed)))
+
+
+def valid_pulls(pulls: object) -> bool:
+    """A list of at most MAX_PULLS entries, each exactly PULL_FIELDS in order, in ascending `at` order."""
+    if not isinstance(pulls, list) or len(pulls) > MAX_PULLS:
+        return False
+
+    def count(v: object, nullable: bool) -> bool:
+        return (v is None and nullable) or (isinstance(v, int) and not isinstance(v, bool) and v >= 0)
+
+    times = []
+    for p in pulls:
+        if not isinstance(p, dict) or tuple(p) != PULL_FIELDS:
+            return False
+        at = iso_time(p["at"])
+        if at is None or p["result"] not in PULL_RESULTS or not count(p["published"], False) \
+                or not count(p["added"], True) or not count(p["removed"], True):
+            return False
+        times.append(at)
+    return all(a <= b for a, b in zip(times, times[1:]))
 
 
 def sort_rows(rows: Iterable[Row], config: Config) -> list[Row]:
@@ -760,8 +810,8 @@ def checked_text(state: State) -> str:
 
 # --------------------------------------------------------------------------- source health
 # The public health panel is a positive-allowlist projection. It reads only CompanyState.status,
-# last_success and last_attempt, plus the count of published rows and the configured mode's fixed
-# CONNECTOR_LABELS name (never a URL or host). detail, screened, removal_hold,
+# last_success and last_attempt, plus the count of published rows, the configured mode's fixed
+# CONNECTOR_LABELS name (never a URL or host) and each pull's PULL_FIELDS. detail, screened, removal_hold,
 # listing_total, stale_since and last_discovery_attempt never reach the page.
 
 FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # one refresh cadence plus scheduler slack
@@ -969,7 +1019,8 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
                     f'{html.escape(connector_label(config, h.company))}</span></span>{badge_html(h.state)}{meter}'
                     f'<dl class="ch-d"><div class="ch-p"><dt>Published</dt><dd class="num">{h.published}</dd></div>'
                     f'<div class="ch-a"><dt>Latest attempt</dt><dd>{attempt}</dd></div>'
-                    f'<div class="h-data"><dt>Last good data</dt><dd>{data}</dd></div></dl></li>')
+                    f'<div class="h-data"><dt>Last good data</dt><dd>{data}</dd></div></dl>'
+                    f'{pulls_html(state.companies[h.company].pulls)}</li>')
     # Visual column header for the terminal's source grid; each row still labels its own fields with dt/dd.
     head = ('<div class="ch-head" aria-hidden="true">' + "".join(f"<span>{c}</span>" for c in CHANNEL_COLUMNS)
             + "</div>")
@@ -978,6 +1029,25 @@ def health_html(state: State, config: Config) -> tuple[str, str, str]:
 
 
 CHANNEL_COLUMNS = ("CH", "Source / connector", "Freshness", "Published", "Latest attempt", "Last good data")
+
+
+def pulls_html(pulls: list) -> str:
+    """A source's pull history, newest first. Reads only PULL_FIELDS; fixed wording only."""
+    if not pulls:
+        return '<p class="pulls-none">No pull history yet</p>'
+    items = []
+    for p in reversed(pulls):
+        at = iso_time(p["at"])
+        if at is None or p["result"] not in PULL_RESULTS:
+            raise ValueError("render: invalid pull entry")
+        added, removed = p["added"], p["removed"]
+        delta = (f' · <span class="pd"><span class="pa">+{int(added)}</span> <span class="pr">−{int(removed)}</span></span>'
+                 if isinstance(added, int) and isinstance(removed, int) else "")
+        items.append(f'<li>{time_html(at)} · <span class="oc" data-o="{ROLLUP_OF[p["result"]]}">'
+                     f'{ATTEMPT_TEXT[p["result"]]}</span> · <b>{int(p["published"])}</b> published{delta}</li>')
+    n = len(pulls)
+    return (f'<details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>'
+            f'last {n} pull{"" if n == 1 else "s"}</summary><ol class="pl-list">' + "".join(items) + "</ol></details>")
 
 
 def status_block_html(state: State, config: Config) -> str:
@@ -2570,7 +2640,26 @@ def run_refresh(state: State, config: Config, excluded: dict, now: dt.datetime,
                 elif why != "excluded":    # private exclusions are never named in reports
                     o.removed.append(f"{jid} ({why})")
     checked = state.checked_at if factory is None else stamp(now)
-    return State(today, checked, companies, list(state.empty_companies), final), outcomes
+    after = State(today, checked, companies, list(state.empty_companies), final)
+    record_pulls(after, config, outcomes)
+    return after, outcomes
+
+
+def record_pulls(state: State, config: Config, outcomes: list[Outcome]) -> None:
+    """Append one pull per attempted source from the finalised rows; keep the newest MAX_PULLS.
+
+    Only ok/held outcomes are attempts (each set last_attempt this run); static and offline record nothing.
+    """
+    counts = published_counts(state, config)
+    for o in outcomes:
+        if o.result not in ("ok", "held"):
+            continue
+        cs = state.companies[o.company]
+        result = attempt_outcome(cs.status, cs.last_success, cs.last_attempt, counts[o.company])
+        if result not in PULL_RESULTS:
+            raise AssertionError("unreachable: an attempted source has a recorded outcome")
+        entry = pull_entry(cs.last_attempt, result, counts[o.company], len(o.added), len(o.removed))
+        cs.pulls = (list(cs.pulls) + [entry])[-MAX_PULLS:]
 
 
 def meaningful(before: State, after: State) -> bool:

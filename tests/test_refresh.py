@@ -742,7 +742,7 @@ class GuardTests(unittest.TestCase):
                     R.load_state(d, config)
         legacy = json.loads(state.to_json())
         for c in legacy["companies"].values():
-            del c["removal_hold"]
+            del c["removal_hold"], c["pulls"]       # state written before removal_hold and pulls existed
         self.assertTrue(all(cs.removal_hold is None for cs in R.load_state(legacy, config).companies.values()))
 
     def test_small_removal_is_allowed(self):
@@ -1616,6 +1616,196 @@ class DryRunTests(unittest.TestCase):
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
         self.assertIn("| Siemens | ok |", out)
+
+
+# --------------------------------------------------------------------------- per-source pull history
+
+def pull(at, result="accepted", published=0, added=0, removed=0):
+    return dict(zip(R.PULL_FIELDS, (at, result, published, added, removed)))
+
+
+def channel_row(doc: str, company: str) -> str:
+    """One source's whole `<li class="ch">` line (pull items nest their own <li>, so no regex end)."""
+    rows = [ln for ln in health_section(doc).splitlines() if ln.startswith('<li class="ch"')]
+    return next(ln for ln in rows if f'<strong class="ch-name">{company}</strong>' in ln)
+
+
+class PullHistoryTests(unittest.TestCase):
+    def setUp(self):
+        self.config, self.excluded, self.state, self.template = env()
+
+    def test_company_state_fields_end_with_pulls(self):
+        self.assertEqual([f.name for f in dataclasses.fields(R.CompanyState)], list(R.COMPANY_FIELDS))
+        self.assertEqual(R.COMPANY_FIELDS[-2:], ("removal_hold", "pulls"))
+        self.assertEqual(R.PULL_FIELDS, ("at", "result", "published", "added", "removed"))
+        self.assertEqual((R.MAX_PULLS, R.CompanyState("seed", "x").pulls), (6, []))
+        self.assertEqual(list(json.loads(self.state.to_json())["companies"]["Siemens"]), list(R.COMPANY_FIELDS))
+
+    def test_missing_pulls_key_is_seeded_from_the_last_attempt(self):
+        at = "2026-10-31T16:38+05:30"
+        self.state.companies["Siemens"] = dataclasses.replace(self.state.companies["Siemens"], status="ok",
+                                                              last_success=at, last_attempt=at)
+        published = R.published_counts(self.state, self.config)
+        for drop in (("pulls",), ("pulls", "removal_hold")):       # both older field sets still load
+            with self.subTest(drop):
+                data = json.loads(self.state.to_json())
+                for c in data["companies"].values():
+                    for k in drop:
+                        del c[k]
+                loaded = R.load_state(data, self.config)
+                self.assertEqual(loaded.companies["Siemens"].pulls,
+                                 [pull(at, "accepted", published["Siemens"], None, None)])
+                for name in self.config.companies[1:]:            # no attempt recorded: nothing to seed
+                    self.assertEqual(loaded.companies[name].pulls, [], name)
+                again = R.load_state(json.loads(loaded.to_json()), self.config)
+                self.assertEqual(again.to_json(), loaded.to_json())
+
+    def test_seed_uses_the_attempt_outcome(self):
+        at = "2026-10-31T16:38+05:30"
+        self.state.companies["ZS"] = dataclasses.replace(self.state.companies["ZS"], status="stale",
+                                                         last_attempt=at)
+        self.state.companies["IQVIA"] = dataclasses.replace(self.state.companies["IQVIA"], status="seed",
+                                                            last_attempt=at)       # outcome "unrecorded"
+        data = json.loads(self.state.to_json())
+        for c in data["companies"].values():
+            del c["pulls"]
+        loaded = R.load_state(data, self.config)
+        n = R.published_counts(self.state, self.config)["ZS"]
+        self.assertEqual(loaded.companies["ZS"].pulls,
+                         [pull(at, "first_snapshot" if n else "first_empty", n, None, None)])
+        self.assertEqual(loaded.companies["IQVIA"].pulls, [])
+
+    def test_strict_validation_fails_closed(self):
+        times = [f"2026-10-{d:02d}T05:53+05:30" for d in range(20, 27)]
+        good = [pull(t) for t in times[:6]]
+        bad = {"seven entries": [pull(t) for t in times],
+               "wrong keys": [{"at": times[0], "result": "accepted", "published": 1, "added": 0}],
+               "extra key": [{**pull(times[0]), "detail": "x"}],
+               "key order": [dict(reversed(list(pull(times[0]).items())))],
+               "bad result": [pull(times[0], result="unrecorded")],
+               "descending": [pull(times[1]), pull(times[0])],
+               "bad time": [pull("yesterday")],
+               "negative": [pull(times[0], published=-1)],
+               "bool count": [pull(times[0], added=True)],
+               "null published": [pull(times[0], published=None)],
+               "not a list": {"at": times[0]},
+               "not a dict": [list(pull(times[0]).values())]}
+        data = json.loads(self.state.to_json())
+        data["companies"]["Siemens"]["pulls"] = good
+        self.assertEqual(R.load_state(data, self.config).companies["Siemens"].pulls, good)
+        for name, value in bad.items():
+            with self.subTest(name):
+                d = json.loads(self.state.to_json())
+                d["companies"]["Siemens"]["pulls"] = value
+                with self.assertRaises(ValueError):
+                    R.load_state(d, self.config)
+
+    def test_fixture_run_records_one_pull_per_source(self):
+        tmp = temp_repo(self, self.state, self.template, self.config)
+        code, _out, err = run_main(["--root", tmp, "refresh", "--fixtures", os.path.join(FIXTURES, "dry_run.json"),
+                                    "--now", "2026-10-31T18:00+05:30"], json.dumps(TEST_EXCLUDED))
+        self.assertEqual(code, 0, err)
+        after = R.load_all(tmp)[1]
+        published = R.published_counts(after, self.config)
+        before_ids = {r.job_id for r in self.state.jobs}
+        for company in self.config.companies:
+            with self.subTest(company):
+                added = {r.job_id for r in rows_of(after, company)} - before_ids
+                self.assertEqual(len(added & FIXTURE_ADDED), 1)
+                self.assertEqual(after.companies[company].pulls,
+                                 [pull("2026-10-31T18:00+05:30", "accepted", published[company], len(added), 0)])
+        doc = R.read_text(os.path.join(tmp, R.INDEX_PATH))
+        self.assertIn('<summary><span class="tri" aria-hidden="true">▸</span>last 1 pull</summary>',
+                      channel_row(doc, "Siemens"))
+
+    def test_history_keeps_the_newest_six_pulls(self):
+        transport = FakeTransport()                 # every source call fails: each run is a held attempt
+        state = self.state
+        runs = [NOW + dt.timedelta(hours=6 * i) for i in range(7)]
+        for when in runs:
+            state, outcomes = R.run_refresh(state, self.config, self.excluded, when,
+                                            factory_for(self.config, transport))
+            self.assertEqual({o.result for o in outcomes}, {"held"})
+            state = R.load_state(json.loads(state.to_json()), self.config)     # persisted between runs
+        for company in self.config.companies:
+            with self.subTest(company):
+                pulls = state.companies[company].pulls
+                self.assertEqual([p["at"] for p in pulls], [R.stamp(w) for w in runs[1:]])   # oldest dropped
+                self.assertEqual(pulls[-1]["at"], state.companies[company].last_attempt)
+                n = R.published_counts(state, self.config)[company]
+                self.assertEqual(pulls[-1], pull(R.stamp(runs[-1]), "first_snapshot" if n else "first_empty", n, 0, 0))
+
+    def test_budget_skipped_source_records_a_held_pull(self):
+        ticks = iter([0.0] + [R.RUN_BUDGET_S] * 50)            # the run budget is gone before any source
+        after, outcomes = R.run_refresh(self.state, self.config, self.excluded, NOW,
+                                        factory_for(self.config, FakeTransport()), clock=lambda: next(ticks))
+        self.assertEqual({o.detail for o in outcomes}, {"run time budget exhausted"})
+        for company in self.config.companies:
+            self.assertEqual([(p["at"], p["added"], p["removed"]) for p in after.companies[company].pulls],
+                             [(R.stamp(NOW), 0, 0)])
+
+    def test_offline_and_static_runs_record_nothing(self):
+        self.state.companies["Siemens"].pulls = [pull("2026-10-31T05:53+05:30", published=3)]
+        after, _o = R.run_refresh(self.state, self.config, self.excluded, NOW, None)
+        self.assertEqual(after.companies["Siemens"].pulls, [pull("2026-10-31T05:53+05:30", published=3)])
+        self.assertTrue(all(not after.companies[c].pulls for c in self.config.companies[1:]))
+        self.assertFalse(R.meaningful(self.state, after))
+        raw = R.read_json(os.path.join(ROOT, R.CONFIG_PATH))
+        raw["companies"] = [e if e["company"] != "ZS" else {"company": "ZS", "mode": "static"}
+                            for e in raw["companies"]]
+        raw["hosts"]["jobs.zs.com"]["fetch"] = False
+        static = R.load_config(raw)
+        self.state.companies["ZS"] = dataclasses.replace(self.state.companies["ZS"], status="static")
+        after, outcomes = R.run_refresh(self.state, static, self.excluded, NOW,
+                                        factory_for(static, FakeTransport()))
+        self.assertEqual([o.result for o in outcomes if o.company == "ZS"], ["static"])
+        self.assertEqual(after.companies["ZS"].pulls, [])
+        self.assertEqual(len(after.companies["IQVIA"].pulls), 1)
+
+    def test_render_lists_pulls_newest_first(self):
+        self.state.checked_at = "2026-10-31T22:47+05:30"
+        self.state.companies["Siemens"].pulls = [
+            pull("2026-10-31T05:53+05:30", "first_empty", 0, 0, 0),
+            pull("2026-10-31T11:53+05:30", "held", 4, 0, 0),
+            pull("2026-10-31T17:53+05:30", "accepted", 9, 3, 1)]
+        self.state.companies["IQVIA"].pulls = [pull("2026-10-31T16:38+05:30", "accepted", 5, None, None)]
+        doc = R.render(self.state, self.template, self.config)
+        delta = '<span class="pd"><span class="pa">+{}</span> <span class="pr">−{}</span></span>'
+        self.assertIn(
+            '</dl><details class="pulls"><summary><span class="tri" aria-hidden="true">▸</span>last 3 pulls</summary>'
+            '<ol class="pl-list">'
+            '<li><time datetime="2026-10-31T17:53:00+05:30">31 Oct 17:53 IST</time> · '
+            '<span class="oc" data-o="accepted">Successful refresh</span> · <b>9</b> published · '
+            + delta.format(3, 1) + '</li>'
+            '<li><time datetime="2026-10-31T11:53:00+05:30">31 Oct 11:53 IST</time> · '
+            '<span class="oc" data-o="held">Refresh held, cached data kept</span> · <b>4</b> published · '
+            + delta.format(0, 0) + '</li>'
+            '<li><time datetime="2026-10-31T05:53:00+05:30">31 Oct 05:53 IST</time> · '
+            '<span class="oc" data-o="failed">No successful automated refresh yet</span> · <b>0</b> published · '
+            + delta.format(0, 0) + '</li></ol></details></li>', channel_row(doc, "Siemens"))
+        # A seeded entry has no added/removed counts, so it renders without the delta span.
+        self.assertIn('last 1 pull</summary><ol class="pl-list"><li><time datetime="2026-10-31T16:38:00+05:30">'
+                      '31 Oct 16:38 IST</time> · <span class="oc" data-o="accepted">Successful refresh</span> · '
+                      '<b>5</b> published</li></ol></details></li>', channel_row(doc, "IQVIA"))
+        self.assertNotIn('class="pd"', channel_row(doc, "IQVIA"))
+        for company in ("JPMorganChase", "GE HealthCare", "GE Vernova", "ZS"):
+            self.assertTrue(channel_row(doc, company).endswith('</dl><p class="pulls-none">No pull history yet</p></li>'))
+        self.assertEqual(doc.count('<details class="pulls">'), 2)
+        self.assertNotIn("<details", page_outside_dialog(doc))
+        # Re-aging reads only .h-data times; pull times stay as rendered.
+        self.assertNotIn(".pulls", main_script(doc))
+        self.assertNotIn("pl-list", main_script(doc))
+
+    def test_pull_styles_and_breakpoints(self):
+        base, blocks = media_blocks(style_of(R.render(self.state, self.template, self.config)))
+        self.assertIn(".ch>.pulls,.ch>.pulls-none{grid-column:2/-1;grid-row:2;margin:4px 0 0}", base)
+        self.assertIn(".pulls[open] .tri{transform:rotate(90deg)}", base)
+        self.assertIn(".pulls>summary::-webkit-details-marker{display:none}", base)
+        self.assertIn(".pl-list,.pulls>summary,.pulls-none{font-family:var(--font-mono);", base)
+        self.assertIn(".ch>.pulls,.ch>.pulls-none{grid-column:1/-1;grid-row:3}", blocks[SHEET_MQ])
+        # .pr is also the search prompt; the removed-count colour is scoped so the prompt keeps its look.
+        self.assertIn(".pr{font-size:14px;font-weight:700;color:hsl(var(--signal))}", base)
+        self.assertIn(".pd .pr{font-size:inherit;font-weight:inherit;color:hsl(var(--bad))}", base)
 
 
 # --------------------------------------------------------------------------- phone alerts (dist/alerts.json)
@@ -3328,10 +3518,13 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("[hidden]{display:none!important}", base)
         # The older page skeletons do not come back; the terminal chrome exists only inside the dialog.
         for gone in ('class="rail"', 'class="top"', 'class="stk"', 'class="lg-head"', 'class="sec-h"',
-                     'class="tile"', "<details", 'id="sync"', 'class="pulse"', 'id="srcs"', 'class="sr"', 'id="key"',
+                     'class="tile"', 'id="sync"', 'class="pulse"', 'id="srcs"', 'class="sr"', 'id="key"',
                      'class="st-note"', 'id="src-led-text"'):
             self.assertNotIn(gone, doc, gone)
         outside = page_outside_dialog(doc)
+        # The only disclosure widgets are the terminal's per-source pull histories.
+        self.assertNotIn("<details", outside)
+        self.assertEqual(api_dialog(doc).count("<details"), api_dialog(doc).count('<details class="pulls">'))
         for chrome in ('class="term-win"', 'class="dot', 'class="caret"', 'class="tb"', "ops@job-signal"):
             self.assertNotIn(chrome, outside, chrome)
             self.assertIn(chrome, api_dialog(doc), chrome)
