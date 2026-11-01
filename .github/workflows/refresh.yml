@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "23 */6 * * *"   # UTC; minute 23 avoids the top-of-hour scheduler rush
   workflow_dispatch:
+  # A human push to the default branch takes the publish-only path below: it re-renders and deploys
+  # the committed state without contacting any employer site. The refresh job's own commit is pushed
+  # with GITHUB_TOKEN, which never triggers `push`, and the publish job also refuses the bot actor.
+  push:
 
 permissions: {}
 
@@ -15,7 +19,8 @@ jobs:
   refresh:
     # schedule always runs on the default branch (its payload has no repository object);
     # manual runs are limited to the default branch so state is only ever pushed there.
-    if: github.event_name == 'schedule' || github.ref_name == github.event.repository.default_branch
+    # Pushes never refresh sources; they take the publish job instead.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -85,8 +90,52 @@ jobs:
         with:
           path: dist
 
+  publish:
+    # Publish-only path for code/template changes: no network access to any source, no commit.
+    # The committed index.html must already match the committed state (the check step), so this
+    # job only proves the tree is consistent and ships it.
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (tag verified with git ls-remote)
+        with:
+          persist-credentials: false
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Verify index.html matches state
+        run: python3 scripts/refresh.py check
+
+      - name: Public-boundary scan
+        run: python3 scripts/refresh.py scan
+
+      - name: Build Pages artifact from the committed state
+        run: |
+          set -euo pipefail
+          python3 scripts/refresh.py render --out dist/index.html
+          cmp dist/index.html index.html
+          # The phone alert describes the latest source refresh, which this path does not repeat, so the
+          # live copy is carried forward unchanged. It must parse, pass the alert checks, and describe the
+          # committed state's own checked_at; otherwise the run fails and nothing is deployed.
+          curl -fsSL --retry 3 --retry-delay 5 --max-time 30 -o dist/alerts.json \
+            "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/alerts.json"
+          python3 scripts/refresh.py alert-verify dist/alerts.json
+          test "$(ls -A dist | tr '\n' ' ')" = "alerts.json index.html "
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0 (tag verified with git ls-remote)
+        with:
+          path: dist
+
   deploy:
-    needs: refresh
+    needs: [refresh, publish]
+    # Exactly one of the two producers runs per event; deploy follows whichever succeeded.
+    if: ${{ !cancelled() && (needs.refresh.result == 'success' || needs.publish.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

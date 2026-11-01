@@ -1260,27 +1260,60 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(self.text, r'(?m)^  schedule:\n    - cron: "23 \*/6 \* \* \*"')
         self.assertEqual(R.REFRESH_CADENCE, dt.timedelta(hours=6))   # removal-hold confirmation spacing
         self.assertRegex(self.text, r"(?m)^  workflow_dispatch:\s*$")
-        self.assertNotRegex(self.text, r"(?m)^  (push|pull_request|pull_request_target):")
+        self.assertRegex(self.text, r"(?m)^  push:\s*$")                     # publish-only path, see below
+        self.assertNotRegex(self.text, r"(?m)^  (pull_request|pull_request_target):")
+
+    def test_push_takes_the_publish_only_path(self):
+        """A code push re-renders and deploys the committed state; it never contacts a source."""
+        refresh, publish = self.block("refresh"), self.block("publish")
+        self.assertIn("if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && "
+                      "github.ref_name == github.event.repository.default_branch)", refresh)
+        self.assertIn("if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch "
+                      "&& github.actor != 'github-actions[bot]'", publish)
+        self.assertNotIn("refresh.py refresh", publish)
+        self.assertNotIn("secrets.", publish)
+        self.assertNotIn("git push", publish)
+        self.assertNotIn("git commit", publish)
+        order = ["persist-credentials: false", "unittest discover", "refresh.py check", "refresh.py scan",
+                 "render --out dist/index.html", "cmp dist/index.html index.html", "curl -fsSL",
+                 'alerts.json"', "refresh.py alert-verify dist/alerts.json", 'test "$(ls -A dist | tr',
+                 "upload-pages-artifact"]
+        positions = [publish.index(s) for s in order]
+        self.assertEqual(positions, sorted(positions))
+        # The carried-forward alert comes from the site's own address, derived from the repository name.
+        self.assertIn('"https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/alerts.json"', publish)
+        self.assertIn("set -euo pipefail", publish)
+        for line in publish.splitlines():
+            if "${{" in line:
+                self.assertRegex(line, r"^\s+(if:|[A-Z_]+: \$\{\{)", line)
+        deploy = self.block("deploy")
+        self.assertIn("needs: [refresh, publish]", deploy)
+        self.assertIn("if: ${{ !cancelled() && (needs.refresh.result == 'success' || needs.publish.result == 'success') }}",
+                      deploy)
 
     def test_least_privilege(self):
         self.assertRegex(self.text, r"(?m)^permissions: \{\}$")
-        refresh, deploy = self.block("refresh"), self.block("deploy")
+        refresh, publish, deploy = self.block("refresh"), self.block("publish"), self.block("deploy")
         self.assertRegex(refresh, r"permissions:\n      contents: write[^\n]*\n    steps:")
+        self.assertRegex(publish, r"permissions:\n      contents: read\n    steps:")
         self.assertRegex(deploy, r"permissions:\n      pages: write\n      id-token: write\n    environment:")
-        self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 2)
+        self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 3)
         self.assertIn("persist-credentials: false", refresh)
+        self.assertIn("persist-credentials: false", publish)
 
     def test_concurrency_timeouts_runner(self):
         self.assertRegex(self.text, r"(?m)^concurrency:\n  group: job-ledger-refresh\n  cancel-in-progress: false$")
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(len(timeouts), 2)
+        self.assertEqual(len(timeouts), 3)
         self.assertTrue(all(t <= 25 for t in timeouts))
-        self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04", "ubuntu-24.04"])
+        self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 3)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
         uses = re.findall(r"uses: (\S+)", self.text)
         self.assertEqual(sorted(uses), sorted([
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",            # refresh + publish
+            "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d",
             "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346",
@@ -1308,7 +1341,47 @@ class WorkflowTests(unittest.TestCase):
         for line in refresh.splitlines():   # expressions only in if:/env:, never inlined into run scripts
             if "${{" in line:
                 self.assertRegex(line, r"^\s+(if:|[A-Z_]+: \$\{\{)", line)
-        self.assertIn("needs: refresh", self.block("deploy"))
+        self.assertIn("needs: [refresh, publish]", self.block("deploy"))
+
+
+class AlertVerifyTests(unittest.TestCase):
+    """`alert-verify` guards the publish-only path: the live alerts.json is redeployed only when it is
+    the canonical payload for the committed state's own run."""
+
+    def setUp(self):
+        self.config, _e, self.state, self.template = env()
+        self.state.checked_at = "2026-10-31T22:47+05:30"
+        self.root = temp_repo(self, self.state, self.template, self.config)
+        self.path = os.path.join(self.root, "alerts.json")
+
+    def payload(self, **over) -> dict:
+        # A live refresh stamps state.checked_at and the outcome's run_at from the same clock.
+        p = alert_for(self.state, self.config, run_at=self.state.checked_at)
+        p.update(over)
+        return p
+
+    def write(self, text: str) -> None:
+        R.write_atomic(self.path, text)
+
+    def test_canonical_payload_for_this_state_passes(self):
+        self.write(R.alert_json(self.payload()))
+        self.assertEqual(R.main(["--root", self.root, "alert-verify", self.path]), 0)
+        self.assertEqual(R.main(["--root", self.root, "alert-verify", "alerts.json"]), 0)   # relative to root
+
+    def test_stale_or_foreign_payloads_fail(self):
+        for bad in (self.payload(checked_at="2026-10-31T16:47+05:30"),          # an earlier run
+                    self.payload(as_of="2026-10-30"),
+                    self.payload(ledger_url="https://example.com/x/")):
+            self.write(R.alert_json(bad))
+            self.assertEqual(R.main(["--root", self.root, "alert-verify", self.path]), 2)
+        self.write(json.dumps(self.payload()))                                   # not canonical form
+        self.assertEqual(R.main(["--root", self.root, "alert-verify", self.path]), 2)
+        self.write("not json")
+        self.assertEqual(R.main(["--root", self.root, "alert-verify", self.path]), 2)
+        self.write(R.alert_json(self.payload()) + " " * R.MAX_ALERT_BYTES)                 # over the size cap
+        self.assertEqual(R.main(["--root", self.root, "alert-verify", self.path]), 2)
+        self.write('{"schema": 1, "x": "é"}')                                             # not ASCII
+        self.assertEqual(R.main(["--root", self.root, "alert-verify", self.path]), 2)
 
 
 def temp_repo(test: unittest.TestCase, state, template, config) -> str:
@@ -2131,10 +2204,19 @@ class AlertTests(unittest.TestCase):
         build = re.search(r"- name: Build Pages artifact\n(.*?)(?=\n      - name:)", refresh, re.S).group(1)
         self.assertIn("set -euo pipefail", build)
         self.assertIn("path: dist", refresh)
-        self.assertEqual(text.count("alerts.json"), 2)                        # built and listed; never staged
+        self.assertEqual(refresh.count("alerts.json"), 2)                     # built and listed; never staged
         self.assertNotIn("alerts.json", re.search(r"git add[^\n]*", refresh).group(0))
+        self.assertNotIn("alerts.json", re.search(r"(?m)^\s*git add[^\n]*", text).group(0))
+        self.assertEqual(text.count("git add"), 1)                            # only the refresh job commits
         self.assertNotRegex(text, r"continue-on-error|always\(\)|failure\(\)")
         self.assertEqual(text.count("refresh-outcome.json"), 2)
+        # The publish-only job never builds an alert from an outcome; it carries the live one forward,
+        # verified against the committed state (alert-verify), and lists exactly the same two files.
+        publish = re.search(r"^  publish:\n(.*?)(?=^  [a-z]+:\n)", text, re.S | re.M).group(1)
+        self.assertNotIn("refresh-outcome", publish)
+        self.assertNotIn("alert --outcome", publish)
+        self.assertIn("refresh.py alert-verify dist/alerts.json", publish)
+        self.assertEqual(publish.count('test "$(ls -A dist | tr \'\\n\' \' \')" = "alerts.json index.html "'), 1)
 
 
 # --------------------------------------------------------------------------- live adapters: JPMorganChase, GE HealthCare, ZS

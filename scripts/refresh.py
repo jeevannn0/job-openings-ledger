@@ -35,6 +35,7 @@ Usage (run from anywhere; paths resolve against the repository root):
                                     [--outcome FILE]
   python scripts/refresh.py render [--out PATH]
   python scripts/refresh.py alert --outcome FILE --out PATH --ledger-url URL
+  python scripts/refresh.py alert-verify PATH
   python scripts/refresh.py check
   python scripts/refresh.py scan [ROOT]
   python scripts/refresh.py seed --from-html PATH --as-of YYYY-MM-DD
@@ -3121,6 +3122,31 @@ def cmd_alert(args, root: str) -> int:
     return 0
 
 
+MAX_ALERT_BYTES = 65_536
+
+
+def cmd_alert_verify(args, root: str) -> int:
+    """Check a carried-forward alerts.json (the publish-only path): it must pass every alert check and
+    describe the committed state's own run, so a stale or foreign payload is never redeployed."""
+    config, state, _template = load_all(root)
+    path = args.path if os.path.isabs(args.path) else os.path.join(root, args.path)
+    with open(path, "rb") as fh:
+        raw = fh.read(MAX_ALERT_BYTES + 1)
+    if len(raw) > MAX_ALERT_BYTES:
+        raise ValueError("alert-verify: file is too large")
+    try:
+        payload = json.loads(raw.decode("ascii"))
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("alert-verify: not ASCII JSON") from None
+    validate_alert(payload, config)
+    if payload["checked_at"] != state.checked_at or payload["as_of"] != state.as_of.isoformat():
+        raise ValueError("alert-verify: payload does not describe the committed state's run")
+    if alert_json(payload) != raw.decode("ascii"):
+        raise ValueError("alert-verify: payload is not in canonical form")
+    print(f"alert-verify: ok ({payload['checked_at']}, total {payload['total_jobs']})")
+    return 0
+
+
 def cmd_check(args, root: str) -> int:
     config, state, template = load_all(root)
     if read_text(os.path.join(root, INDEX_PATH)) != render(state, template, config):
@@ -3166,6 +3192,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--outcome", required=True, help="file written by refresh --outcome")
     p.add_argument("--out", required=True, help="alerts.json path, e.g. dist/alerts.json")
     p.add_argument("--ledger-url", required=True, help="the repository's GitHub Pages URL")
+    p = sub.add_parser("alert-verify", help="verify a carried-forward alerts.json against the committed state")
+    p.add_argument("path", help="alerts.json to verify, e.g. dist/alerts.json")
     sub.add_parser("check", help="verify index.html matches the state")
     p = sub.add_parser("scan", help="recursive public-boundary scan")
     p.add_argument("scan_root", nargs="?", metavar="ROOT")
@@ -3173,8 +3201,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from-html", required=True)
     p.add_argument("--as-of", required=True)
     args = ap.parse_args(argv)
-    handlers = {"refresh": cmd_refresh, "render": cmd_render, "alert": cmd_alert, "check": cmd_check,
-                "scan": cmd_scan, "seed": cmd_seed}
+    handlers = {"refresh": cmd_refresh, "render": cmd_render, "alert": cmd_alert, "alert-verify": cmd_alert_verify,
+                "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed}
     try:
         return handlers[args.cmd](args, args.root)
     except (OSError, ValueError) as exc:
