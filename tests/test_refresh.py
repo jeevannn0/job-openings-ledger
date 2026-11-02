@@ -270,10 +270,11 @@ class SeedAndRenderTests(unittest.TestCase):
             self.assertIn(s, doc)
         self.assertIn("fmtClose=s=>`${MON[+s.slice(5,7)-1]} ${+s.slice(8,10)}`;", doc)
         self.assertNotIn("${s.slice(8,10)}", doc)
-        # match() is the legacy function plus the one "New today" clause added since.
+        # match() is the legacy function plus the "New today" and location clauses added since.
         legacy_match = re.search(r"function match\(r\)\{.*?\}return true\}", legacy).group(0)
         now_match = re.search(r"function match\(r\)\{.*?\}return true\}", doc).group(0)
-        self.assertEqual(now_match.replace("if(onlyNew&&r[10]!==0)return false;", "", 1), legacy_match)
+        self.assertEqual(now_match.replace("if(onlyNew&&r[10]!==0)return false;", "", 1)
+                         .replace("if(lf.value&&!inCity(r,lf.value))return false;", "", 1), legacy_match)
         self.assertNotEqual(now_match, legacy_match)
         # Content grid: one column by default and below 1024px (feed first, then the Informational aside);
         # from 1024px the feed plus one sticky 300px aside.
@@ -302,7 +303,8 @@ class SeedAndRenderTests(unittest.TestCase):
             self.assertIn(rule, phone, rule)
         self.assertNotIn(".c-f", style)
         self.assertIn("#results{display:grid;gap:12px;", base)
-        self.assertIn(".fsel{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));", base)
+        self.assertIn(".fsel{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));", base)
+        self.assertIn(".srch .fsel{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px}", blocks[SHEET_MQ])
         # Search panel: heading then the LED line; no "Live" tag and no helper paragraph.
         self.assertIn('<h2 id="qd-h">Search the ledger</h2><p class="label-sys src-led" id="src-led"', doc)
         for gone in ('class="tag"', "srch-p", "Type a title, skill or job ID"):
@@ -1108,6 +1110,26 @@ class NewSourceHelperTests(unittest.TestCase):
                      "technopark", "kozhikode", "calicut", "thrissur", "kollam", "kannur", "palakkad", "alappuzha",
                      "kottayam", "malappuram", "kerala", "bengaluru", "bangalore"):
             self.assertIn(term, config.cities, term)
+
+    def test_kerala_cities_are_the_region_terms(self):
+        # The region's term list is built from the city table, "kerala" itself first, so the filter and the crawl
+        # cannot drift apart; every alias belongs to exactly one city.
+        flat = [term for _n, terms in R.KERALA_CITIES for term in terms]
+        self.assertEqual(R.REGION_TERMS["kerala"], ("kerala", *flat))
+        self.assertEqual(len(flat), len(set(flat)))
+        self.assertEqual([n for n, _t in R.KERALA_CITIES][:3], ["Kochi", "Thiruvananthapuram", "Kozhikode"])
+        config, _e, _s, _t = env()
+        cities = R.city_filter(config)
+        self.assertEqual(list(cities)[:3], ["bengaluru", "kerala", "kochi"])
+        self.assertEqual(cities["bengaluru"], ["Bengaluru", ["bengaluru", "bangalore"], 1])
+        self.assertEqual(cities["kerala"], ["Kerala · any city", list(R.REGION_TERMS["kerala"]), 1])
+        self.assertEqual(cities["kochi"], ["Kochi", ["kochi", "cochin", "ernakulam", "kakkanad", "infopark"], 0])
+        self.assertTrue(all(v[2] == 0 for k, v in cities.items() if k not in config.regions))
+        self.assertEqual(len(cities), 2 + len(R.KERALA_CITIES))
+        for key, (label, terms, _always) in cities.items():
+            self.assertEqual(key, key.lower())
+            self.assertTrue(set(terms) <= set(config.cities), key)
+            self.assertNotRegex(label, r"[<>&]")
 
     def test_workday_tenant_ids_follow_each_site_pattern(self):
         for company, path, jid in (("Lilly", "/job/India-Bengaluru/Associate---Clinical-Data_R-113171", "R-113171"),
@@ -5175,18 +5197,42 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(int(re.search(r'<dd id="today">(\d+)</dd>', doc).group(1)), sum(1 for r in shown if r[10] == 0))
         self.assertIn('$("#sort-l").textContent=sortBy==="close"?"· closing soon":"· newest first"', script)
         # Company chips: "All companies" plus one per configured company, kept in sync with #company, which is a
-        # non-visible state holder placed just before the phone Filters toggle and the three visible filters.
+        # non-visible state holder placed just before the phone Filters toggle and the four visible filters.
         self.assertIn('<select id="company" class="vh" aria-hidden="true" tabindex="-1"><option value="">All '
                       'companies</option></select>\n<button class="ob ftog" id="ftog" type="button" aria-controls="fsel" '
                       'aria-expanded="false" hidden><span>Filters (<span id="fn">0</span>)</span><span class="ftog-c" '
                       'aria-hidden="true">▾</span></button>\n<div class="fsel" id="fsel"><div class="field">'
                       '<label for="age">', doc)
         self.assertNotIn('<label for="company">', doc)
-        self.assertEqual(re.search(r'<div class="fsel" id="fsel">.*?</div>\n', doc).group(0).count('class="field"'), 3)
+        self.assertEqual(re.search(r'<div class="fsel" id="fsel">.*?</div>\n', doc).group(0).count('class="field"'), 4)
         self.assertIn('ci.innerHTML=`<li><button class="ci" type="button" data-co="" aria-pressed="true">All companies '
                       '<b>0</b></button></li>`+order.map(c=>`<li><button class="ci" type="button" data-co="${esc(c)}" '
                       'aria-pressed="false">', script)
         self.assertIn('cf.value=b.dataset.co&&cf.value!==b.dataset.co?b.dataset.co:"";render()', script)
+        # Location filter: the fourth select. Its options come from one CITY table on its own script line
+        # ({key: [label, place terms, always listed]}); regions are always listed, a Kerala city only once a row
+        # names it; option labels carry live counts (like the company chips), and it takes part in match(),
+        # the chips, the Filters count, the status readout, the Informational aside and Reset.
+        self.assertIn('<div class="field"><label for="city">Location</label><select id="city"><option value="">All '
+                      'locations</option></select></div></div>\n', doc)
+        city = re.search(r"\nconst CITY=(\{.*?\});\n", doc).group(1)
+        self.assertEqual(json.loads(city), R.city_filter(self.config))
+        self.assertIn("CITY_JS", R.ONCE_PLACEHOLDERS)
+        for snippet in ('lf=document.querySelector("#city"),',
+                        'const inCity=(r,k)=>{const s=r[6].toLowerCase();return CITY[k][1].some(x=>s.includes(x))};'
+                        'Object.keys(CITY).forEach(k=>{if(CITY[k][2]||jobs.some(r=>inCity(r,k)))lf.add(new Option(CITY[k][0],k))});',
+                        'if(cf.value&&c!==cf.value)return false;if(lf.value&&!inCity(r,lf.value))return false;',
+                        'const lv=lf.value;lf.value="";const lp=jobs.filter(match);lf.value=lv;[...lf.options].forEach(o=>{if(o.value)'
+                        'o.textContent=`${CITY[o.value][0]} (${lp.filter(r=>inCity(r,o.value)).length})`});',
+                        'if(lf.value)f.push(CITY[lf.value][0].toUpperCase());',
+                        'if(lf.value)on.push(["city",CITY[lf.value][0]]);',
+                        '||bf.value||clf.value||lf.value);',
+                        'bf.value="";lf.value="";clf.value="";onlyNew=false;render();q.focus()};[q,cf,af,bf,lf,clf].forEach('):
+            self.assertIn(snippet, script, snippet)
+        # Every published row names at least one of the filter's terms (the crawl only admits target places).
+        rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
+        terms = [x for _k, (_l, t, _a) in R.city_filter(self.config).items() for x in t]
+        self.assertTrue(all(any(x in r[6].lower() for x in terms) for r in rows))
         self.assertIn('b.setAttribute("aria-pressed",String(co===cv))', script)
         base = media_blocks(style_of(doc))[0]
         self.assertIn(".ob[aria-pressed=true],.ci[aria-pressed=true]{border-color:hsl(var(--signal)/.7);"

@@ -190,11 +190,18 @@ JOB_ID_RE = {
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
 # keys are what the config and the page speak of, the terms are how employers actually write the places
 # (Kerala postings mostly name the city, so the state's cities are listed too).
+# Kerala cities with the aliases and IT campuses employers write for them; the page's location filter lists a
+# city under its first name once a posting names any of its terms.
+KERALA_CITIES = (
+    ("Kochi", ("kochi", "cochin", "ernakulam", "kakkanad", "infopark")),
+    ("Thiruvananthapuram", ("thiruvananthapuram", "trivandrum", "technopark")),
+    ("Kozhikode", ("kozhikode", "calicut")),
+    ("Thrissur", ("thrissur",)), ("Kollam", ("kollam",)), ("Kannur", ("kannur",)), ("Palakkad", ("palakkad",)),
+    ("Alappuzha", ("alappuzha",)), ("Kottayam", ("kottayam",)), ("Malappuram", ("malappuram",)),
+)
 REGION_TERMS = {
     "bengaluru": ("bengaluru", "bangalore"),
-    "kerala": ("kerala", "kochi", "cochin", "ernakulam", "kakkanad", "infopark", "thiruvananthapuram", "trivandrum",
-               "technopark", "kozhikode", "calicut", "thrissur", "kollam", "kannur", "palakkad", "alappuzha", "kottayam",
-               "malappuram"),
+    "kerala": ("kerala",) + tuple(term for _name, terms in KERALA_CITIES for term in terms),
 }
 REGION_LABELS = {"bengaluru": "Bengaluru", "kerala": "Kerala"}
 
@@ -1388,7 +1395,7 @@ def health_js() -> str:
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
                                "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS",
-                               "VAPID_JS", "PUSH_URL_JS"})
+                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS"})
 LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
 
 
@@ -1403,6 +1410,19 @@ def logo_urls(config: Config) -> dict[str, str]:
                 parts.path + (f"?{parts.query}" if parts.query else "")):
             raise ValueError("render: a company logo URL is not an allowlisted icon path")
         out[company] = url
+    return out
+
+
+def city_filter(config: Config) -> dict[str, list]:
+    """The page's location filter, in option order: {key: [label, place terms, always listed]}. Each configured
+    region is always listed; a Kerala city is listed only while a posting names it (the page checks its rows)."""
+    out = {}
+    for region in config.regions:
+        label = REGION_LABELS[region] + (" · any city" if region == "kerala" else "")
+        out[region] = [label, list(REGION_TERMS[region]), 1]
+        if region == "kerala":
+            for name, terms in KERALA_CITIES:
+                out[name.lower()] = [name, list(terms), 0]
     return out
 
 
@@ -1430,6 +1450,7 @@ def render(state: State, template: str, config: Config) -> str:
         "EMPTY_JS": "[\n" + ",\n".join(js_json(list(e)) for e in state.empty_companies) + "]",
         "ORDER_JS": js_json(list(config.companies)),
         "LOGOS_JS": js_json(logo_urls(config)),
+        "CITY_JS": js_json(city_filter(config)),           # the location filter's options and their place terms
         "VAPID_JS": js_json(config.vapid_public_key),      # the key the page subscribes with (push.mjs signs with its pair)
         "PUSH_URL_JS": js_json(config.register_url),       # where a Home Screen web app registers this device
         "STALE_JS": js_json(stale_labels(state, config)),
