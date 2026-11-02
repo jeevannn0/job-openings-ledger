@@ -4862,11 +4862,13 @@ class SourceHealthTests(unittest.TestCase):
         # On phones the card title link covers the whole card.
         self.assertIn('.job:after{content:"";position:absolute;inset:0}', blocks[PHONE_MQ])
         self.assertTrue(rules[(".card",)].startswith("position:relative;"))
-        # The card wears the search panel's faded vertical gradient (three stops, 0/55/100%, like --panel-grad) in its
-        # age hue, over the page background; the border takes the same hue. No per-age classes, no literal hues.
-        self.assertEqual(rules[(".card",)], "position:relative;--ah:28;border:1px solid hsl(var(--ah) 60% 50%/.35);"
-                         "background:linear-gradient(180deg,hsl(var(--ah) 75% 50%/.18) 0%,hsl(var(--ah) 75% 50%/.09) 55%,"
-                         "hsl(var(--ah) 75% 50%/.04) 100%),hsl(var(--void));transition:border-color var(--dur-base) var(--ease-out-quart)")
+        # The card wears the search panel's faded vertical gradient (three stops, 0/55/100%, like --panel-grad) as a
+        # faint wash in its age hue over the page background; the outline stays the plain hull border. No per-age
+        # classes, no literal hues.
+        self.assertEqual(rules[(".card",)], "position:relative;--ah:28;border:1px solid hsl(var(--hull)/.6);"
+                         "background:linear-gradient(180deg,hsl(var(--ah) 70% 60%/.1) 0%,hsl(var(--ah) 70% 60%/.05) 55%,"
+                         "hsl(var(--ah) 70% 60%/.02) 100%),hsl(var(--void));transition:border-color var(--dur-base) var(--ease-out-quart)")
+        self.assertNotIn("var(--ah)", rules[(".card",)].split("background:")[0])          # the outline is untinted
         self.assertNotIn("background:hsl(var(--void))", rules[(".card",)])
         self.assertEqual(rules[(".card:hover", ".card:focus-within")], "border-color:hsl(var(--signal)/.4)")   # hover stays purple
         for age, hue in ((0, 152), (1, 148), (15, 90), (29, 32), (30, 28), (45, 28)):   # the JS formula, mirrored
