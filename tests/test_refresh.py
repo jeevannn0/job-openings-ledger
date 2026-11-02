@@ -284,8 +284,8 @@ class SeedAndRenderTests(unittest.TestCase):
         self.assertEqual(blocks[WIDE_MQ],
                          ".grid{grid-template-columns:minmax(0,1fr) 300px}.grid:has(.ar[hidden]){grid-template-columns:"
                          "minmax(0,1fr)}.feed{grid-column:1}.ar{grid-column:2;"
-                         "position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;"
-                         "max-height:calc(100dvh - 2rem)}.ar-in{overflow-y:auto}")
+                         "position:sticky;top:calc(var(--hh) + 16px);align-self:start;display:flex;flex-direction:column;"
+                         "max-height:calc(100dvh - var(--hh) - 2rem)}.ar-in{overflow-y:auto}")
         self.assertFalse([c for c in blocks if "1279px" in c or "1280px" in c])
         for w in (320, 390, 768, 1023, 1024, 1279, 1280, 1440):
             with self.subTest(w):
@@ -4557,7 +4557,7 @@ class SourceHealthTests(unittest.TestCase):
                                                     "overflow:hidden;clip-path:inset(50%);white-space:nowrap}"
                                                     ".srch-top{justify-content:space-between}.src-led{margin-left:0}"
                                                     ".th-m:not([hidden])"))
-        self.assertEqual(blocks["(max-width:359px)"], ".wm-row{justify-content:flex-end}.logo{width:100%}")
+        self.assertEqual(blocks["(max-width:359px)"], ".wm-row{justify-content:flex-end}.logo{width:100%}html{--hh:93px}")
         self.assertNotIn(".ck-w", base)
         self.assertEqual(rules[(".src-led",)], "display:flex;align-items:center;gap:8px;margin-left:auto")
         self.assertIn("h1,.lede{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip-path:inset(50%);"
@@ -4578,6 +4578,43 @@ class SourceHealthTests(unittest.TestCase):
         # In-page anchors stay in this tab despite <base target="_blank">.
         for href in re.findall(r'<a [^>]*href="#[^"]*"[^>]*>', doc):
             self.assertIn('target="_self"', href)
+
+    def test_header_sticks_to_the_top_on_every_viewport(self):
+        """The header (mark, title lines, Requests) stays pinned while the page scrolls, on phones and desktops.
+
+        Pure CSS: position:sticky on .hdr with the page background so content slides under it. The resting layout
+        is unchanged: the gap above the mark moved from <main> into the header so the mark keeps its inset when
+        stuck. --hh is the header's rendered height per breakpoint; anchor and focus scrolls (scroll-padding-top)
+        and the desktop aside's own sticky offset start below the band.
+        """
+        self.all_states_state()
+        doc = R.render(self.state, self.template, self.config)
+        style = style_of(doc)
+        base, blocks = media_blocks(style)
+        rules = dict((tuple(s), b) for s, b in css_rules(base))
+        self.assertEqual(rules[(".hdr",)], "position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;"
+                                           "justify-content:space-between;gap:16px 24px;padding:16px 0;"
+                                           "border-bottom:1px solid hsl(var(--hull));background:hsl(var(--void));"
+                                           "box-shadow:-24px 0 0 hsl(var(--void)),24px 0 0 hsl(var(--void))")
+        # The two offset shadows are gutter covers: the search panel's signal glow (.panel-signal box-shadow) spills
+        # 1-2px past the content edge and would show beside the band while the panel passes under it.
+        self.assertEqual(rules[("html",)],
+                         "--hh:121px;background:hsl(var(--void));scroll-padding-top:calc(var(--hh) + 16px)")
+        self.assertEqual(rules[("main.container",)], "padding-top:24px;padding-bottom:40px")     # 24 + 16 = 40 as before
+        self.assertIn(".hdr-r{display:none}.hdr{padding-bottom:10px}", blocks[SHEET_MQ])
+        self.assertTrue(blocks[SHEET_MQ].endswith("html{--hh:61px}"))
+        self.assertIn(".container{padding:0 16px}main.container{padding-top:12px}.hdr{padding-top:12px}",
+                      blocks[PHONE_MQ])
+        self.assertTrue(blocks[PHONE_MQ].endswith("html{--hh:57px}"))
+        self.assertEqual(blocks["(max-width:359px)"], ".wm-row{justify-content:flex-end}.logo{width:100%}html{--hh:93px}")
+        # All three phone blocks match at 320px, so the narrowest one must come last in the cascade.
+        self.assertGreater(style.index("@media(max-width:359px)"), style.index("@media(max-width:639px)"))
+        self.assertIn(".ar{grid-column:2;position:sticky;top:calc(var(--hh) + 16px);", blocks[WIDE_MQ])
+        self.assertIn("max-height:calc(100dvh - var(--hh) - 2rem)", blocks[WIDE_MQ])
+        # Under the splash (z 50); the fixed theme toggle (z 30) sits bottom-right and never overlaps.
+        self.assertEqual(style.count("position:sticky"), 3)        # .hdr, the desktop aside, the terminal's title bar
+        self.assertEqual(style.count("z-index:20"), 1)
+        self.assertNotIn("offsetHeight", main_script(doc))        # the CSS numbers are the contract, no measuring
 
     def test_terminal_never_shows_detail_or_urls(self):
         hosts = sorted(self.config.hosts)
