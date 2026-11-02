@@ -2,12 +2,18 @@ name: Refresh job ledger
 
 on:
   schedule:
-    # UTC. Hourly at minute 30: on the hour in IST and off the top-of-the-hour rush the scheduler warns
-    # about. The gate job lets the refresh run at 00:00, 03:00, ... 21:00 IST, and at any later hour while
-    # that slot's check is still unpublished, because GitHub runs scheduled slots late at busy times and
-    # sometimes drops them outright (the 06:00 IST slot on 2 Nov 2026 never fired).
-    - cron: "30 * * * *"
+    # UTC. The refresh slots are 00:00, 03:00, ... 21:00 IST (minute 30 UTC). GitHub fires cron ticks late at
+    # busy times and sometimes not at all, so this ticks hourly at minute 35: the tick 55 minutes before a
+    # slot waits inside the run for the slot's exact time, the tick 5 minutes after a slot serves it if its
+    # check is still unpublished, and the other ticks do nothing. The gate job decides.
+    - cron: "35 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "now = refresh at once; slot = act like a tick (wait for the next slot if it is close)"
+        type: choice
+        options: [now, slot]
+        default: now
   # A human push to the default branch takes the publish-only path below: it re-renders and deploys
   # the committed state without contacting any employer site. The refresh job's own commit is pushed
   # with GITHUB_TOKEN, which never triggers `push`, and the publish job also refuses the bot actor.
@@ -31,25 +37,27 @@ jobs:
       contents: read
     outputs:
       due: ${{ steps.due.outputs.due }}
+      until: ${{ steps.due.outputs.until }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (tag verified with git ls-remote)
         with:
           persist-credentials: false
 
-      # A scheduled run refreshes only while the latest three-hourly slot has no published check, so the
-      # hourly slots between are no-ops unless the scheduler skipped one. Manual runs always refresh.
-      - name: Is the latest slot still unpublished?
+      # Refresh now (latest slot unpublished, or a manual run), wait for the next slot (a tick within the
+      # schedule lead), or nothing to do. The decision and times go to the step summary.
+      - name: Decide what this tick does
         id: due
         env:
           EVENT: ${{ github.event_name }}
-        run: python3 scripts/refresh.py due --event "$EVENT" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          MODE: ${{ inputs.mode || 'now' }}
+        run: python3 scripts/refresh.py due --event "$EVENT" --mode "$MODE" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
   refresh:
     needs: gate
     if: needs.gate.result == 'success' && needs.gate.outputs.due == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 100   # up to the schedule lead waiting for the slot, then the run budget
     permissions:
       contents: write   # persist state/jobs.json and index.html
     steps:
@@ -63,6 +71,12 @@ jobs:
 
       - name: Verify index.html matches state
         run: python3 scripts/refresh.py check   # fails loudly if index.html was edited outside the state
+
+      # Tests and checks are done before the slot; the refresh itself starts on the slot's exact minute.
+      - name: Wait for the slot
+        env:
+          UNTIL: ${{ needs.gate.outputs.until }}
+        run: python3 scripts/refresh.py wait --until "$UNTIL"
 
       - name: Refresh public sources
         id: refresh

@@ -916,13 +916,15 @@ def checked_html(state: State) -> str:
 # scheduler runs cron slots hours late at busy times and sometimes drops them outright (two of the four
 # six-hourly slots on 1 Nov 2026 never ran). A run that finds nothing new is cheap and says "no change".
 FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # two schedule slots plus slack: one dropped slot never goes stale
-# The workflow fires hourly at minute 30 UTC: on the hour in IST (UTC+5:30), and off the top-of-the-hour rush
-# GitHub's scheduler warns about. The refresh itself runs at the three-hourly slots below; the hours between
-# are catch-up slots that refresh only while the latest slot's check is still unpublished (slot_due), because
-# the scheduler fires slots late at busy times and sometimes not at all (the 06:00 IST slot on 2 Nov 2026).
-SCHEDULE_CRON = "30 * * * *"            # UTC; must match .github/workflows/refresh.yml
+# The refresh slots are on the hour in IST (minute 30 UTC, UTC+5:30), every three hours. GitHub's scheduler
+# is best-effort: it fires cron ticks late at busy times (45 min on 2 Nov 2026) and sometimes not at all (the
+# 06:00 IST slot that day), so the workflow's cron ticks hourly at minute 35 UTC, 55 minutes before each slot
+# and 5 minutes after it. The tick before a slot waits inside the run for the slot's exact time (SCHEDULE_LEAD),
+# the tick after serves a slot whose check is still unpublished, and the other ticks do nothing (slot_due).
+SCHEDULE_CRON = "35 * * * *"            # UTC; must match .github/workflows/refresh.yml
 SCHEDULE_UTC_MINUTE = 30
 SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # refresh slots: 00:00, 03:00, 06:00, ... 21:00 IST
+SCHEDULE_LEAD = dt.timedelta(minutes=58)             # a run this close to the next slot waits for it
 HEALTH_STATES = ("live", "degraded", "stale", "failed", "unknown")     # display order
 HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least to most severe
 HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",
@@ -1074,21 +1076,38 @@ def latest_slot(now: dt.datetime) -> dt.datetime:
     raise AssertionError("unreachable: a slot exists within one day")
 
 
-def slot_due(state: State, now: dt.datetime) -> tuple[bool, str]:
-    """Whether a scheduled run should refresh now: yes while the latest slot has no published check.
+def slot_due(state: State, now: dt.datetime) -> tuple[bool, dt.datetime | None, str]:
+    """What a scheduled tick should do: (refresh?, wait until this slot first, reason naming times only).
 
-    The cron fires hourly, so a slot the scheduler delayed or dropped is served by the next hour that
-    fires; once a check at or after the slot is committed, the hours before the next slot do nothing.
-    The reason names times only."""
-    slot = latest_slot(now)
+    A slot whose check is still unpublished is refreshed at once (the tick after a slot catches a tick
+    the scheduler delayed past it or dropped). Otherwise a tick within SCHEDULE_LEAD of the next slot
+    refreshes at that slot's exact time, waiting inside the run; any other tick does nothing."""
+    latest, nxt = latest_slot(now), next_scheduled(now)
     ref = iso_time(state.checked_at)
-    when = f"slot {slot:%d %b %H:%M} IST"
-    if ref is None:
-        return True, f"{when}: no check published yet"
-    last = f"last published check {ref.astimezone(IST):%d %b %H:%M} IST"
-    if ref < slot:
-        return True, f"{when}: {last} is older"
-    return False, f"{when}: already published ({last})"
+    if ref is None or ref < latest:
+        last = "no check published yet" if ref is None else f"last published check {ref.astimezone(IST):%d %b %H:%M} IST"
+        return True, None, f"slot {latest:%d %b %H:%M} IST unpublished ({last}): refreshing now"
+    if nxt - now <= SCHEDULE_LEAD:
+        minutes = int((nxt - now).total_seconds() // 60)
+        return True, nxt, f"slot {nxt:%d %b %H:%M} IST in {minutes} min: waiting for it"
+    return False, None, (f"slot {latest:%d %b %H:%M} IST already published ({ref.astimezone(IST):%d %b %H:%M} IST); "
+                         f"next slot {nxt:%d %b %H:%M} IST")
+
+
+def wait_until(until: dt.datetime, now: Callable[[], dt.datetime], sleep: Callable[[float], None],
+               log: Callable[[str], None] = print) -> int:
+    """Sleep until `until` (at most SCHEDULE_LEAD plus slack), logging every five minutes; returns seconds waited."""
+    remaining = (until - now()).total_seconds()
+    if remaining > (SCHEDULE_LEAD + dt.timedelta(minutes=5)).total_seconds():
+        raise ValueError("wait: the slot is further ahead than the schedule lead")
+    waited = 0
+    while remaining > 0:
+        log(f"wait: slot {until.astimezone(IST):%H:%M} IST in {int(remaining // 60)} min {int(remaining % 60)} s")
+        step = min(remaining, 300.0)
+        sleep(step)
+        waited += step
+        remaining = (until - now()).total_seconds()
+    return int(waited)
 
 
 def age_text(age: dt.timedelta) -> str:
@@ -3640,20 +3659,35 @@ def cmd_refresh(args, root: str) -> int:
 
 
 def cmd_due(args, root: str) -> int:
-    """Gate for the workflow: scheduled runs refresh only while the latest slot is unpublished; manual runs always."""
+    """Gate for the workflow: what this run should do (see slot_due). A manual run in mode "now" refreshes at
+    once; mode "slot" behaves like a scheduled tick, which is what an external clock would send."""
     _config, state, _template = load_all(root)
-    if args.event == "workflow_dispatch":
-        due, why = True, "manual run"
+    if args.event == "workflow_dispatch" and args.mode == "now":
+        due, until, why = True, None, "manual run: refreshing now"
     else:
-        due, why = slot_due(state, _now(args.now))
+        due, until, why = slot_due(state, _now(args.now))
     if args.github_output:
         with open(args.github_output, "a", encoding="utf-8") as fh:
-            fh.write(f"due={'true' if due else 'false'}\n")
+            fh.write(f"due={'true' if due else 'false'}\n"
+                     f"until={until.isoformat(timespec='seconds') if until else ''}\n")
     report = f"{'Refreshing' if due else 'Nothing to do'}: {why}.\n"
     if args.summary:
         with open(args.summary, "a", encoding="utf-8") as fh:
             fh.write(report)
     print("due: " + report.rstrip())
+    return 0
+
+
+def cmd_wait(args, root: str) -> int:
+    """Hold the run until the slot the gate named, so the refresh starts on the exact minute."""
+    if not args.until:
+        print("wait: no slot to wait for")
+        return 0
+    until = iso_time(args.until)
+    if until is None:
+        raise ValueError("wait: --until must be an ISO 8601 time with a UTC offset")
+    waited = wait_until(until, lambda: dt.datetime.now(IST), time.sleep)
+    print(f"wait: slot {until.astimezone(IST):%d %b %H:%M} IST reached after {waited} s")
     return 0
 
 
@@ -3748,11 +3782,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--github-output", help="append changed=/as_of= lines to this file")
     p.add_argument("--summary", help="append a Markdown summary to this file")
     p.add_argument("--outcome", help="write this run's public outcome (for the alert command) to this file")
-    p = sub.add_parser("due", help="workflow gate: should this scheduled run refresh? (manual runs always do)")
+    p = sub.add_parser("due", help="workflow gate: refresh now, wait for the next slot, or nothing to do")
     p.add_argument("--event", required=True, choices=("schedule", "workflow_dispatch"), help="GITHUB_EVENT_NAME")
+    p.add_argument("--mode", default="now", choices=("now", "slot"), help="manual runs: refresh now or act as a tick")
     p.add_argument("--now", help="override the current time (ISO 8601)")
-    p.add_argument("--github-output", help="append a due=true|false line to this file")
+    p.add_argument("--github-output", help="append due=true|false and until=<time or empty> lines to this file")
     p.add_argument("--summary", help="append a one-line Markdown summary to this file")
+    p = sub.add_parser("wait", help="sleep until the slot named by the gate (no-op when empty or past)")
+    p.add_argument("--until", default="", help="ISO 8601 time with offset, from the gate's until= output")
     p = sub.add_parser("render", help="render state into an HTML file")
     p.add_argument("--out", default=INDEX_PATH)
     p = sub.add_parser("alert", help="build the phone alert payload from a refresh outcome")
@@ -3769,7 +3806,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--as-of", required=True)
     args = ap.parse_args(argv)
     handlers = {"refresh": cmd_refresh, "render": cmd_render, "alert": cmd_alert, "alert-verify": cmd_alert_verify,
-                "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed, "due": cmd_due}
+                "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed, "due": cmd_due, "wait": cmd_wait}
     try:
         return handlers[args.cmd](args, args.root)
     except (OSError, ValueError) as exc:
