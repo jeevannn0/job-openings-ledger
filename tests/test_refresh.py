@@ -1153,7 +1153,12 @@ class NewSourceHelperTests(unittest.TestCase):
         style = style_of(doc)
         self.assertIn(".jd{padding:0;border:0;background:none;font:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:700;"
                       'color:hsl(var(--signal));cursor:pointer}.jd:after{content:"";position:absolute;inset:-8px -4px}', style)
-        self.assertIn(".jd-out{font-family:var(--font-sans);font-size:13px;line-height:1.6;", style)
+        self.assertIn(".jd-out{padding:22px 24px 40px;font-family:var(--font-sans);font-size:13px;line-height:1.65;", style)
+        self.assertIn(".jd-b{max-width:68ch}", style)
+        # Phones: larger type, more air between blocks, and room above the home indicator.
+        _base, blocks = media_blocks(style)
+        self.assertIn(".term-out.jd-out{padding:22px 20px calc(44px + env(safe-area-inset-bottom));font-size:14px;line-height:1.7}"
+                      ".jd-t{margin-bottom:24px;font-size:19px}", blocks[SHEET_MQ])     # outranks the sheet's .term-out rule
 
     def test_kerala_cities_are_the_region_terms(self):
         # The region's term list is built from the city table, "kerala" itself first, so the filter and the crawl
