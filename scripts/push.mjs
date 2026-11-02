@@ -114,8 +114,9 @@ export function verifyVapid(authorization, publicPoint) {
 
 // ---------------------------------------------------------------------- the message
 
-const BRAND = "K9 · ";                     // every title leads with the ledger's name, as the owner asked
-const TEST_TITLE = BRAND + "Notifications are on";
+// No "K9" in titles: iOS itself appends " from K9" (the web app's name) to every notification title and offers
+// no way to turn that off, so a prefix would name the ledger twice ("K9 · … from K9", seen 2 Nov 2026).
+const TEST_TITLE = "Notifications are on";
 const TEST_BODY = "This is the test message. New openings will arrive here after each refresh.";
 
 const TITLE_MAX = 60, BODY_MAX = 240;      // the alert payload's own limits (refresh.py ALERT_TITLE_MAX / ALERT_BODY_MAX)
@@ -127,7 +128,7 @@ export function customMessage(value, index) {
   const [title, body] = pair.map((s) => s.trim());
   if (!title || title.length > TITLE_MAX || body.length > BODY_MAX) throw new Error(`message #${index + 1}: length`);
   if (/[\x00-\x1f\x7f<>&]/.test(title + body)) throw new Error(`message #${index + 1}: characters`);
-  return { title: title.startsWith(BRAND) ? title : BRAND + title, body };
+  return { title, body };
 }
 
 /** A series of custom test messages from a JSON list; an empty value means the single default test message. */
@@ -154,7 +155,7 @@ export function notificationFor(alert, ledgerUrl, test = false, custom = null) {
   if (n === 0) return null;
   const { notification_title: title, notification_body: body } = alert;
   if (typeof title !== "string" || !title || typeof body !== "string") throw new Error("alert: notification text");
-  return { web_push: 8030, notification: { title: BRAND + title, body, ...base } };
+  return { web_push: 8030, notification: { title, body, ...base } };
 }
 
 /** Validates a list of PushSubscription JSON objects (what the registry returns); shapes only, never trusted blindly. */

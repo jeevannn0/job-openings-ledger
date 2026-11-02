@@ -74,11 +74,11 @@ test("VAPID header signs the push service origin for twelve hours", () => {
 test("the message is the declarative push format and only when there is news", () => {
   const alert = { new_count: 3, notification_title: "3 new job openings", notification_body: "Siemens 2, ZS 1 · 10 jobs" };
   assert.deepEqual(notificationFor(alert, LEDGER), { web_push: 8030, notification: {
-    title: "K9 · 3 new job openings", body: "Siemens 2, ZS 1 · 10 jobs", lang: "en", dir: "ltr", silent: false, tag: "k9-openings", navigate: LEDGER } });
+    title: "3 new job openings", body: "Siemens 2, ZS 1 · 10 jobs", lang: "en", dir: "ltr", silent: false, tag: "k9-openings", navigate: LEDGER } });
   assert.equal(notificationFor({ ...alert, new_count: 0 }, LEDGER), null);
   const t = notificationFor(null, LEDGER, true);
   assert.equal(t.web_push, 8030);
-  assert.equal(t.notification.title, "K9 · Notifications are on");     // every title leads with the ledger's name
+  assert.equal(t.notification.title, "Notifications are on");     // iOS appends " from K9" itself; no prefix
   assert.equal(t.notification.navigate, LEDGER);
   for (const bad of [{}, { new_count: -1 }, { new_count: 1 }, { new_count: 1, notification_title: "", notification_body: "x" }, "x", null]) {
     assert.throws(() => notificationFor(bad, LEDGER), /alert/);
@@ -155,9 +155,8 @@ test("delivery maps push-service answers", async () => {
 
 test("a test run can carry a series of custom messages, each with its own tag", async () => {
   const { customMessage, parseSeries } = await import("./push.mjs");
-  assert.deepEqual(parseSeries(""), [{ title: "K9 · Notifications are on", body: "This is the test message. New openings will arrive here after each refresh." }]);
-  assert.deepEqual(parseSeries(JSON.stringify([["Woof", " hi "], { title: "K9 · T", body: "B" }])),
-                   [{ title: "K9 · Woof", body: "hi" }, { title: "K9 · T", body: "B" }]);         // prefixed once, never twice
+  assert.deepEqual(parseSeries(""), [{ title: "Notifications are on", body: "This is the test message. New openings will arrive here after each refresh." }]);
+  assert.deepEqual(parseSeries(JSON.stringify([["Woof", " hi "], { title: "T", body: "B" }])), [{ title: "Woof", body: "hi" }, { title: "T", body: "B" }]);
   for (const [bad, re] of [["{", /not JSON/], ["[]", /1 to 10/], [JSON.stringify(Array(11).fill(["a", "b"])), /1 to 10/],
                            [JSON.stringify([["a"]]), /\[title, body\]/], [JSON.stringify([["", "b"]]), /length/],
                            [JSON.stringify([["a".repeat(61), "b"]]), /length/], [JSON.stringify([["a<b", "b"]]), /characters/],
