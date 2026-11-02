@@ -114,8 +114,9 @@ export function verifyVapid(authorization, publicPoint) {
 
 // ---------------------------------------------------------------------- the message
 
-const TEST_TITLE = "K9 test";
-const TEST_BODY = "Notifications are working. New openings will arrive here after each refresh.";
+// The web app's own name ("K9") already heads every notification, so the test message does not repeat it.
+const TEST_TITLE = "Notifications are on";
+const TEST_BODY = "This is the test message. New openings will arrive here after each refresh.";
 
 /** The declarative push message for one alert payload, or null when there is nothing to tell. */
 export function notificationFor(alert, ledgerUrl, test = false) {

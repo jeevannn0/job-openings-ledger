@@ -78,7 +78,7 @@ test("the message is the declarative push format and only when there is news", (
   assert.equal(notificationFor({ ...alert, new_count: 0 }, LEDGER), null);
   const t = notificationFor(null, LEDGER, true);
   assert.equal(t.web_push, 8030);
-  assert.equal(t.notification.title, "K9 test");
+  assert.equal(t.notification.title, "Notifications are on");     // not "K9 …": iOS shows the app name above it
   assert.equal(t.notification.navigate, LEDGER);
   for (const bad of [{}, { new_count: -1 }, { new_count: 1 }, { new_count: 1, notification_title: "", notification_body: "x" }, "x", null]) {
     assert.throws(() => notificationFor(bad, LEDGER), /alert/);
