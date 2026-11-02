@@ -8,7 +8,9 @@ Safety rules the code enforces:
 * Only HTTPS requests to hosts listed in config/public_sources.json with
   ``"fetch": true``. Redirects must stay on the same host. Responses are
   size-capped, requests are sequential with per-host delays, and robots.txt
-  is honoured where configured.
+  is honoured where configured. Hosts with ``"fetch": false`` are link-only:
+  the page may point at them (job links, the employers' own site icons used
+  as card logos) but this script never requests them.
 * A failed, blocked, partial, or ambiguous source keeps that company's
   last-known-good rows. Rows are removed only on an explicit closed signal
   (HTTP 410, a "no longer available"/"filled" page where the adapter trusts one,
@@ -116,39 +118,60 @@ class CompanySpec:
     url_re: re.Pattern
     modes: frozenset
     hosts: frozenset          # hosts the company's links and fetches may use
+    logo: str                 # the employer's own site icon; the visitor's browser loads it, this script never does
+
+    @property
+    def logo_host(self) -> str:
+        return urllib.parse.urlsplit(self.logo).hostname or ""
 
 
-def _spec(url_re: str, modes: Iterable[str], hosts: Iterable[str]) -> CompanySpec:
-    return CompanySpec(re.compile(url_re), frozenset(modes) | {"static"}, frozenset(hosts))
+def _spec(url_re: str, modes: Iterable[str], hosts: Iterable[str], logo: str) -> CompanySpec:
+    return CompanySpec(re.compile(url_re), frozenset(modes) | {"static"}, frozenset(hosts), logo)
 
 
+# Card logos are the icons the employers publish for their own sites (favicon / apple-touch-icon), referenced
+# by URL and loaded by the reader's browser with no referrer; nothing is downloaded or stored here. Each URL was
+# checked to load in a browser on 2 Nov 2026; one that stops loading falls back to the company's initials.
 COMPANY_SPECS = {
     "Siemens": _spec(r"https://jobs\.siemens\.com/en_US/externaljobs/JobDetail/(\d{5,7})",
-                     {"siemens_avature_html"}, {"jobs.siemens.com"}),
+                     {"siemens_avature_html"}, {"jobs.siemens.com"}, "https://www.siemens.com/_static/favicon.svg"),
     "GE Vernova": _spec(r"https://careers\.gevernova\.com/[a-z0-9]+(?:-[a-z0-9]+)*/job/(R\d{6,8})",
-                        {"gevernova_paradox_api"}, {"careers.gevernova.com"}),
+                        {"gevernova_paradox_api"}, {"careers.gevernova.com"},
+                        "https://www.gevernova.com/themes/custom/ge_vernova_unified/favicon.ico"),
     "IQVIA": _spec(r"https://jobs\.iqvia\.com/en/jobs/(R\d{6,8})-0",
-                   {"iqvia_workday_cxs"}, {"jobs.iqvia.com", "iqvia.wd1.myworkdayjobs.com"}),
+                   {"iqvia_workday_cxs"}, {"jobs.iqvia.com", "iqvia.wd1.myworkdayjobs.com"},
+                   "https://www.iqvia.com/Content/Shotgun/img/favicon/apple-icon-precomposed.png?v=4"),
     "JPMorganChase": _spec(r"https://jpmc\.fa\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/(\d{6,12})",
-                           {"jpm_oracle_ce"}, {"jpmc.fa.oraclecloud.com"}),
+                           {"jpm_oracle_ce"}, {"jpmc.fa.oraclecloud.com"},
+                           "https://www.jpmorganchase.com/etc.clientlibs/cws/clientlibs/clientlib-base/resources/jpmc/images/"
+                           "jpmc-favicon-152.png"),
     "GE HealthCare": _spec(r"https://gehc\.wd5\.myworkdayjobs\.com/GEHC_ExternalSite/job/[A-Za-z0-9-]+/"
                            r"[A-Za-z0-9-]+_(R\d{6,8})(?:-\d{1,3})?",
-                           {"gehc_workday_cxs"}, {"gehc.wd5.myworkdayjobs.com"}),
-    "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", {"zs_jibe_api"}, {"jobs.zs.com"}),
+                           {"gehc_workday_cxs"}, {"gehc.wd5.myworkdayjobs.com"},
+                           "https://www.gehealthcare.com/etc.clientlibs/gehealthcare/clientlibs/clientlib-site/resources/favicons/"
+                           "favicon-96x96.png"),
+    "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", {"zs_jibe_api"}, {"jobs.zs.com"},
+                "https://www.zs.com/icons/favicon-zs.ico"),
     "Accenture": _spec(r"https://www\.accenture\.com/in-en/careers/jobdetails\?id=([A-Za-z0-9-]{6,40})_en",
-                       {"accenture_findjobs_api"}, {"www.accenture.com"}),
+                       {"accenture_findjobs_api"}, {"www.accenture.com"}, "https://www.accenture.com/favicon.ico"),
     "Lilly": _spec(r"https://lilly\.wd115\.myworkdayjobs\.com/LLY/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
-                   r"_(R-\d{5,7})(?:-\d{1,3})?", {"workday_cxs"}, {"lilly.wd115.myworkdayjobs.com"}),
+                   r"_(R-\d{5,7})(?:-\d{1,3})?", {"workday_cxs"}, {"lilly.wd115.myworkdayjobs.com"},
+                   "https://www.lilly.com/apple-touch-icon.png"),
     "AstraZeneca": _spec(r"https://careers\.astrazeneca\.com/job/[^/\s\"]+/[^/\s\"]+/\d{3,6}/(\d{6,14})",
-                         {"astrazeneca_talentbrew_html"}, {"careers.astrazeneca.com"}),
+                         {"astrazeneca_talentbrew_html"}, {"careers.astrazeneca.com"},
+                         "https://www.astrazeneca.com/etc/designs/az/img/favicons/icon-apple-touch-icon-152x152.png"),
     "Shell": _spec(r"https://shell\.wd3\.myworkdayjobs\.com/ShellCareers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
-                   r"_(R\d{5,8})(?:-\d{1,3})?", {"workday_cxs"}, {"shell.wd3.myworkdayjobs.com"}),
+                   r"_(R\d{5,8})(?:-\d{1,3})?", {"workday_cxs"}, {"shell.wd3.myworkdayjobs.com"},
+                   "https://www.shell.com/etc.clientlibs/amidala/clientlibs/theme-base/resources/favicon/apple-touch-icon.png"),
     "GE Aerospace": _spec(r"https://geaerospace\.wd5\.myworkdayjobs\.com/GE_ExternalSite/job/(?:[A-Za-z0-9._~%-]+/)?"
-                          r"[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?", {"workday_cxs"}, {"geaerospace.wd5.myworkdayjobs.com"}),
+                          r"[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?", {"workday_cxs"}, {"geaerospace.wd5.myworkdayjobs.com"},
+                          "https://www.geaerospace.com/themes/custom/aero_sub_theme/favicon.ico"),
+    # fractal.ai declares its icon on the Framer asset CDN that hosts its site; there is no copy on fractal.ai.
     "Fractal": _spec(r"https://fractal\.wd1\.myworkdayjobs\.com/Careers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
-                     r"_(SR-\d{4,7})(?:-\d{1,3})?", {"workday_cxs"}, {"fractal.wd1.myworkdayjobs.com"}),
+                     r"_(SR-\d{4,7})(?:-\d{1,3})?", {"workday_cxs"}, {"fractal.wd1.myworkdayjobs.com"},
+                     "https://framerusercontent.com/images/2NEvcDMv0ErqoXzQe3A9Z2TJgiE.png"),
     "D. E. Shaw India": _spec(r"https://www\.deshawindia\.com/careers/[A-Za-z0-9-]+-(\d{3,7})",
-                              {"deshaw_nextdata_html"}, {"www.deshawindia.com"}),
+                              {"deshaw_nextdata_html"}, {"www.deshawindia.com"}, "https://www.deshawindia.com/favicon.ico"),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -572,7 +595,7 @@ def load_config(data: dict) -> Config:
             else:
                 lo, hi = rule
                 _check(isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi, f"config: {name}.{key}")
-        needed_link |= spec.hosts
+        needed_link |= spec.hosts | {spec.logo_host}     # the logo host is link-only unless a source also fetches it
         if mode != "static":
             needed_fetch |= spec.hosts
         companies.append(name)
@@ -1293,7 +1316,22 @@ def health_js() -> str:
 
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
-                               "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK"})
+                               "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS"})
+LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
+
+
+def logo_urls(config: Config) -> dict[str, str]:
+    """{company: icon URL} for the page's card avatars. Fails closed: every URL must be a plain https icon path on
+    a host the config allowlists for links, so the public page can never point readers anywhere else."""
+    out = {}
+    for company in config.companies:
+        url = COMPANY_SPECS[company].logo
+        parts = urllib.parse.urlsplit(url)
+        if check_url(url, config.link_hosts) or parts.fragment or not LOGO_PATH.fullmatch(
+                parts.path + (f"?{parts.query}" if parts.query else "")):
+            raise ValueError("render: a company logo URL is not an allowlisted icon path")
+        out[company] = url
+    return out
 
 
 def render(state: State, template: str, config: Config) -> str:
@@ -1319,6 +1357,7 @@ def render(state: State, template: str, config: Config) -> str:
         "JOBS_JS": "[\n" + ",\n".join(js_json(r) for r in rows) + "\n]",
         "EMPTY_JS": "[\n" + ",\n".join(js_json(list(e)) for e in state.empty_companies) + "]",
         "ORDER_JS": js_json(list(config.companies)),
+        "LOGOS_JS": js_json(logo_urls(config)),
         "STALE_JS": js_json(stale_labels(state, config)),
         "AS_OF_JS": js_json(state.as_of.isoformat()),
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),

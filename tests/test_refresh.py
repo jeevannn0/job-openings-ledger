@@ -1393,6 +1393,79 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("24123", {r.job_id for r in after.jobs})
 
 
+class LogoTests(unittest.TestCase):
+    """Card logos are the employers' own site icons, referenced by URL for the reader's browser to load; the
+    refresh never downloads or stores them, and a URL that stops loading leaves the company's initials."""
+
+    def setUp(self):
+        self.config, _e, self.state, self.template = env()
+
+    def test_every_company_has_an_allowlisted_icon_url(self):
+        logos = R.logo_urls(self.config)
+        self.assertEqual(list(logos), list(self.config.companies))
+        source_hosts = set().union(*(R.COMPANY_SPECS[c].hosts for c in self.config.companies))
+        for company, url in logos.items():
+            with self.subTest(company):
+                spec = R.COMPANY_SPECS[company]
+                parts = R.urllib.parse.urlsplit(url)
+                self.assertEqual(url, spec.logo)
+                self.assertEqual(parts.scheme, "https")
+                self.assertEqual(parts.hostname, spec.logo_host)
+                self.assertIsNone(R.check_url(url, self.config.link_hosts))
+                self.assertRegex(parts.path, r"\.(png|ico|svg)$")
+                self.assertFalse(parts.fragment)
+                if spec.logo_host not in source_hosts:
+                    self.assertFalse(self.config.hosts[spec.logo_host].fetch, "a logo-only host is never fetched")
+        logo_only = {R.COMPANY_SPECS[c].logo_host for c in self.config.companies} - source_hosts
+        self.assertGreaterEqual(len(logo_only), 10)
+        self.assertEqual(logo_only & self.config.fetch_hosts, set())
+        self.assertEqual(set(self.config.link_hosts), source_hosts | logo_only)
+
+    def test_logo_url_outside_the_allowlist_or_shape_fails_closed(self):
+        zs = R.COMPANY_SPECS["ZS"]
+        with mock.patch.dict(R.COMPANY_SPECS, {"ZS": dataclasses.replace(zs, logo="https://logo.clearbit.com/zs.com")}):
+            with self.assertRaises(ValueError):
+                R.render(self.state, self.template, self.config)
+        for url in ("https://www.zs.com/icons/favicon-active.ico#x", "https://www.zs.com/icons/fav.ico?a=1&b=2",
+                    "https://www.zs.com/icons/", "https://www.zs.com/icons/favicon.html", "http://www.zs.com/favicon.ico",
+                    "https://www.zs.com/icons/favicon.ico?v=12345", "https://www.zs.com/icons/fav icon.ico"):
+            with self.subTest(url), mock.patch.dict(R.COMPANY_SPECS, {"ZS": dataclasses.replace(zs, logo=url)}):
+                with self.assertRaises(ValueError):
+                    R.logo_urls(self.config)
+        # A config that drops a logo host is rejected before anything renders.
+        data = R.read_json(os.path.join(ROOT, R.CONFIG_PATH))
+        del data["hosts"]["www.zs.com"]
+        with self.assertRaises(R.ConfigError):
+            R.load_config(data)
+        data = R.read_json(os.path.join(ROOT, R.CONFIG_PATH))
+        data["hosts"]["www.zs.com"]["fetch"] = True                  # a logo host must stay link-only
+        with self.assertRaises(R.ConfigError):
+            R.load_config(data)
+
+    def test_page_carries_the_logo_map_and_the_fallback_script(self):
+        doc = R.render(self.state, self.template, self.config)
+        script = main_script(doc)
+        logos = re.search(r"\nconst LOGOS=(\{.*?\});\n", doc).group(1)      # its own line: the STALE/H line stays parseable
+        self.assertEqual(json.loads(logos), R.logo_urls(self.config))
+        self.assertEqual(self.template.count("{{LOGOS_JS}}"), 1)
+        self.assertIn("LOGOS_JS", R.ONCE_PLACEHOLDERS)
+        for snippet in ('const dead=new Set(),lg=c=>{const u=LOGOS[c];return u&&!dead.has(u)?`<img class="lg" src="${esc(u)}" '
+                        'alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:""};',
+                        'out.addEventListener("load",e=>{if(e.target.tagName==="IMG")e.target.classList.add("ok")},true);',
+                        'out.addEventListener("error",e=>{const m=e.target;if(m.tagName==="IMG"){dead.add(m.getAttribute("src"));'
+                        'm.remove()}},true);',
+                        '<span class="av" aria-hidden="true">${esc(ini(c))}${lg(c)}</span>'):
+            self.assertIn(snippet, script, snippet)
+        style = style_of(doc)
+        self.assertIn(".av{position:relative;display:grid;flex:none;place-items:center;width:32px;height:32px;", style)
+        # Hidden until it has loaded, then shown on a white tile so dark marks stay visible on the dark plate.
+        self.assertIn(".lg{position:absolute;inset:0;width:100%;height:100%;padding:3px;object-fit:contain;visibility:hidden}"
+                      ".lg.ok{visibility:visible;background:hsl(0 0% 100%)}", style)
+        for url in re.findall(r"https://[^\s\"'<>)\\]+", logos):
+            self.assertIsNone(R.check_url(url, self.config.link_hosts), url)
+        self.assertEqual(doc.count("<img"), 1)                       # the one template string in the script
+
+
 class BoundaryScanTests(unittest.TestCase):
     def copy_repo(self):
         tmp = tempfile.mkdtemp()
@@ -3880,8 +3953,15 @@ class SourceHealthTests(unittest.TestCase):
                       "stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .64 0 0 0 0 .36 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E"
                       "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
-        self.assertNotRegex(doc, r"(?i)<link\b|<img\b|<iframe\b|<svg\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
+        self.assertNotRegex(doc, r"(?i)<link\b|<iframe\b|<svg\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
                                  r"setInterval|requestAnimationFrame|<table")
+        # The one image the page may show is a card logo: the employer's own site icon, written by the script from
+        # the LOGOS map (allowlisted hosts only), lazy, decoded off the main thread, sent without a referrer, and
+        # removed in favour of the initials when it fails. The markup itself carries no <img>.
+        script = main_script(doc)
+        self.assertEqual(re.findall(r"<img\b[^>]*>", doc),
+                         ['<img class="lg" src="${esc(u)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'])
+        self.assertNotIn("<img", doc.replace(script, ""))
         self.assertNotRegex(R.read_text(os.path.join(ROOT, R.TEMPLATE_PATH)), r"https?://")
         # Fonts are named and fall back to system faces; nothing is downloaded.
         fonts = dict(re.findall(r"--font-(sans|display|mono):([^;]+);", style))
@@ -3905,7 +3985,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotIn("job signal", doc)                       # the mark stands alone: no wordmark, no Ledger card
         self.assertNotIn('class="wm"', doc)
         self.assertNotIn("font-display", doc)
-        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<img", "<svg"):
+        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<svg"):
             self.assertNotIn(gone, doc, gone)
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
         self.assertIn("width:calc(72ch * .21);height:34px;overflow:hidden;font:10px/10px var(--font-mono)",
@@ -4732,7 +4812,7 @@ class SourceHealthTests(unittest.TestCase):
         script = main_script(doc)
         # One flat stream of cards; only the first 12 animate, and only on the first render.
         for snippet in ('const card=(r,i,more,g,open,sub)=>{const[c,id,t,e,d,a,l,u,b,cd,nw,sb]=r,', 'anim=!booted&&i<12',
-                        '<span class="av" aria-hidden="true">${esc(ini(c))}</span>',
+                        '<span class="av" aria-hidden="true">${esc(ini(c))}${lg(c)}</span>',
                         '<h3 class="c-l"><span class="c-co">${esc(c)}</span> ${sb?"lists":"posted"} <a class="job" '
                         'href="${esc(u)}" rel="noopener noreferrer">${esc(t)}</a></h3>',
                         'ini=c=>{const w=c.split(/\\s+/).filter(Boolean);return(w.length>1?w[0][0]+w[1][0]:c.slice(0,2))'
