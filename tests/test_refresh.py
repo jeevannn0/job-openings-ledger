@@ -3982,8 +3982,13 @@ class SourceHealthTests(unittest.TestCase):
                       "stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .64 0 0 0 0 .36 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E"
                       "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
-        self.assertNotRegex(doc, r"(?i)<link\b|<iframe\b|<svg\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
+        self.assertNotRegex(doc, r"(?i)<link\b|<iframe\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
                                  r"setInterval|requestAnimationFrame|<table")
+        # The one inline SVG is the brand mark: flat rects only, nothing that references, loads or runs anything.
+        svgs = re.findall(r"<svg\b.*?</svg>", doc, re.S | re.I)
+        self.assertEqual(len(svgs), 1)
+        self.assertEqual(set(re.findall(r"<(\w+)", svgs[0])), {"svg", "g", "rect"})
+        self.assertNotRegex(svgs[0], r"(?i)href|url\(|\son\w+=|<script|<image|<use|<foreignObject|<style|<text|<a\b")
         # The one image the page may show is a card logo: the employer's own site icon, written by the script from
         # the LOGOS map (allowlisted hosts only), lazy, decoded off the main thread, sent without a referrer, and
         # removed in favour of the initials when it fails. The markup itself carries no <img>.
@@ -4009,21 +4014,23 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(re.findall(r"::backdrop\{([^}]*)\}", style), ["background:hsl(var(--void-deep)/.72)",
                                                                        "animation:overlay-fade-in .2s ease-out",
                                                                        "animation:none!important"])
-        # Brand mark: the guard-dog silhouette converted to shade-block text (no image, no external asset), decorative.
-        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><span class="ls"><pre class="lf">', doc)
+        # Brand mark: the guard-dog silhouette as an inline pixel grid (no image, no external asset), decorative.
+        self.assertIn('<div class="wm-row"><span class="logo" id="logo" aria-hidden="true"><span class="ls"><svg class="lf" '
+                      'viewBox="0 0 72 15" preserveAspectRatio="none" fill="currentColor">', doc)
         self.assertNotIn("job signal", doc)                       # the mark stands alone: no wordmark, no Ledger card
         self.assertNotIn('class="wm"', doc)
         self.assertNotIn("font-display", doc)
-        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<svg"):
+        for gone in ("av48", "idn", "tagrow", "#bengaluru", "Ledger summary", 'class="mark"', "<pre class=\"lf\""):
             self.assertNotIn(gone, doc, gone)
         rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
-        self.assertIn("width:calc(72ch * .21);height:34px;overflow:hidden;font:10px/10px var(--font-mono)",
-                      rules[(".logo",)])
-        # The scale sits on a static wrapper; the text layers inside carry no transform (Safari mis-renders
-        # transformed elements whose transform-related properties animate).
-        self.assertEqual(rules[(".ls",)], "position:absolute;top:0;left:0;width:72ch;height:160px;transform:scale(.21);"
-                                          "transform-origin:0 0")
-        self.assertEqual(rules[(".lf",)], "position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal))")
+        # Drawn at its display size (96x30: a 3x phone gets exact 4x6 device-pixel cells) centred in a 34 px box
+        # that keeps the header height; no scaling anywhere, so nothing is resampled.
+        self.assertIn("width:96px;height:34px;overflow:hidden;cursor:default;contain:paint", rules[(".logo",)])
+        self.assertEqual(rules[(".ls",)], "position:absolute;top:2px;left:0;width:96px;height:30px")
+        self.assertEqual(rules[(".lf",)], "position:absolute;top:0;left:0;display:block;width:96px;height:30px;color:hsl(var(--signal))")
+        for sel in ((".logo",), (".ls",), (".lf",)):
+            self.assertNotIn("transform", rules[sel], sel)
+        self.assertNotIn("72ch", style)
         for gone in (".lc{", ".lk{", ".lb{", ".lf b{"):
             self.assertNotIn(gone, style, gone)
         # Chamfered panels and buttons with a signal hairline; the header status panel is gone.
@@ -4532,24 +4539,33 @@ class SourceHealthTests(unittest.TestCase):
     def test_header_has_only_the_requests_button(self):
         self.all_states_state()
         doc = R.render(self.state, self.template, self.config)
-        self.assertIn('</pre></span></span><button class="th-m" '
+        self.assertIn('</svg></span></span><button class="th-m" '
                       'id="theme-m" type="button" aria-label="Switch to light mode" hidden>[ theme ]</button><button '
                       'class="th-m" id="req-btn-m" type="button" aria-haspopup="dialog" aria-controls="api" hidden>'
                       '[ requests ]</button></div>', doc)
         logo = re.search(r'<span class="logo" id="logo" aria-hidden="true">(.*?)</span><button class="th-m"', doc, re.S).group(1)
         for gone in ('class="live"', "label-sys-bright live", "lv-x", "live · automated", ".live{"):
             self.assertNotIn(gone, doc, gone)                                  # no live badge in the header
-        # One static frame: a straight image-to-ASCII conversion of the K9 mark (72 columns x 16 rows of shade
-        # blocks), plain text in the steel colour with no inline markup.
-        frames = re.findall(r'<pre class="lf">(.*?)</pre>', logo, re.S)
+        # One static frame: the K9 mark as a 72 x 15 pixel grid, each cell a flat rect in one of four tones (the
+        # old shade blocks ░▒▓█ at .25/.5/.75/1 opacity), drawn at display size so nothing is resampled or dithered.
+        frames = re.findall(r'<svg class="lf"[^>]*>(.*?)</svg>', logo, re.S)
         self.assertEqual(len(frames), 1)
-        self.assertEqual(logo.count("<pre"), 1)
-        text = frames[0]
-        self.assertNotIn("<", text)
-        self.assertEqual(text.count("\n"), 15)                                   # 16 rows
-        self.assertTrue(all(len(line) <= 72 for line in text.split("\n")))
-        self.assertEqual(set(text) - set("█▓▒░ \n"), set())                     # shade blocks and spaces only
-        self.assertTrue(all(not line.endswith(" ") for line in text.split("\n")))
+        self.assertEqual(logo.count("<svg"), 1)
+        self.assertNotIn("<pre", logo)
+        body = frames[0]
+        self.assertEqual(re.findall(r"<g( fill-opacity=\"[^\"]+\")?>", body), [' fill-opacity=".25"', ' fill-opacity=".5"',
+                                                                                ' fill-opacity=".75"', ""])
+        rects = re.findall(r'<rect x="(\d+)" y="(\d+)" width="(\d+)" height="1"/>', body)
+        self.assertEqual(len(rects), body.count("<rect"))
+        self.assertGreater(len(rects), 100)
+        covered = set()
+        for x, y, w in ((int(a), int(b), int(c)) for a, b, c in rects):
+            self.assertTrue(w >= 1 and x + w <= 72 and 0 <= y <= 14, (x, y, w))
+            cells = {(x + i, y) for i in range(w)}
+            self.assertFalse(cells & covered, (x, y, w))                        # cells never overlap
+            covered |= cells
+        self.assertEqual({y for _x, y in covered}, set(range(15)))               # every row carries pixels
+        self.assertGreater(len(covered), 500)
         # Two short lines on desktop; both are visually hidden (still read out) on phones.
         self.assertIn('<h1><span class="h1a">New openings every three hours</span><span class="h1b"> · 0–2 years · '
                       'Bengaluru · Kerala</span></h1>\n<p class="lede">First-party employer portals · deduplicated · '
@@ -4562,7 +4578,8 @@ class SourceHealthTests(unittest.TestCase):
                                 '&gt;_</span> Requests</button></div>\n</header>')
         for gone in ('class="panel', "status", '<pre class="pre"', 'id="st-', "Details", "Status key", "signal status"):
             self.assertNotIn(gone, header, gone)
-        self.assertEqual(header.count("<pre"), 1)                 # only the logo
+        self.assertEqual(header.count("<pre"), 0)                 # the logo is an SVG grid now, no text art
+        self.assertEqual(header.count("<svg"), 1)                 # only the logo
         # No `$ signal …` command text, status block or status key outside the dialog.
         outside = page_outside_dialog(doc)
         text = re.sub(r"<[^>]+>", "", outside)
@@ -4699,25 +4716,30 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("glitch-b .5s steps(1) 1", anims)
         self.assertIn(".g1,.g2{clip-path:inset(0 0 100% 0)}.g1{color:hsl(var(--steel))}.g2{color:hsl(var(--signal)/.55)}",
                       style)
-        self.assertIn(".lf{position:absolute;top:0;left:0;margin:0;font:inherit;white-space:pre;color:hsl(var(--signal))}",
+        self.assertIn(".lf{position:absolute;top:0;left:0;display:block;width:96px;height:30px;color:hsl(var(--signal))}",
                       style)
         # Nothing the logo animates may be compositor-accelerated (no transform/translate/scale/rotate, no
-        # opacity, no filter): iOS WebKit rasterises composited layers under a CSS-scaled ancestor about 3x too
-        # big, and the mark stayed that way after the first glitch. The scale lives on the static .ls wrapper
-        # and the layers move with left/top (software-painted) plus clip-path.
-        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{left:0;top:0}8%{left:4px;top:-3px}48%{left:-5px;top:3px}}",
+        # opacity, no filter): iOS WebKit rasterised composited layers under a CSS-scaled ancestor about 3x too
+        # big. The mark is drawn at display size (no scale anywhere) and the layers move with left/top
+        # (software-painted) plus clip-path; offsets are display pixels on a 96 px wide mark.
+        for kf in ("@keyframes glitch-x{0%,16%,52%,100%{left:0;top:0}8%{left:1px;top:-1px}48%{left:-1px;top:1px}}",
                    "@keyframes glitch-a{0%,38%,62%,100%{clip-path:inset(0 0 100% 0);left:0}8%{clip-path:inset(12% 0 64% 0);"
-                   "left:-16px}",
+                   "left:-4px}22%{clip-path:inset(58% 0 18% 0);left:3px}48%{clip-path:inset(30% 0 52% 0);left:-2px}"
+                   "76%{clip-path:inset(4% 0 80% 0);left:2px}}",
                    "@keyframes glitch-b{0%,30%,70%,100%{clip-path:inset(0 0 100% 0);left:0}14%{clip-path:inset(40% 0 36% 0);"
-                   "left:14px}"):
+                   "left:3px}42%{clip-path:inset(70% 0 8% 0);left:-3px}56%{clip-path:inset(16% 0 70% 0);left:2px}}"):
             self.assertIn(kf, style, kf)
         for name in ("glitch-x", "glitch-a", "glitch-b"):
             body = re.search(r"@keyframes %s\{(.*?)\}\}" % name, style).group(1)
             for gone in ("transform", "translate", "scale", "rotate", "opacity", "filter", "offset"):
                 self.assertNotIn(gone, body, (name, gone))
-        self.assertEqual(style.count("scale(.21)"), 1)                       # only the static .ls rule
-        self.assertIn(".logo{position:relative;display:inline-block;flex:none;width:calc(72ch * .21);height:34px;overflow:hidden;"
-                      "font:10px/10px var(--font-mono);cursor:default;contain:paint}", style)   # the box always clips
+            for px in re.findall(r"(-?\d+)px", body):
+                self.assertLessEqual(abs(int(px)), 4, (name, px))             # a few pixels on a 96 px mark
+        self.assertNotIn("scale(.21)", style)
+        self.assertIn(".logo{position:relative;display:inline-block;flex:none;width:96px;height:34px;overflow:hidden;"
+                      "cursor:default;contain:paint}", style)                   # the box always clips
+        # Crisp cell edges only where a cell spans several device pixels; 1x screens keep anti-aliasing.
+        self.assertEqual(media_blocks(style)[1]["(min-resolution:2dppx)"], ".lf{shape-rendering:crispEdges}")
         script = main_script(doc)
         self.assertIn('const logo=$("#logo"),ls=logo.firstElementChild,lf0=ls.firstElementChild;["g1","g2"].forEach(c=>{'
                       'const k=lf0.cloneNode(true);k.classList.add(c);ls.appendChild(k)});', script)
