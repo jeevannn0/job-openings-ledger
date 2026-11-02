@@ -4869,6 +4869,12 @@ class SourceHealthTests(unittest.TestCase):
                          "background:linear-gradient(180deg,hsl(var(--ah) 70% 60%/.1) 0%,hsl(var(--ah) 70% 60%/.05) 55%,"
                          "hsl(var(--ah) 70% 60%/.02) 100%),hsl(var(--void));transition:border-color var(--dur-base) var(--ease-out-quart)")
         self.assertNotIn("var(--ah)", rules[(".card",)].split("background:")[0])          # the outline is untinted
+        # Only a posting from today gets the green outline; hover still wins (its rule comes later), and an expanded
+        # duplicate keeps its purple left rail.
+        self.assertEqual(rules[(".card.today",)], "border-color:hsl(var(--ok)/.6)")
+        self.assertLess(base.index(".card.today{"), base.index(".card:hover,.card:focus-within{"))
+        self.assertEqual(rules[(".sub.today",)], "border-left-color:hsl(var(--signal)/.45)")
+        self.assertLess(base.index(".sub{"), base.index(".sub.today{"))
         self.assertNotIn("background:hsl(var(--void))", rules[(".card",)])
         self.assertEqual(rules[(".card:hover", ".card:focus-within")], "border-color:hsl(var(--signal)/.4)")   # hover stays purple
         for age, hue in ((0, 152), (1, 148), (15, 90), (29, 32), (30, 28), (45, 28)):   # the JS formula, mirrored
@@ -4934,7 +4940,8 @@ class SourceHealthTests(unittest.TestCase):
                         'const xg=new Set();out.addEventListener("click",e=>{const b=e.target.closest(".mo");if(!b)return;'
                         'const g=b.dataset.g;xg.has(g)?xg.delete(g):xg.add(g);render();const n=out.querySelector(`.mo[data-g="${CSS.escape(g)}"]`);'
                         'if(n)n.focus()});',
-                        '<article class="card${sub?" sub":""}${anim?" reveal":""}" style="--ah:${ah}${anim?`;--i:${i}`:""}">',
+                        '<article class="card${a===0?" today":""}${sub?" sub":""}${anim?" reveal":""}" style="--ah:${ah}'
+                        '${anim?`;--i:${i}`:""}">',
                         # Posting age tints the card: hue 152 (green) today, sliding to 28 (orange) at 30 days and
                         # beyond; the hue rides on the card as --ah and one CSS rule paints every card.
                         'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30);return `',
