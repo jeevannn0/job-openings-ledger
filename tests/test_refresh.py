@@ -1111,6 +1111,50 @@ class NewSourceHelperTests(unittest.TestCase):
                      "kottayam", "malappuram", "kerala", "bengaluru", "bangalore"):
             self.assertIn(term, config.cities, term)
 
+    def test_jd_sheet_fetches_a_posting_on_demand_and_stores_nothing(self):
+        # Every card has a "JD" button; tapping it opens a sheet whose text the Worker's /jd route fetches from the
+        # employer at that moment (the same Worker and origin as the push registry). The page never holds a
+        # description: the route's URL is the only JD-related data rendered, and everything the sheet shows is
+        # escaped text built from the response's lines ("## " headings, "• " bullets, paragraphs).
+        config, _e, state, template = env()
+        doc = R.render(state, template, config)
+        script = main_script(doc)
+        self.assertEqual(R.jd_url(config), config.register_url.rsplit("/", 1)[0] + "/jd")
+        self.assertEqual(json.loads(re.search(r"\nconst JD_URL=(\"[^\"]+\");\n", doc).group(1)), R.jd_url(config))
+        self.assertIn("JD_URL_JS", R.ONCE_PLACEHOLDERS)
+        self.assertNotIn("/jd", template)                            # the route reaches the page only as a placeholder
+        card = script[script.index("const card="):script.index("function render()")]
+        self.assertIn('<button class="jd" type="button" data-u="${esc(u)}" data-t="${esc(t)}" data-c="${esc(c)}" data-l="${esc(l)}">JD'
+                      '<span class="vh"> — read the job description here</span></button>${more?', card)
+        self.assertEqual(card.count("<a "), 1)                       # the title is still the card's only link
+        self.assertEqual(card.count("<button"), 2)                   # JD and "+N more"
+        for snippet in ('const jdl=$("#jd"),jdw=$("#jd .term-win"),jdB=$("#jd-b"),jdT=$("#jd-t"),jdM=$("#jd-m"),jdL=$("#jd-l");',
+                        'if(x.startsWith("\\u2022 ")){ul.push(x.slice(2));continue}',
+                        'out.push(x.startsWith("## ")?`<h3>${esc(x.slice(3))}</h3>`:`<p>${esc(x)}</p>`)',
+                        'jdL.href=u;', 'jdl.showModal();jdw.focus();',
+                        'const d=r.ok?await r.json():null;if(seq!==jdSeq)return;',
+                        'if(!d||d.ok!==true||typeof d.text!=="string"||!d.text)throw 0;',
+                        'jdB.innerHTML=jdText(d.text)',
+                        'out.addEventListener("click",e=>{const b=e.target.closest(".jd");if(b)jdOpen(b)});',
+                        'jdl.addEventListener("click",e=>{if(e.target===jdl)jdl.close()});',
+                        '$("#jd-x").addEventListener("click",()=>jdl.close());',
+                        'jdl.addEventListener("close",()=>{jdSeq++;if(jdOpener&&document.contains(jdOpener))jdOpener.focus()});'):
+            self.assertIn(snippet, script, snippet)
+        # Response text only ever reaches the DOM through esc(): no raw insertion of d.text or d.title.
+        self.assertNotIn("innerHTML=d.", script)
+        self.assertNotIn("innerHTML=d.text", script)
+        self.assertEqual(script.count("jdB.innerHTML="), 3)         # loading note, rendered text, failure note
+        dialog = re.search(r'<dialog id="jd".*?</dialog>', doc, re.S).group(0)
+        self.assertEqual(dialog.count("<button"), 1)                 # the close dot
+        # The link has no href until the sheet opens (the script sets the posting's URL), so <base target="_blank">
+        # applies to it like to every job link and the in-page-anchor rule does not.
+        self.assertIn('<a class="jd-l" id="jd-l" rel="noopener noreferrer">Open the posting on the employer’s site ↗</a>', dialog)
+        self.assertNotIn("http", dialog)
+        style = style_of(doc)
+        self.assertIn(".jd{padding:0;border:0;background:none;font:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:700;"
+                      'color:hsl(var(--signal));cursor:pointer}.jd:after{content:"";position:absolute;inset:-8px -4px}', style)
+        self.assertIn(".jd-out{font-family:var(--font-sans);font-size:13px;line-height:1.6;", style)
+
     def test_kerala_cities_are_the_region_terms(self):
         # The region's term list is built from the city table, "kerala" itself first, so the filter and the crawl
         # cannot drift apart; every alias belongs to exactly one city.
@@ -1587,7 +1631,9 @@ class PushTests(unittest.TestCase):
                         'await register(await subscribe())',
                         'if(s){try{await send("DELETE",s)}catch(e){}await s.unsubscribe()}'):
             self.assertIn(snippet, script, snippet)
-        self.assertEqual(script.count("fetch("), 1)
+        # Two network calls on the whole page: this registration and the JD sheet's on-demand description fetch.
+        self.assertEqual(script.count("fetch("), 2)
+        self.assertIn('fetch(JD_URL+"?u="+encodeURIComponent(u),{mode:"cors"})', script)
         self.assertNotIn("serviceWorker", self.doc)                          # declarative push: no worker
         style = style_of(self.doc)
         self.assertIn(".pn-act{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}", style)
@@ -3701,8 +3747,8 @@ def main_script(doc: str) -> str:
 
 
 def page_outside_dialog(doc: str) -> str:
-    """The rendered markup with the <style>, the <script>s and the Requests dialog removed."""
-    body = doc.replace(style_of(doc), "").replace(api_dialog(doc), "")
+    """The rendered markup with the <style>, the <script>s and both dialogs (Requests, JD sheet) removed."""
+    body = re.sub(r"<dialog id=\"[a-z]+\".*?</dialog>", "", doc.replace(style_of(doc), ""), flags=re.S)
     return re.sub(r"<script>.*?</script>", "", body, flags=re.S)
 
 
@@ -4187,9 +4233,10 @@ class SourceHealthTests(unittest.TestCase):
                       "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
         self.assertNotRegex(doc, r"(?i)<iframe\b|<script\s+src|XMLHttpRequest|setInterval|requestAnimationFrame|<table")
-        # The page's only network call: a Home Screen web app registering (or removing) this device's push subscription
-        # with the ledger's own Worker (config push.register_url, an allowlisted host). Nothing else is fetched.
-        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL"])
+        # The page's only network calls go to the ledger's own Worker (config push.register_url, an allowlisted host):
+        # a Home Screen web app registering (or removing) this device's push subscription, and the JD sheet asking
+        # for one posting's description. Nothing else is fetched.
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
         # The only <link>s name this site's own web app manifest and Home Screen icon by relative path (the page
         # still names no host); nothing else is linked, preloaded or prefetched.
         self.assertEqual(re.findall(r"<link\b[^>]*>", doc), ['<link rel="manifest" href="manifest.webmanifest">',
@@ -4255,7 +4302,8 @@ class SourceHealthTests(unittest.TestCase):
         # Everything backend-facing lives in one native "Requests" dialog that starts closed at every width.
         self.assertIn('<dialog id="api" class="term" aria-labelledby="api-h"><div class="term-win" tabindex="-1">', doc)
         self.assertNotRegex(doc, r"<dialog\b[^>]*\bopen\b")
-        self.assertEqual(doc.count("<dialog"), 1)
+        self.assertEqual(doc.count("<dialog"), 2)                   # the Requests terminal and the JD sheet
+        self.assertIn('<dialog id="jd" class="term" aria-labelledby="jd-t"><div class="term-win" tabindex="-1">', doc)
         dialog = api_dialog(doc)
         # macOS-style title bar: a real close button (red) and two decorative lights, then a centred title.
         self.assertIn('<div class="term-bar"><span class="dots"><button class="dot dot-x" id="api-x" type="button" '
@@ -4300,7 +4348,7 @@ class SourceHealthTests(unittest.TestCase):
         for gone in ('id="api-btn"', 'id="api-btn2"', 'id="api-btn3"', 'class="x"', 'class="cta-s"', 'id="qv-req"'):
             self.assertNotIn(gone, doc, gone)
         script = main_script(doc)
-        self.assertEqual(script.count("showModal()"), 1)
+        self.assertEqual(script.count("showModal()"), 2)             # Requests, and the JD sheet
         for snippet in ('const dlg=$("#api"),win=$("#api .term-win");',
                         '[$("#req-btn"),$("#req-btn-m")].forEach(b=>{b.hidden=false;'
                         'b.addEventListener("click",()=>{opener=b;dlg.showModal();win.focus()})})',

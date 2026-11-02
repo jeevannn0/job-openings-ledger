@@ -1441,7 +1441,7 @@ def health_js() -> str:
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
                                "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS",
-                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS"})
+                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS", "JD_URL_JS"})
 LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
 
 
@@ -1457,6 +1457,12 @@ def logo_urls(config: Config) -> dict[str, str]:
             raise ValueError("render: a company logo URL is not an allowlisted icon path")
         out[company] = url
     return out
+
+
+def jd_url(config: Config) -> str:
+    """The Worker route that fetches one posting's description on demand: the push registry's sibling route
+    (same Worker, same origin), so the config names the Worker once. Nothing about a posting is stored here."""
+    return config.register_url.rsplit("/", 1)[0] + "/jd"
 
 
 def city_filter(config: Config) -> dict[str, list]:
@@ -1499,6 +1505,7 @@ def render(state: State, template: str, config: Config) -> str:
         "CITY_JS": js_json(city_filter(config)),           # the location filter's options and their place terms
         "VAPID_JS": js_json(config.vapid_public_key),      # the key the page subscribes with (push.mjs signs with its pair)
         "PUSH_URL_JS": js_json(config.register_url),       # where a Home Screen web app registers this device
+        "JD_URL_JS": js_json(jd_url(config)),              # where the JD sheet fetches a posting's text from
         "STALE_JS": js_json(stale_labels(state, config)),
         "AS_OF_JS": js_json(state.as_of.isoformat()),
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),
