@@ -7,7 +7,8 @@
     "regions": ["bengaluru", "kerala"]
   },
   "push": {
-    "vapid_public_key": "BFW2sWkJm-3LyGFlk9iIHht00zEmGNbsbsd1pMQkDqKK0MNNOofQhpu3BPoQXzHkDIEQbo0RDq94f6Hj_aYaCPY"
+    "vapid_public_key": "BFW2sWkJm-3LyGFlk9iIHht00zEmGNbsbsd1pMQkDqKK0MNNOofQhpu3BPoQXzHkDIEQbo0RDq94f6Hj_aYaCPY",
+    "register_url": "https://job-ledger-clock.we6325070.workers.dev/subscriptions"
   },
   "hosts": {
     "jobs.siemens.com": {"fetch": true, "robots": true, "min_delay_s": 2.0},
@@ -33,7 +34,8 @@
     "www.astrazeneca.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "www.shell.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "www.geaerospace.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
-    "framerusercontent.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
+    "framerusercontent.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "job-ledger-clock.we6325070.workers.dev": {"fetch": false, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
     {

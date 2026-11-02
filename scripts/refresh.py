@@ -543,6 +543,7 @@ class Config:
     companies: tuple          # ordered company names (page order)
     sources: dict             # company -> dict (mode + tunables)
     vapid_public_key: str     # the page's Web Push application server key (base64url P-256 point)
+    register_url: str         # where the page registers a device's push subscription (the ledger's own Worker)
 
     @property
     def fetch_hosts(self) -> frozenset:
@@ -589,6 +590,8 @@ def _num(v: object) -> bool:
 _P256_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
 _P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
 VAPID_PUBLIC_KEY_RE = re.compile(r"[A-Za-z0-9_-]{87}")      # 65 bytes, base64url without padding
+# The push-subscription registry: the /subscriptions route of a Worker on the ledger's own Cloudflare account.
+REGISTER_URL_RE = re.compile(r"https://[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev/subscriptions")
 
 
 def check_vapid_public_key(value: object) -> str:
@@ -615,8 +618,12 @@ def load_config(data: dict) -> Config:
            all(isinstance(r, str) and r in REGION_TERMS for r in f["regions"]), "config: regions")
     cities = tuple(dict.fromkeys(term for r in f["regions"] for term in REGION_TERMS[r]))
     push = data["push"]
-    _check(isinstance(push, dict) and set(push) == {"vapid_public_key"}, "config: push must be exactly {vapid_public_key}")
+    _check(isinstance(push, dict) and set(push) == {"vapid_public_key", "register_url"},
+           "config: push must be exactly {vapid_public_key, register_url}")
     vapid_public_key = check_vapid_public_key(push["vapid_public_key"])
+    register_url = push["register_url"]
+    _check(isinstance(register_url, str) and REGISTER_URL_RE.fullmatch(register_url) is not None, "config: push.register_url")
+    register_host = urllib.parse.urlsplit(register_url).hostname or ""
 
     hosts: dict[str, HostPolicy] = {}
     _check(isinstance(data["hosts"], dict), "config: hosts")
@@ -656,6 +663,7 @@ def load_config(data: dict) -> Config:
             needed_fetch |= spec.hosts
         companies.append(name)
         sources[name] = dict(entry)
+    needed_link.add(register_host)                    # the page posts a device's subscription there; link-only here
     _check(set(hosts) == needed_link, "config: hosts must be exactly the hosts the configured companies use")
     _check({h for h, p in hosts.items() if p.fetch} == needed_fetch,
            "config: fetch must be true exactly for hosts of non-static sources")
@@ -668,7 +676,7 @@ def load_config(data: dict) -> Config:
     _check(sum(s["budget_s"] for s in sources.values() if s["mode"] != "static") <= RUN_BUDGET_S,
            "config: source budgets must sum to at most the run budget")
     return Config(f["max_age_days"], float(f["max_years"]), tuple(f["regions"]), cities, hosts, tuple(companies), sources,
-                  vapid_public_key)
+                  vapid_public_key, register_url)
 
 
 def load_excluded(data: dict, config: Config) -> dict[str, frozenset]:
@@ -1380,7 +1388,7 @@ def health_js() -> str:
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
                                "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS",
-                               "VAPID_JS"})
+                               "VAPID_JS", "PUSH_URL_JS"})
 LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
 
 
@@ -1423,6 +1431,7 @@ def render(state: State, template: str, config: Config) -> str:
         "ORDER_JS": js_json(list(config.companies)),
         "LOGOS_JS": js_json(logo_urls(config)),
         "VAPID_JS": js_json(config.vapid_public_key),      # the key the page subscribes with (push.mjs signs with its pair)
+        "PUSH_URL_JS": js_json(config.register_url),       # where a Home Screen web app registers this device
         "STALE_JS": js_json(stale_labels(state, config)),
         "AS_OF_JS": js_json(state.as_of.isoformat()),
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),

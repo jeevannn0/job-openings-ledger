@@ -232,10 +232,10 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1 (tag verified with git ls-remote)
 
   notify:
-    # Once a refresh is live, tell the subscribed phone when it found new openings (scripts/push.mjs sends a Web
-    # Push message to the push service each subscription names; nothing else is contacted). Separate from deploy
-    # so the Pages deployment keeps its own permissions, and so a dead subscription fails only this job: the
-    # ledger is already published, and the owner sees the failure and re-subscribes.
+    # Once a refresh is live, tell the registered phones when it found new openings: scripts/push.mjs reads the
+    # registry (the ledger's own Worker, with PUSH_STORE_KEY), sends a Web Push message to the push service each
+    # device names, and drops devices the service reports gone (they register again when the ledger is next opened
+    # on them). Separate from deploy so the Pages deployment keeps its own permissions.
     needs: [refresh, deploy]
     if: needs.refresh.result == 'success' && needs.deploy.result == 'success'
     runs-on: ubuntu-24.04
@@ -251,6 +251,6 @@ jobs:
       - name: Send the phone notification
         env:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+          PUSH_STORE_KEY: ${{ secrets.PUSH_STORE_KEY }}
           ALERT: ${{ needs.refresh.outputs.alert }}
         run: node scripts/push.mjs --alert-env ALERT --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"

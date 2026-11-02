@@ -1,6 +1,6 @@
 name: Test the phone notification
 
-# Sends one fixed test notification to every subscription in PUSH_SUBSCRIPTIONS, without touching any
+# Sends one fixed test notification to every registered device, without touching any
 # employer site or the ledger's state. Run it from the Actions tab after subscribing a device.
 on:
   workflow_dispatch:
@@ -26,5 +26,5 @@ jobs:
       - name: Send a test notification
         env:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+          PUSH_STORE_KEY: ${{ secrets.PUSH_STORE_KEY }}
         run: node scripts/push.mjs --test --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"

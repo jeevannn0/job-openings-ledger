@@ -3,18 +3,22 @@
 //
 // After a refresh deploys, the workflow runs this with the run's alert payload (the same JSON as alerts.json).
 // When the refresh found new openings, one Declarative Web Push message (W3C Push API, as shipped in Safari
-// 18.4+) goes to every subscription in the PUSH_SUBSCRIPTIONS secret: the browser shows it as a normal
-// notification and opens the ledger when it is tapped. No service worker, no third party: the message travels
-// from GitHub Actions to the push service the subscribing browser named (Apple's, for an iPhone), encrypted
-// to the device (RFC 8291) and signed with the ledger's VAPID key (RFC 8292).
+// 18.4+) goes to every device in the registry: the browser shows it as a normal notification and opens the
+// ledger when it is tapped. No service worker, no third party: the message travels from GitHub Actions to the
+// push service the subscribing browser named (Apple's, for an iPhone), encrypted to the device (RFC 8291) and
+// signed with the ledger's VAPID key (RFC 8292).
+//
+// The registry is the ledger's own Cloudflare Worker (config push.register_url): the page registers a device
+// there whenever it is opened from the Home Screen, this script lists the devices with the PUSH_STORE_KEY
+// secret, and a device whose push service answers 404/410 is removed from the registry so it is never
+// retried; it re-registers itself the next time the ledger is opened on it.
 //
 //   node scripts/push.mjs --alert-env ALERT --ledger-url https://example.github.io/ledger/
 //   node scripts/push.mjs --test --ledger-url https://example.github.io/ledger/
 //
 // Environment: VAPID_PRIVATE_KEY (the P-256 private scalar, base64url; its public half lives in
-// config/public_sources.json so the page can subscribe) and PUSH_SUBSCRIPTIONS (one PushSubscription JSON
-// object, or an array of them, copied from the ledger's Requests panel). Neither is ever printed.
-// A dead subscription (HTTP 404/410 from the push service) fails the run so the owner learns to re-subscribe.
+// config/public_sources.json so the page can subscribe) and PUSH_STORE_KEY (the registry's bearer key).
+// Neither is ever printed, and neither is any device's endpoint.
 
 import { createCipheriv, createECDH, createPrivateKey, hkdfSync, randomBytes, sign, verify, createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -32,6 +36,7 @@ const RECORD_SIZE = 4096;                 // one record; RFC 8291 §4 caps the w
 const TTL_S = 3 * 3600;                   // undelivered after three hours: the next refresh supersedes it
 const RETRY_MS = [2000, 6000];            // after the first attempt, for 429 and 5xx answers
 const NOTIFICATION_TAG = "k9-openings";   // a newer notification replaces an unread older one
+export const REGISTER_URL = /^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev\/subscriptions$/;
 
 // ---------------------------------------------------------------------- RFC 8291: message encryption
 
@@ -125,16 +130,9 @@ export function notificationFor(alert, ledgerUrl, test = false) {
   return { web_push: 8030, notification: { title, body, ...base } };
 }
 
-/** PUSH_SUBSCRIPTIONS: one PushSubscription JSON or an array of them; empty means nobody is subscribed. */
-export function parseSubscriptions(text) {
-  if (!text || !text.trim()) return [];
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new Error("PUSH_SUBSCRIPTIONS: not JSON");
-  }
-  const list = Array.isArray(value) ? value : [value];
+/** Validates a list of PushSubscription JSON objects (what the registry returns); shapes only, never trusted blindly. */
+export function parseSubscriptions(list) {
+  if (!Array.isArray(list)) throw new Error("registry: subscriptions must be a list");
   return list.map((s, i) => {
     const what = `subscription #${i + 1}`;
     if (!s || typeof s !== "object" || typeof s.endpoint !== "string" || !s.keys || typeof s.keys !== "object") throw new Error(`${what}: shape`);
@@ -158,11 +156,31 @@ export function parseSubscriptions(text) {
   });
 }
 
-/** Reads the page's VAPID public key from the repository config, as the subscribing browser saw it. */
-export function configuredPublicKey(configPath) {
+/** The page's VAPID public key and the registry URL from the repository config, as the browser saw them. */
+export function configuredPush(configPath) {
   const config = JSON.parse(readFileSync(configPath, "utf8"));
-  const text = config && config.push && config.push.vapid_public_key;
-  return assertPublicPoint(dec(text), "config push.vapid_public_key");
+  const push = (config && config.push) || {};
+  if (typeof push.register_url !== "string" || !REGISTER_URL.test(push.register_url)) throw new Error("config push.register_url");
+  return { publicPoint: assertPublicPoint(dec(push.vapid_public_key), "config push.vapid_public_key"), storeUrl: push.register_url };
+}
+
+// ---------------------------------------------------------------------- the registry
+
+/** Every registered device, validated. Throws when the registry cannot be read (the run must not pretend). */
+export async function listRegistered(storeUrl, storeKey, fetchImpl = fetch) {
+  const response = await fetchImpl(storeUrl, { headers: { Authorization: `Bearer ${storeKey}` } });
+  if (response.status !== 200) throw new Error(`registry: HTTP ${response.status}`);
+  const data = await response.json();
+  return parseSubscriptions(data && data.subscriptions);
+}
+
+/** Removes devices whose push service said they are gone; returns how many the registry dropped. */
+export async function pruneRegistered(storeUrl, storeKey, endpoints, fetchImpl = fetch) {
+  if (!endpoints.length) return 0;
+  const response = await fetchImpl(storeUrl, { method: "PATCH", headers: { Authorization: `Bearer ${storeKey}`, "Content-Type": "application/json" },
+                                                body: JSON.stringify({ expired: endpoints }) });
+  if (response.status !== 200) throw new Error(`registry prune: HTTP ${response.status}`);
+  return (await response.json()).removed;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -213,13 +231,9 @@ function parseArgs(argv) {
   return out;
 }
 
-export async function main(argv, env = process.env, log = console.log) {
+export async function main(argv, env = process.env, log = console.log, fetchImpl = fetch,
+                           configPath = join(dirname(fileURLToPath(import.meta.url)), "..", "config", "public_sources.json")) {
   const args = parseArgs(argv);
-  const subscriptions = parseSubscriptions(env.PUSH_SUBSCRIPTIONS);
-  if (!subscriptions.length) {
-    log("push: PUSH_SUBSCRIPTIONS is not set; nothing to send");
-    return 0;
-  }
   let alert = null;
   if (!args.test) {
     const text = args.alertFile ? readFileSync(args.alertFile, "utf8") : env[args.alertEnv];
@@ -231,25 +245,34 @@ export async function main(argv, env = process.env, log = console.log) {
     log("push: no new openings in this refresh; nothing to send");
     return 0;
   }
-  const publicPoint = configuredPublicKey(join(dirname(fileURLToPath(import.meta.url)), "..", "config", "public_sources.json"));
+  const { publicPoint, storeUrl } = configuredPush(configPath);
+  if (!env.PUSH_STORE_KEY) throw new Error("PUSH_STORE_KEY secret is not set");
   if (!env.VAPID_PRIVATE_KEY) throw new Error("VAPID_PRIVATE_KEY secret is not set");
   const privateScalar = dec(env.VAPID_PRIVATE_KEY);
   if (privateScalar.length !== 32 || !publicKeyFor(privateScalar).equals(publicPoint)) throw new Error("VAPID_PRIVATE_KEY does not match config push.vapid_public_key");
-  log(`push: ${args.test ? "test message" : `"${message.notification.title}"`} to ${subscriptions.length} subscription${subscriptions.length === 1 ? "" : "s"}`);
+  const subscriptions = await listRegistered(storeUrl, env.PUSH_STORE_KEY, fetchImpl);
+  if (!subscriptions.length) {
+    log("push: no device is registered; nothing to send");
+    return 0;
+  }
+  log(`push: ${args.test ? "test message" : `"${message.notification.title}"`} to ${subscriptions.length} device${subscriptions.length === 1 ? "" : "s"}`);
   if (args.dryRun) {
     log("push: dry run; nothing sent");
     return 0;
   }
   let failures = 0;
+  const expired = [];
   for (const [i, sub] of subscriptions.entries()) {
     const authorization = vapidAuthorization(sub.endpoint, args.ledgerUrl, privateScalar, publicPoint);
-    const result = await deliver(sub, message, authorization);
+    const result = await deliver(sub, message, authorization, fetchImpl);
     const detail = result.detail ? ` ${result.detail}` : "";
     log(`push: #${i + 1} (${sub.host}): ${result.outcome} (HTTP ${result.status})${detail}`);
-    if (result.outcome !== "sent") failures++;
-    if (result.outcome === "expired") {
-      log(`push: #${i + 1} is no longer valid. Open the ledger from its Home Screen icon, [ requests ] > signal notify > Turn on, then replace the PUSH_SUBSCRIPTIONS secret with the new code.`);
-    }
+    if (result.outcome === "expired") expired.push(sub.endpoint);
+    else if (result.outcome !== "sent") failures++;
+  }
+  if (expired.length) {
+    const removed = await pruneRegistered(storeUrl, env.PUSH_STORE_KEY, expired, fetchImpl);
+    log(`push: ${removed} device${removed === 1 ? "" : "s"} no longer reachable, removed from the registry; a device registers itself again the next time the ledger is opened on it`);
   }
   return failures ? 1 : 0;
 }

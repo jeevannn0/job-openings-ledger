@@ -1339,6 +1339,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(R.check_vapid_public_key(
             "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"),
             "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8")   # RFC 8291 §5
+        self.assertRegex(config.register_url, R.REGISTER_URL_RE)
+        self.assertIn(R.urllib.parse.urlsplit(config.register_url).hostname, config.link_hosts)
 
     def test_endpoints_stay_on_company_hosts(self):
         for company, urls in {"JPMorganChase": (R.JPM_SEARCH, R.JPM_DETAIL, R.JPM_FRONT),
@@ -1387,6 +1389,12 @@ class ConfigTests(unittest.TestCase):
             "vapid off curve": lambda d: d["push"].__setitem__("vapid_public_key", d["push"]["vapid_public_key"][:-1] +
                                                               ("A" if d["push"]["vapid_public_key"][-1] != "A" else "B")),
             "vapid not base64url": lambda d: d["push"].__setitem__("vapid_public_key", d["push"]["vapid_public_key"][:-1] + "+"),
+            "no register_url": lambda d: d["push"].pop("register_url"),
+            "register_url off workers.dev": lambda d: d["push"].__setitem__("register_url", "https://evil.example/subscriptions"),
+            "register_url other route": lambda d: d["push"].__setitem__("register_url", d["push"]["register_url"] + "/x"),
+            "register host not listed": lambda d: d["hosts"].pop(R.urllib.parse.urlsplit(d["push"]["register_url"]).hostname),
+            "register host fetched": lambda d: d["hosts"][R.urllib.parse.urlsplit(d["push"]["register_url"]).hostname]
+                                                      .__setitem__("fetch", True),
         }
         for name, mutate in mutations.items():
             with self.subTest(name), self.assertRaises(R.ConfigError):
@@ -1431,7 +1439,9 @@ class LogoTests(unittest.TestCase):
         logo_only = {R.COMPANY_SPECS[c].logo_host for c in self.config.companies} - source_hosts
         self.assertGreaterEqual(len(logo_only), 10)
         self.assertEqual(logo_only & self.config.fetch_hosts, set())
-        self.assertEqual(set(self.config.link_hosts), source_hosts | logo_only)
+        register_host = R.urllib.parse.urlsplit(self.config.register_url).hostname
+        self.assertEqual(set(self.config.link_hosts), source_hosts | logo_only | {register_host})
+        self.assertFalse(self.config.hosts[register_host].fetch)                # the refresh never calls the registry
 
     def test_logo_url_outside_the_allowlist_or_shape_fails_closed(self):
         zs = R.COMPANY_SPECS["ZS"]
@@ -1481,7 +1491,8 @@ class LogoTests(unittest.TestCase):
 class PushTests(unittest.TestCase):
     """Phone notifications: the page can subscribe (as a Home Screen web app) with the published VAPID key, the
     workflow sends a Declarative Web Push message after each refresh that found new openings, and the only
-    files added for it are the manifest, three plain PNG icons and the dependency-free sender."""
+    files added for it are the manifest, three plain PNG icons and the dependency-free sender. A device registers
+    its subscription with the ledger's own Worker whenever the page is opened from the Home Screen icon."""
 
     def setUp(self):
         self.config, _e, self.state, self.template = env()
@@ -1510,31 +1521,37 @@ class PushTests(unittest.TestCase):
         key = re.search(r"\nconst VAPID=(\"[^\"]+\");\n", self.doc).group(1)     # its own line, like LOGOS
         self.assertEqual(json.loads(key), self.config.vapid_public_key)
         self.assertIn("VAPID_JS", R.ONCE_PLACEHOLDERS)
+        url = re.search(r"\nconst PUSH_URL=(\"[^\"]+\");\n", self.doc).group(1)
+        self.assertEqual(json.loads(url), self.config.register_url)
+        self.assertIn("PUSH_URL_JS", R.ONCE_PLACEHOLDERS)
         dialog = api_dialog(self.doc)
         self.assertIn('<div class="tb" id="push" style="--d:4" hidden><p class="pl"><span class="pu">ops@job-signal</span> '
                       '<span class="pp">~ %</span> signal notify</p>\n<p class="kv">Phone alerts: <b id="pn-state" data-s="off">off'
                       '</b></p>', dialog)
         self.assertIn('<p class="pn-act"><button class="ob" id="pn-on" type="button">Turn on</button><button class="ob" '
-                      'id="pn-copy" type="button" hidden>Copy code</button><button class="ob" id="pn-off" type="button" hidden>'
-                      'Turn off</button></p>', dialog)
-        self.assertIn('<textarea class="pn-sub" id="pn-sub" readonly spellcheck="false" aria-label="Subscription code">'
-                      '</textarea></div></div>', dialog)
-        self.assertEqual(self.doc.count("<textarea"), 1)
+                      'id="pn-off" type="button" hidden>Turn off</button></p></div>', dialog)
+        self.assertNotIn("<textarea", self.doc)                               # nothing to copy by hand any more
+        self.assertNotIn("PUSH_SUBSCRIPTIONS", self.doc)
         script = main_script(self.doc)
-        # Shown only where the browser exposes window.pushManager (a Home Screen web app on iOS); the Notification
-        # permission is requested inside the tap, the subscription uses the page's key, and the code is copied by hand.
+        # Shown only where the browser exposes window.pushManager (a Home Screen web app on iOS). On every open an
+        # existing (or, with permission already granted, a fresh) subscription is registered with the Worker; the
+        # Notification permission itself is requested inside the tap; Turn off removes the device from the registry.
         for snippet in ('const pm=window.pushManager,pn=$("#push");if(pm&&pn){',
-                        'pn.hidden=false;pm.getSubscription().then(show,()=>show(null));',
-                        'if(await Notification.requestPermission()!=="granted")return fail(',
-                        'show(await pm.subscribe({userVisibleOnly:true,applicationServerKey:b64(VAPID)}))',
-                        'ta.value=ok?JSON.stringify(s.toJSON()):""',
-                        'await navigator.clipboard.writeText(ta.value);cp.textContent="Copied"',
-                        'if(s)await s.unsubscribe()'):
+                        'send=(m,s)=>fetch(PUSH_URL,{method:m,mode:"cors",headers:{"Content-Type":"application/json"},'
+                        'body:JSON.stringify(s.toJSON()),keepalive:true})',
+                        'subscribe=()=>pm.subscribe({userVisibleOnly:true,applicationServerKey:b64(VAPID)})',
+                        'let s=await pm.getSubscription();if(!s&&Notification.permission==="granted")s=await subscribe();'
+                        'if(s)await register(s);else state("off","off")',
+                        'pn.hidden=false;start();',
+                        'if(await Notification.requestPermission()!=="granted")return state(',
+                        'await register(await subscribe())',
+                        'if(s){try{await send("DELETE",s)}catch(e){}await s.unsubscribe()}'):
             self.assertIn(snippet, script, snippet)
+        self.assertEqual(script.count("fetch("), 1)
         self.assertNotIn("serviceWorker", self.doc)                          # declarative push: no worker
         style = style_of(self.doc)
         self.assertIn(".pn-act{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}", style)
-        self.assertIn("#pn-state[data-s=on]{color:hsl(var(--ok))}", style)
+        self.assertIn("#pn-state[data-s=on]{color:hsl(var(--ok))}#pn-state[data-s=warn]{color:hsl(var(--warn))}", style)
 
     def test_key_check_fails_closed(self):
         good = self.config.vapid_public_key
@@ -1575,7 +1592,9 @@ class PushTests(unittest.TestCase):
         self.assertNotRegex(sender, r'from "(?!node:)')                        # standard library only
         self.assertIn("web_push:8030", sender.replace(" ", ""))                 # the declarative format
         self.assertIn("if (status === 404 || status === 410) return { status, outcome: \"expired\" };", sender)
-        self.assertNotRegex(sender, r"console\.log\([^\n]*(endpoint|VAPID_PRIVATE_KEY|PUSH_SUBSCRIPTIONS)[^\n]*\)")
+        self.assertNotRegex(sender, r"console\.log\([^\n]*(endpoint|VAPID_PRIVATE_KEY|PUSH_STORE_KEY)[^\n]*\)")
+        self.assertIn("if (result.outcome === \"expired\") expired.push(sub.endpoint);", sender)   # pruned, not retried
+        self.assertNotIn("PUSH_SUBSCRIPTIONS", sender)
         test_wf = R.read_text(os.path.join(ROOT, ".github", "workflows", "push-test.yml"))
         self.assertRegex(test_wf, r"(?m)^on:\n  workflow_dispatch:\n")
         self.assertNotRegex(test_wf, r"(?m)^  (schedule|push|pull_request)")
@@ -2095,9 +2114,10 @@ class PrivateExclusionTests(unittest.TestCase):
         notify = re.search(r"^  notify:\n(.*)\Z", text, re.S | re.M).group(1)
         send = re.search(r"- name: Send the phone notification\n(.*)\Z", notify, re.S).group(1)
         self.assertIn("VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}", send)
-        self.assertIn("PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}", send)
-        self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*(VAPID_PRIVATE_KEY|PUSH_SUBSCRIPTIONS)")
-        self.assertEqual(text.count("secrets.VAPID_PRIVATE_KEY") + text.count("secrets.PUSH_SUBSCRIPTIONS"), 2)
+        self.assertIn("PUSH_STORE_KEY: ${{ secrets.PUSH_STORE_KEY }}", send)
+        self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*(VAPID_PRIVATE_KEY|PUSH_STORE_KEY)")
+        self.assertEqual(text.count("secrets.VAPID_PRIVATE_KEY") + text.count("secrets.PUSH_STORE_KEY"), 2)
+        self.assertNotIn("PUSH_SUBSCRIPTIONS", text)                 # the registry replaced the hand-pasted secret
 
 
 class DryRunTests(unittest.TestCase):
@@ -4113,7 +4133,10 @@ class SourceHealthTests(unittest.TestCase):
                       "stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .64 0 0 0 0 .36 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E"
                       "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
-        self.assertNotRegex(doc, r"(?i)<iframe\b|<script\s+src|\bfetch\(|XMLHttpRequest|setInterval|requestAnimationFrame|<table")
+        self.assertNotRegex(doc, r"(?i)<iframe\b|<script\s+src|XMLHttpRequest|setInterval|requestAnimationFrame|<table")
+        # The page's only network call: a Home Screen web app registering (or removing) this device's push subscription
+        # with the ledger's own Worker (config push.register_url, an allowlisted host). Nothing else is fetched.
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL"])
         # The only <link>s name this site's own web app manifest and Home Screen icon by relative path (the page
         # still names no host); nothing else is linked, preloaded or prefetched.
         self.assertEqual(re.findall(r"<link\b[^>]*>", doc), ['<link rel="manifest" href="manifest.webmanifest">',
@@ -4186,7 +4209,7 @@ class SourceHealthTests(unittest.TestCase):
                       'aria-label="Close"></button><span class="dot dot-m" aria-hidden="true"></span><span class="dot '
                       'dot-z" aria-hidden="true"></span></span><span id="api-h">ops@job-signal — requests — zsh</span>'
                       '<span class="term-esc" aria-hidden="true">esc</span></div>', dialog)
-        self.assertEqual(dialog.count("<button"), 4)          # close, then the notify block's on / copy / off
+        self.assertEqual(dialog.count("<button"), 3)          # close, then the notify block's Turn on / Turn off
         # Four commands and a final prompt, in order; each block is one staggered output group. The status
         # block comes first, so the reader sees when the latest refresh ran and what it found.
         prompt = '<p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
@@ -4198,7 +4221,7 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="h-note">', prompt + "signal schedule</p>",
                  '<p class="kv">every 3 h on the hour IST · armed 15 min ahead by an external clock · cron '
                  '20,35 0,3,6,9,12,15,18,21 * * * UTC as fallback · last 6 pulls kept per source</p>',
-                 prompt + "signal notify</p>", 'id="pn-state"', 'id="pn-on"', 'id="pn-sub"',
+                 prompt + "signal notify</p>", 'id="pn-state"', 'id="pn-on"', 'id="pn-off"',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb"(?: id="push")? style="--d:(\d)"', dialog), list("012345"))
