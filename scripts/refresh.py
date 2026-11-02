@@ -130,14 +130,15 @@ def _spec(url_re: str, modes: Iterable[str], hosts: Iterable[str], logo: str) ->
 
 
 # Card logos are the icons the employers publish for their own sites (favicon / apple-touch-icon), referenced
-# by URL and loaded by the reader's browser with no referrer; nothing is downloaded or stored here. Each URL was
-# checked to load in a browser on 2 Nov 2026; one that stops loading falls back to the company's initials.
+# by URL and loaded by the reader's browser with no referrer; nothing is downloaded or stored here. Each is the
+# largest icon the employer publishes on its own hosts (vector where one exists); every URL was checked to load in
+# Chromium and WebKit on 2 Nov 2026, and one that stops loading falls back to the company's initials.
 COMPANY_SPECS = {
     "Siemens": _spec(r"https://jobs\.siemens\.com/en_US/externaljobs/JobDetail/(\d{5,7})",
                      {"siemens_avature_html"}, {"jobs.siemens.com"}, "https://www.siemens.com/_static/favicon.svg"),
     "GE Vernova": _spec(r"https://careers\.gevernova\.com/[a-z0-9]+(?:-[a-z0-9]+)*/job/(R\d{6,8})",
                         {"gevernova_paradox_api"}, {"careers.gevernova.com"},
-                        "https://www.gevernova.com/themes/custom/ge_vernova_unified/favicon.ico"),
+                        "https://careers.gevernova.com/favicon-192x192.png"),
     "IQVIA": _spec(r"https://jobs\.iqvia\.com/en/jobs/(R\d{6,8})-0",
                    {"iqvia_workday_cxs"}, {"jobs.iqvia.com", "iqvia.wd1.myworkdayjobs.com"},
                    "https://www.iqvia.com/Content/Shotgun/img/favicon/apple-icon-precomposed.png?v=4"),
@@ -149,11 +150,13 @@ COMPANY_SPECS = {
                            r"[A-Za-z0-9-]+_(R\d{6,8})(?:-\d{1,3})?",
                            {"gehc_workday_cxs"}, {"gehc.wd5.myworkdayjobs.com"},
                            "https://www.gehealthcare.com/etc.clientlibs/gehealthcare/clientlibs/clientlib-site/resources/favicons/"
-                           "favicon-96x96.png"),
+                           "favicon-512x512.png"),
+    # zs.com publishes its mark as the Organization logo of its home page; its favicons are 32 px bitmaps.
     "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", {"zs_jibe_api"}, {"jobs.zs.com"},
-                "https://www.zs.com/icons/favicon-zs.ico"),
+                "https://www.zs.com/media_1b8724fe009e8982e66a149bbca1eb3e1e1d909e9.svg"),
     "Accenture": _spec(r"https://www\.accenture\.com/in-en/careers/jobdetails\?id=([A-Za-z0-9-]{6,40})_en",
-                       {"accenture_findjobs_api"}, {"www.accenture.com"}, "https://www.accenture.com/favicon.ico"),
+                       {"accenture_findjobs_api"}, {"www.accenture.com"},
+                       "https://www.accenture.com/content/dam/accenture/final/images/icons/symbol/Acc_GT_Dimensional_RGB.svg"),
     "Lilly": _spec(r"https://lilly\.wd115\.myworkdayjobs\.com/LLY/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
                    r"_(R-\d{5,7})(?:-\d{1,3})?", {"workday_cxs"}, {"lilly.wd115.myworkdayjobs.com"},
                    "https://www.lilly.com/apple-touch-icon.png"),
@@ -162,7 +165,7 @@ COMPANY_SPECS = {
                          "https://www.astrazeneca.com/etc/designs/az/img/favicons/icon-apple-touch-icon-152x152.png"),
     "Shell": _spec(r"https://shell\.wd3\.myworkdayjobs\.com/ShellCareers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
                    r"_(R\d{5,8})(?:-\d{1,3})?", {"workday_cxs"}, {"shell.wd3.myworkdayjobs.com"},
-                   "https://www.shell.com/etc.clientlibs/amidala/clientlibs/theme-base/resources/favicon/apple-touch-icon.png"),
+                   "https://www.shell.com/etc.clientlibs/amidala/clientlibs/theme-base/resources/favicon/favicon.svg"),
     "GE Aerospace": _spec(r"https://geaerospace\.wd5\.myworkdayjobs\.com/GE_ExternalSite/job/(?:[A-Za-z0-9._~%-]+/)?"
                           r"[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?", {"workday_cxs"}, {"geaerospace.wd5.myworkdayjobs.com"},
                           "https://www.geaerospace.com/themes/custom/aero_sub_theme/favicon.ico"),
