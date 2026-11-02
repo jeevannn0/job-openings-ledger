@@ -4862,6 +4862,15 @@ class SourceHealthTests(unittest.TestCase):
         # On phones the card title link covers the whole card.
         self.assertIn('.job:after{content:"";position:absolute;inset:0}', blocks[PHONE_MQ])
         self.assertTrue(rules[(".card",)].startswith("position:relative;"))
+        # The card wears the search panel's faded vertical gradient (three stops, 0/55/100%, like --panel-grad) in its
+        # age hue, over the page background; the border takes the same hue. No per-age classes, no literal hues.
+        self.assertEqual(rules[(".card",)], "position:relative;--ah:28;border:1px solid hsl(var(--ah) 60% 50%/.35);"
+                         "background:linear-gradient(180deg,hsl(var(--ah) 75% 50%/.18) 0%,hsl(var(--ah) 75% 50%/.09) 55%,"
+                         "hsl(var(--ah) 75% 50%/.04) 100%),hsl(var(--void));transition:border-color var(--dur-base) var(--ease-out-quart)")
+        self.assertNotIn("background:hsl(var(--void))", rules[(".card",)])
+        self.assertEqual(rules[(".card:hover", ".card:focus-within")], "border-color:hsl(var(--signal)/.4)")   # hover stays purple
+        for age, hue in ((0, 152), (1, 148), (15, 90), (29, 32), (30, 28), (45, 28)):   # the JS formula, mirrored
+            self.assertEqual(round(152 - 124 * min(max(age, 0), 30) / 30), hue, age)
         # Absolutely positioned screen-reader text inside scrolling chips stays inside its chip.
         self.assertIn(".ci,.chip{position:relative}", base)
 
@@ -4923,7 +4932,10 @@ class SourceHealthTests(unittest.TestCase):
                         'const xg=new Set();out.addEventListener("click",e=>{const b=e.target.closest(".mo");if(!b)return;'
                         'const g=b.dataset.g;xg.has(g)?xg.delete(g):xg.add(g);render();const n=out.querySelector(`.mo[data-g="${CSS.escape(g)}"]`);'
                         'if(n)n.focus()});',
-                        '<article class="card${sub?" sub":""}${anim?" reveal":""}"${anim?` style="--i:${i}"`:""}>',
+                        '<article class="card${sub?" sub":""}${anim?" reveal":""}" style="--ah:${ah}${anim?`;--i:${i}`:""}">',
+                        # Posting age tints the card: hue 152 (green) today, sliding to 28 (orange) at 30 days and
+                        # beyond; the hue rides on the card as --ah and one CSS rule paints every card.
+                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30);return `',
                         # Sources without posting dates read "lists" / "seen N days ago" (row 11 = 1).
                         '<span class="c-co">${esc(c)}</span> ${sb?"lists":"posted"} <a class="job"',
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
