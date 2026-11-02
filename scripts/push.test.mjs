@@ -153,6 +153,42 @@ test("delivery maps push-service answers", async () => {
   assert.deepEqual(await deliver(sub, message, "vapid t=x, k=y", fake([403])), { status: 403, outcome: "rejected", detail: "BadJwtToken" });
 });
 
+test("a test run can carry a series of custom messages, each with its own tag", async () => {
+  const { customMessage, parseSeries } = await import("./push.mjs");
+  assert.deepEqual(parseSeries(""), [{ title: "Notifications are on", body: "This is the test message. New openings will arrive here after each refresh." }]);
+  assert.deepEqual(parseSeries(JSON.stringify([["Woof", " hi "], { title: "T", body: "B" }])), [{ title: "Woof", body: "hi" }, { title: "T", body: "B" }]);
+  for (const [bad, re] of [["{", /not JSON/], ["[]", /1 to 10/], [JSON.stringify(Array(11).fill(["a", "b"])), /1 to 10/],
+                           [JSON.stringify([["a"]]), /\[title, body\]/], [JSON.stringify([["", "b"]]), /length/],
+                           [JSON.stringify([["a".repeat(61), "b"]]), /length/], [JSON.stringify([["a<b", "b"]]), /characters/],
+                           [JSON.stringify([["a", "b\nc"]]), /characters/]]) {
+    assert.throws(() => parseSeries(bad), re, bad.slice(0, 30));
+  }
+  assert.throws(() => customMessage(5, 0), /message #1/);
+  const d = randomBytes(32);
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const cfg = join(mkdtempSync(join(tmpdir(), "push-")), "c.json");
+  writeFileSync(cfg, JSON.stringify({ push: { vapid_public_key: enc(publicKeyFor(d)), register_url: STORE } }));
+  const sent = [], slept = [], logs = [];
+  const fake = async (url, init = {}) => {
+    if (url === STORE) return { status: 200, json: async () => ({ subscriptions: [sample()] }) };
+    sent.push(init.body.length);
+    return { status: 201, text: async () => "{}" };
+  };
+  const env = { VAPID_PRIVATE_KEY: enc(d), PUSH_STORE_KEY: "k", MESSAGES: JSON.stringify([["One", "first"], ["Two", "second"], ["Three", "third"]]) };
+  const code = await main(["--test", "--series-env", "MESSAGES", "--interval-s", "5", "--ledger-url", LEDGER], env, (m) => logs.push(m), fake, cfg, async (ms) => slept.push(ms));
+  assert.equal(code, 0);
+  assert.equal(sent.length, 3);
+  assert.deepEqual(slept, [5000, 5000]);                                  // between messages, not after the last
+  assert.match(logs[0], /3 test messages, 5 s apart to 1 device/);
+  assert.match(logs.join("\n"), /message 2 #1 \(web\.push\.apple\.com\): sent/);
+  // Distinct tags so the series stacks on the phone; a single message keeps the usual tag.
+  assert.equal(notificationFor(null, LEDGER, true, { title: "a", body: "b", tag: "k9-openings-2" }).notification.tag, "k9-openings-2");
+  assert.equal(notificationFor(null, LEDGER, true, { title: "a", body: "b" }).notification.tag, "k9-openings");
+  await assert.rejects(main(["--test", "--interval-s", "0", "--ledger-url", LEDGER], env, () => {}, fake, cfg), /interval/);
+  await assert.rejects(main(["--alert-env", "X", "--series-env", "MESSAGES", "--ledger-url", LEDGER], env, () => {}, fake, cfg), /series-env/);
+});
+
 test("a run sends to every registered device, prunes the dead ones and fails only on real errors", async () => {
   const d = randomBytes(32);
   const { publicPoint } = configuredPush(CONFIG);

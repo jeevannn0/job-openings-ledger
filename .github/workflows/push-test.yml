@@ -4,6 +4,15 @@ name: Test the phone notification
 # employer site or the ledger's state. Run it from the Actions tab after subscribing a device.
 on:
   workflow_dispatch:
+    inputs:
+      messages:
+        description: 'Optional JSON list of up to 10 [title, body] pairs; empty sends the single default test message'
+        type: string
+        default: ""
+      interval_s:
+        description: "Seconds between messages of a series (1-60)"
+        type: string
+        default: "5"
 
 permissions: {}
 
@@ -27,4 +36,6 @@ jobs:
         env:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           PUSH_STORE_KEY: ${{ secrets.PUSH_STORE_KEY }}
-        run: node scripts/push.mjs --test --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+          MESSAGES: ${{ inputs.messages }}
+          INTERVAL: ${{ inputs.interval_s }}
+        run: node scripts/push.mjs --test --series-env MESSAGES --interval-s "$INTERVAL" --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"

@@ -1598,7 +1598,8 @@ class PushTests(unittest.TestCase):
         test_wf = R.read_text(os.path.join(ROOT, ".github", "workflows", "push-test.yml"))
         self.assertRegex(test_wf, r"(?m)^on:\n  workflow_dispatch:\n")
         self.assertNotRegex(test_wf, r"(?m)^  (schedule|push|pull_request)")
-        self.assertIn("run: node scripts/push.mjs --test --ledger-url", test_wf)
+        self.assertIn('run: node scripts/push.mjs --test --series-env MESSAGES --interval-s "$INTERVAL" --ledger-url', test_wf)
+        self.assertIn("MESSAGES: ${{ inputs.messages }}", test_wf)        # optional custom series, as environment only
         self.assertRegex(test_wf, r"(?m)^permissions: \{\}$")
         self.assertIn("persist-credentials: false", test_wf)
         self.assertNotIn("refresh.py", test_wf)

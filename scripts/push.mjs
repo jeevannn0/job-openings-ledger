@@ -118,9 +118,35 @@ export function verifyVapid(authorization, publicPoint) {
 const TEST_TITLE = "Notifications are on";
 const TEST_BODY = "This is the test message. New openings will arrive here after each refresh.";
 
+const TITLE_MAX = 60, BODY_MAX = 240;      // the alert payload's own limits (refresh.py ALERT_TITLE_MAX / ALERT_BODY_MAX)
+
+/** A custom test message: [title, body] or {title, body}, with the alert's length and character rules. */
+export function customMessage(value, index) {
+  const pair = Array.isArray(value) ? value : value && typeof value === "object" ? [value.title, value.body] : null;
+  if (!pair || pair.length !== 2 || pair.some((s) => typeof s !== "string")) throw new Error(`message #${index + 1}: [title, body]`);
+  const [title, body] = pair.map((s) => s.trim());
+  if (!title || title.length > TITLE_MAX || body.length > BODY_MAX) throw new Error(`message #${index + 1}: length`);
+  if (/[\x00-\x1f\x7f<>&]/.test(title + body)) throw new Error(`message #${index + 1}: characters`);
+  return { title, body };
+}
+
+/** A series of custom test messages from a JSON list; an empty value means the single default test message. */
+export function parseSeries(text) {
+  if (!text || !text.trim()) return [{ title: TEST_TITLE, body: TEST_BODY }];
+  let list;
+  try {
+    list = JSON.parse(text);
+  } catch {
+    throw new Error("messages: not JSON");
+  }
+  if (!Array.isArray(list) || !list.length || list.length > 10) throw new Error("messages: a list of 1 to 10 [title, body] pairs");
+  return list.map(customMessage);
+}
+
 /** The declarative push message for one alert payload, or null when there is nothing to tell. */
-export function notificationFor(alert, ledgerUrl, test = false) {
+export function notificationFor(alert, ledgerUrl, test = false, custom = null) {
   const base = { lang: "en", dir: "ltr", silent: false, tag: NOTIFICATION_TAG, navigate: ledgerUrl };
+  if (custom) return { web_push: 8030, notification: { title: custom.title, body: custom.body, ...base, tag: custom.tag || NOTIFICATION_TAG } };
   if (test) return { web_push: 8030, notification: { title: TEST_TITLE, body: TEST_BODY, ...base } };
   if (!alert || typeof alert !== "object") throw new Error("alert: not an object");
   const n = alert.new_count;
@@ -217,7 +243,7 @@ export async function deliver(subscription, message, authorization, fetchImpl = 
 // ---------------------------------------------------------------------- CLI
 
 function parseArgs(argv) {
-  const out = { test: false, alertEnv: "", alertFile: "", ledgerUrl: "", dryRun: false };
+  const out = { test: false, alertEnv: "", alertFile: "", ledgerUrl: "", dryRun: false, seriesEnv: "", intervalS: 5 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--test") out.test = true;
@@ -225,15 +251,20 @@ function parseArgs(argv) {
     else if (a === "--alert-env") out.alertEnv = argv[++i] || "";
     else if (a === "--alert-file") out.alertFile = argv[++i] || "";
     else if (a === "--ledger-url") out.ledgerUrl = argv[++i] || "";
+    else if (a === "--series-env") out.seriesEnv = argv[++i] || "";
+    else if (a === "--interval-s") out.intervalS = Number(argv[++i]);
     else throw new Error(`unknown argument ${a}`);
   }
   if (!/^https:\/\/[a-z0-9-]+\.github\.io\/[A-Za-z0-9._-]+\/$/.test(out.ledgerUrl)) throw new Error("--ledger-url must be the site's GitHub Pages URL");
   if (!out.test && !out.alertEnv && !out.alertFile) throw new Error("need --test, --alert-env NAME or --alert-file PATH");
+  if (out.seriesEnv && !out.test) throw new Error("--series-env is for --test runs");
+  if (!Number.isInteger(out.intervalS) || out.intervalS < 1 || out.intervalS > 60) throw new Error("--interval-s must be 1 to 60");
   return out;
 }
 
 export async function main(argv, env = process.env, log = console.log, fetchImpl = fetch,
-                           configPath = join(dirname(fileURLToPath(import.meta.url)), "..", "config", "public_sources.json")) {
+                           configPath = join(dirname(fileURLToPath(import.meta.url)), "..", "config", "public_sources.json"),
+                           sleepImpl = sleep) {
   const args = parseArgs(argv);
   let alert = null;
   if (!args.test) {
@@ -241,8 +272,12 @@ export async function main(argv, env = process.env, log = console.log, fetchImpl
     if (!text) throw new Error("alert payload is empty");
     alert = JSON.parse(text);
   }
-  const message = notificationFor(alert, args.ledgerUrl, args.test);
-  if (!message) {
+  // A test run may carry a series of custom messages (each with its own tag, so they stack on the phone).
+  const series = args.test ? parseSeries(args.seriesEnv ? env[args.seriesEnv] : "") : [];
+  const messages = args.test
+    ? series.map((m, i) => notificationFor(null, args.ledgerUrl, true, series.length > 1 ? { ...m, tag: `${NOTIFICATION_TAG}-${i + 1}` } : m))
+    : [notificationFor(alert, args.ledgerUrl)];
+  if (!messages[0]) {
     log("push: no new openings in this refresh; nothing to send");
     return 0;
   }
@@ -256,20 +291,26 @@ export async function main(argv, env = process.env, log = console.log, fetchImpl
     log("push: no device is registered; nothing to send");
     return 0;
   }
-  log(`push: ${args.test ? "test message" : `"${message.notification.title}"`} to ${subscriptions.length} device${subscriptions.length === 1 ? "" : "s"}`);
+  const what = args.test ? (messages.length === 1 ? "test message" : `${messages.length} test messages, ${args.intervalS} s apart`) : `"${messages[0].notification.title}"`;
+  log(`push: ${what} to ${subscriptions.length} device${subscriptions.length === 1 ? "" : "s"}`);
   if (args.dryRun) {
     log("push: dry run; nothing sent");
     return 0;
   }
   let failures = 0;
   const expired = [];
-  for (const [i, sub] of subscriptions.entries()) {
-    const authorization = vapidAuthorization(sub.endpoint, args.ledgerUrl, privateScalar, publicPoint);
-    const result = await deliver(sub, message, authorization, fetchImpl);
-    const detail = result.detail ? ` ${result.detail}` : "";
-    log(`push: #${i + 1} (${sub.host}): ${result.outcome} (HTTP ${result.status})${detail}`);
-    if (result.outcome === "expired") expired.push(sub.endpoint);
-    else if (result.outcome !== "sent") failures++;
+  for (const [m, message] of messages.entries()) {
+    if (m > 0) await sleepImpl(args.intervalS * 1000);
+    const step = messages.length > 1 ? `message ${m + 1} ` : "";
+    for (const [i, sub] of subscriptions.entries()) {
+      if (expired.includes(sub.endpoint)) continue;
+      const authorization = vapidAuthorization(sub.endpoint, args.ledgerUrl, privateScalar, publicPoint);
+      const result = await deliver(sub, message, authorization, fetchImpl);
+      const detail = result.detail ? ` ${result.detail}` : "";
+      log(`push: ${step}#${i + 1} (${sub.host}): ${result.outcome} (HTTP ${result.status})${detail}`);
+      if (result.outcome === "expired") expired.push(sub.endpoint);
+      else if (result.outcome !== "sent") failures++;
+    }
   }
   if (expired.length) {
     const removed = await pruneRegistered(storeUrl, env.PUSH_STORE_KEY, expired, fetchImpl);
