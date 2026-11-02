@@ -5084,7 +5084,7 @@ class SourceHealthTests(unittest.TestCase):
                         # The posting date the portal shows (first-seen date for sources without one, row 11 = 1) sits
                         # beside the relative age in the meta line: "Oct 31 · 1 day ago", or "Nov 2 · seen today".
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
-                        '<span><span class="vh">${sb?"First seen":"Posted"} </span>${esc(d)}</span><span>${ago}</span>'):
+                        '<span><span class="vh">${sb?"First seen":"Posted"} </span>${esc(d)}</span><span class="ag">${ago}</span>'):
             self.assertIn(snippet, script, snippet)
         # The button keeps its own box inside the overflow-hidden meta line (so focusing it cannot scroll the line)
         # and widens its hit area with a pseudo-element.
@@ -5130,6 +5130,9 @@ class SourceHealthTests(unittest.TestCase):
             self.assertIn(snippet, script, snippet)
         self.assertIn(".tgl{display:flex;gap:6px}.tgl>.tgl{margin-left:6px}", style_of(doc))
         self.assertIn(".nw{font-weight:700;color:hsl(var(--signal))}", style_of(doc))
+        # The relative age is the freshness cue, so it takes the line's emphasis (600, steel) and the posting date
+        # beside it stays muted; the two no longer read as one token.
+        self.assertIn(".ag{font-weight:600;color:hsl(var(--steel))}", style_of(doc))
         self.assertIn('<option value="0">Today</option>', doc)
         self.assertNotIn("r[5]===0", script)
         # Row 10 of the job data is days since first seen, and the stats "New today" counts the published rows
