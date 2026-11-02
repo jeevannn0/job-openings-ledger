@@ -916,10 +916,13 @@ def checked_html(state: State) -> str:
 # scheduler runs cron slots hours late at busy times and sometimes drops them outright (two of the four
 # six-hourly slots on 1 Nov 2026 never ran). A run that finds nothing new is cheap and says "no change".
 FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # two schedule slots plus slack: one dropped slot never goes stale
-# Minute 30 UTC is on the hour in IST (UTC+5:30), and off the top-of-the-hour rush GitHub's scheduler warns about.
-SCHEDULE_CRON = "30 */3 * * *"          # UTC; must match .github/workflows/refresh.yml
+# The workflow fires hourly at minute 30 UTC: on the hour in IST (UTC+5:30), and off the top-of-the-hour rush
+# GitHub's scheduler warns about. The refresh itself runs at the three-hourly slots below; the hours between
+# are catch-up slots that refresh only while the latest slot's check is still unpublished (slot_due), because
+# the scheduler fires slots late at busy times and sometimes not at all (the 06:00 IST slot on 2 Nov 2026).
+SCHEDULE_CRON = "30 * * * *"            # UTC; must match .github/workflows/refresh.yml
 SCHEDULE_UTC_MINUTE = 30
-SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 IST
+SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # refresh slots: 00:00, 03:00, 06:00, ... 21:00 IST
 HEALTH_STATES = ("live", "degraded", "stale", "failed", "unknown")     # display order
 HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least to most severe
 HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",
@@ -958,7 +961,7 @@ HEALTH_MEANINGS = {
     "failed": "No successful refresh yet.",
     "unknown": "No automated check yet (snapshot or static source).",
 }
-LATE_TEXT = " · update not yet published"      # next slot + grace has passed with no newer page
+LATE_TEXT = " · update not yet published, retried hourly"   # next slot + grace passed with no newer page
 STALE_PREFIX = "stale since "                  # company label once cached data passes the threshold
 _DATETIME_ATTR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30")
 
@@ -1057,6 +1060,35 @@ def next_scheduled(reference: dt.datetime) -> dt.datetime:
             if slot > u:
                 return slot.astimezone(IST)
     raise AssertionError("unreachable: a slot exists within one day")
+
+
+def latest_slot(now: dt.datetime) -> dt.datetime:
+    """The most recent refresh slot at or before now, in IST."""
+    u = now.astimezone(dt.timezone.utc)
+    for offset in (0, -1):
+        day = u.date() + dt.timedelta(days=offset)
+        for hour in reversed(SCHEDULE_UTC_HOURS):
+            slot = dt.datetime.combine(day, dt.time(hour, SCHEDULE_UTC_MINUTE), dt.timezone.utc)
+            if slot <= u:
+                return slot.astimezone(IST)
+    raise AssertionError("unreachable: a slot exists within one day")
+
+
+def slot_due(state: State, now: dt.datetime) -> tuple[bool, str]:
+    """Whether a scheduled run should refresh now: yes while the latest slot has no published check.
+
+    The cron fires hourly, so a slot the scheduler delayed or dropped is served by the next hour that
+    fires; once a check at or after the slot is committed, the hours before the next slot do nothing.
+    The reason names times only."""
+    slot = latest_slot(now)
+    ref = iso_time(state.checked_at)
+    when = f"slot {slot:%d %b %H:%M} IST"
+    if ref is None:
+        return True, f"{when}: no check published yet"
+    last = f"last published check {ref.astimezone(IST):%d %b %H:%M} IST"
+    if ref < slot:
+        return True, f"{when}: {last} is older"
+    return False, f"{when}: already published ({last})"
 
 
 def age_text(age: dt.timedelta) -> str:
@@ -3607,6 +3639,24 @@ def cmd_refresh(args, root: str) -> int:
     return 0
 
 
+def cmd_due(args, root: str) -> int:
+    """Gate for the workflow: scheduled runs refresh only while the latest slot is unpublished; manual runs always."""
+    _config, state, _template = load_all(root)
+    if args.event == "workflow_dispatch":
+        due, why = True, "manual run"
+    else:
+        due, why = slot_due(state, _now(args.now))
+    if args.github_output:
+        with open(args.github_output, "a", encoding="utf-8") as fh:
+            fh.write(f"due={'true' if due else 'false'}\n")
+    report = f"{'Refreshing' if due else 'Nothing to do'}: {why}.\n"
+    if args.summary:
+        with open(args.summary, "a", encoding="utf-8") as fh:
+            fh.write(report)
+    print("due: " + report.rstrip())
+    return 0
+
+
 def cmd_render(args, root: str) -> int:
     config, state, template = load_all(root)
     write_atomic(os.path.join(root, args.out) if not os.path.isabs(args.out) else args.out,
@@ -3698,6 +3748,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--github-output", help="append changed=/as_of= lines to this file")
     p.add_argument("--summary", help="append a Markdown summary to this file")
     p.add_argument("--outcome", help="write this run's public outcome (for the alert command) to this file")
+    p = sub.add_parser("due", help="workflow gate: should this scheduled run refresh? (manual runs always do)")
+    p.add_argument("--event", required=True, choices=("schedule", "workflow_dispatch"), help="GITHUB_EVENT_NAME")
+    p.add_argument("--now", help="override the current time (ISO 8601)")
+    p.add_argument("--github-output", help="append a due=true|false line to this file")
+    p.add_argument("--summary", help="append a one-line Markdown summary to this file")
     p = sub.add_parser("render", help="render state into an HTML file")
     p.add_argument("--out", default=INDEX_PATH)
     p = sub.add_parser("alert", help="build the phone alert payload from a refresh outcome")
@@ -3714,7 +3769,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--as-of", required=True)
     args = ap.parse_args(argv)
     handlers = {"refresh": cmd_refresh, "render": cmd_render, "alert": cmd_alert, "alert-verify": cmd_alert_verify,
-                "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed}
+                "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed, "due": cmd_due}
     try:
         return handlers[args.cmd](args, args.root)
     except (OSError, ValueError) as exc:

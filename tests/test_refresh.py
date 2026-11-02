@@ -1467,7 +1467,7 @@ class WorkflowTests(unittest.TestCase):
         return m.group(1)
 
     def test_triggers(self):
-        self.assertRegex(self.text, r'(?m)^  schedule:\n(?:    #[^\n]*\n)*    - cron: "30 \*/3 \* \* \*"')
+        self.assertRegex(self.text, r'(?m)^  schedule:\n(?:    #[^\n]*\n)*    - cron: "30 \* \* \* \*"')
         self.assertEqual(R.REFRESH_CADENCE, dt.timedelta(hours=6))   # removal-hold confirmation spacing
         self.assertRegex(self.text, r"(?m)^  workflow_dispatch:\s*$")
         self.assertRegex(self.text, r"(?m)^  push:\s*$")                     # publish-only path, see below
@@ -1475,9 +1475,12 @@ class WorkflowTests(unittest.TestCase):
 
     def test_push_takes_the_publish_only_path(self):
         """A code push re-renders and deploys the committed state; it never contacts a source."""
-        refresh, publish = self.block("refresh"), self.block("publish")
+        gate, refresh, publish = self.block("gate"), self.block("refresh"), self.block("publish")
         self.assertIn("if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && "
-                      "github.ref_name == github.event.repository.default_branch)", refresh)
+                      "github.ref_name == github.event.repository.default_branch)", gate)
+        # The gate decides for scheduled runs (see test_hourly_gate); the refresh runs only on its say-so.
+        self.assertIn("needs: gate\n    if: needs.gate.result == 'success' && needs.gate.outputs.due == 'true'\n", refresh)
+        self.assertNotIn("github.event_name", refresh)
         self.assertIn("if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch "
                       "&& github.actor != 'github-actions[bot]'", publish)
         self.assertNotIn("refresh.py refresh", publish)
@@ -1503,25 +1506,29 @@ class WorkflowTests(unittest.TestCase):
 
     def test_least_privilege(self):
         self.assertRegex(self.text, r"(?m)^permissions: \{\}$")
-        refresh, publish, deploy = self.block("refresh"), self.block("publish"), self.block("deploy")
+        gate, refresh, publish, deploy = (self.block("gate"), self.block("refresh"), self.block("publish"),
+                                          self.block("deploy"))
+        self.assertRegex(gate, r"permissions:\n      contents: read\n    outputs:\n      due: ")
         self.assertRegex(refresh, r"permissions:\n      contents: write[^\n]*\n    steps:")
         self.assertRegex(publish, r"permissions:\n      contents: read\n    steps:")
         self.assertRegex(deploy, r"permissions:\n      pages: write\n      id-token: write\n    environment:")
-        self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 3)
-        self.assertIn("persist-credentials: false", refresh)
-        self.assertIn("persist-credentials: false", publish)
+        self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 4)
+        for job in (gate, refresh, publish):
+            self.assertIn("persist-credentials: false", job)
+        self.assertNotIn("secrets.", gate)
 
     def test_concurrency_timeouts_runner(self):
         self.assertRegex(self.text, r"(?m)^concurrency:\n  group: job-ledger-refresh\n  cancel-in-progress: false$")
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(timeouts, [40, 10, 10])          # refresh (thirteen sources), publish, deploy
-        self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 3)
+        self.assertEqual(timeouts, [5, 40, 10, 10])       # gate, refresh (thirteen sources), publish, deploy
+        self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 4)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
         uses = re.findall(r"uses: (\S+)", self.text)
         self.assertEqual(sorted(uses), sorted([
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",            # refresh + publish
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",            # gate + refresh + publish
             "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d",
@@ -1536,9 +1543,20 @@ class WorkflowTests(unittest.TestCase):
             "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346": "v5.0.1",
         })
 
+    def test_hourly_gate(self):
+        """Every hour is a chance to serve the latest three-hourly slot; the gate says whether it is still open."""
+        gate = self.block("gate")
+        self.assertIn('run: python3 scripts/refresh.py due --event "$EVENT" --github-output "$GITHUB_OUTPUT" '
+                      '--summary "$GITHUB_STEP_SUMMARY"', gate)
+        self.assertIn("EVENT: ${{ github.event_name }}", gate)
+        self.assertLess(gate.index("persist-credentials: false"), gate.index("refresh.py due"))
+        for line in gate.splitlines():
+            if "${{" in line:
+                self.assertRegex(line, r"^\s+(if:|due:|[A-Z_]+: \$\{\{)", line)
+        self.assertLess(self.text.index("\n  gate:\n"), self.text.index("\n  refresh:\n"))
+
     def test_step_order_and_safe_push(self):
         refresh = self.block("refresh")
-        self.assertIn("if: github.event_name == 'schedule' ||", refresh)
         self.assertIn('echo "::add-mask::${auth}"', refresh)
         order = ["unittest discover", "refresh.py check", "refresh.py refresh", "refresh.py scan",
                  "render --out dist/index.html",
@@ -3287,7 +3305,7 @@ class AdapterIsolationTests(unittest.TestCase):
 
     def test_configured_budgets_fit_the_run_budget_and_workflow_timeout(self):
         config, _e, state, _t = env()
-        timeout = int(re.search(r"timeout-minutes: (\d+)", R.read_text(
+        timeout = int(re.search(r"(?ms)^  refresh:\n.*?timeout-minutes: (\d+)", R.read_text(
             os.path.join(ROOT, ".github", "workflows", "refresh.yml"))).group(1))
         self.assertLessEqual(R.RUN_BUDGET_S, (timeout - 4) * 60)
         live = [c for c in config.companies if config.sources[c]["mode"] != "static"]
@@ -3459,9 +3477,10 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(R.age_text(dt.timedelta(days=3, hours=1)), "3d ago")
 
     def test_schedule_slots_and_date_boundaries(self):
-        self.assertEqual(R.SCHEDULE_CRON, "30 */3 * * *")
+        self.assertEqual(R.SCHEDULE_CRON, "30 * * * *")             # hourly; the gate picks the slots below
         workflow = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
         self.assertIn(f'cron: "{R.SCHEDULE_CRON}"', workflow)
+        self.assertEqual(workflow.count("cron:"), 1)
         self.assertEqual(R.SCHEDULE_UTC_HOURS, tuple(range(0, 24, 3)))
         # Twice the cadence the freshness window needs, so one dropped slot never shows STALE.
         self.assertGreaterEqual(R.FRESHNESS_THRESHOLD, 2 * dt.timedelta(hours=3) + dt.timedelta(minutes=30))
@@ -3486,6 +3505,69 @@ class SourceHealthTests(unittest.TestCase):
                 self.assertEqual(got.utcoffset(), dt.timedelta(hours=5, minutes=30))
         self.assertEqual({f"{R.next_scheduled(ist(2026, 10, 31, h, 30)):%H:%M}" for h in (0, 3, 6, 9, 12, 15, 18, 21)},
                          {"03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00", "00:00"})
+
+    def test_latest_slot_and_due_gate(self):
+        ist = lambda *a: dt.datetime(*a, tzinfo=R.IST)   # noqa: E731
+        for now, expected in [(ist(2026, 11, 2, 6, 0), ist(2026, 11, 2, 6, 0)),        # at the slot
+                              (ist(2026, 11, 2, 7, 29), ist(2026, 11, 2, 6, 0)),
+                              (ist(2026, 11, 2, 8, 59, 59), ist(2026, 11, 2, 6, 0)),
+                              (ist(2026, 11, 2, 2, 15), ist(2026, 11, 2, 0, 0)),
+                              (ist(2026, 11, 2, 0, 0), ist(2026, 11, 2, 0, 0)),
+                              (ist(2026, 11, 1, 23, 59), ist(2026, 11, 1, 21, 0)),     # IST date boundary
+                              (ist(2027, 1, 1, 1, 0), ist(2027, 1, 1, 0, 0)),
+                              (dt.datetime(2026, 11, 2, 0, 30, tzinfo=dt.timezone.utc), ist(2026, 11, 2, 6, 0))]:
+            with self.subTest(now):
+                got = R.latest_slot(now)
+                self.assertEqual(got, expected)
+                self.assertEqual(got.utcoffset(), dt.timedelta(hours=5, minutes=30))
+                self.assertEqual(R.next_scheduled(got), R.next_scheduled(now))         # same window
+        # The 2 Nov 2026 case: the 03:00 slot fired at 03:45; the 06:00 slot never fired.
+        self.state.checked_at = "2026-11-02T03:45+05:30"
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 4, 0)),
+                         (False, "slot 02 Nov 03:00 IST: already published (last published check 02 Nov 03:45 IST)"))
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 0))[0], False)
+        for hour in (6, 7, 8):                                   # the slot itself, then each hourly retry
+            self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, hour, 0, 40)),
+                             (True, "slot 02 Nov 06:00 IST: last published check 02 Nov 03:45 IST is older"), hour)
+        self.state.checked_at = "2026-11-02T07:31+05:30"          # a catch-up (or manual) run served it ...
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 8, 0))[0], False)
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 9, 0))[0], True)      # ... the next slot is new work
+        self.state.checked_at = "2026-11-02T06:00+05:30"          # a check exactly at the slot counts
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 7, 0))[0], False)
+        self.state.checked_at = None
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 7, 0)),
+                         (True, "slot 02 Nov 06:00 IST: no check published yet"))
+        self.assertEqual(R.LATE_TEXT, " · update not yet published, retried hourly")
+
+    def test_due_command(self):
+        self.state.checked_at = "2026-11-02T03:45+05:30"
+        root = temp_repo(self, self.state, self.template, self.config)
+        out, summary = os.path.join(root, "gh_output"), os.path.join(root, "summary.md")
+
+        def due(event, now):
+            for path in (out, summary):
+                if os.path.exists(path):
+                    os.remove(path)
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                code = R.main(["--root", root, "due", "--event", event, "--now", now,
+                               "--github-output", out, "--summary", summary])
+            self.assertEqual(code, 0)
+            with open(out, encoding="utf-8") as fo, open(summary, encoding="utf-8") as fs:
+                return fo.read(), fs.read(), buf.getvalue()
+
+        self.assertEqual(due("schedule", "2026-11-02T04:00+05:30"),
+                         ("due=false\n", "Nothing to do: slot 02 Nov 03:00 IST: already published "
+                          "(last published check 02 Nov 03:45 IST).\n",
+                          "due: Nothing to do: slot 02 Nov 03:00 IST: already published "
+                          "(last published check 02 Nov 03:45 IST).\n"))
+        self.assertEqual(due("schedule", "2026-11-02T07:00+05:30")[:2],
+                         ("due=true\n", "Refreshing: slot 02 Nov 06:00 IST: last published check 02 Nov 03:45 IST is older.\n"))
+        self.assertEqual(due("workflow_dispatch", "2026-11-02T04:00+05:30")[:2],
+                         ("due=true\n", "Refreshing: manual run.\n"))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):   # unknown events are refused
+            R.main(["--root", root, "due", "--event", "push", "--now", "2026-11-02T07:00+05:30"])
+        for text in due("schedule", "2026-11-02T07:00+05:30"):   # times only, never a job or a private detail
+            self.assertNotRegex(text, r"[A-Z]{2,}-?\d{4,}|https?:")
 
     def test_next_scheduled_uses_cron_not_last_attempt(self):
         self.set_company("Siemens", status="ok", last_success=iso(REF), last_attempt=iso(REF))
@@ -3804,7 +3886,8 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="h-scope">', '<div class="ch-head"',
                  '<ol class="ch-list"', prompt + "signal sources --help</p>", '<dl class="h-key">',
                  '<p class="h-note">', prompt + "signal schedule</p>",
-                 '<p class="kv">every 3 h on the hour IST · cron 30 */3 * * * UTC · last 6 pulls kept per source</p>',
+                 '<p class="kv">every 3 h on the hour IST · hourly cron 30 * * * * UTC retries a missed slot · '
+                 'last 6 pulls kept per source</p>',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb" style="--d:(\d)">', dialog), list("01234"))
@@ -4057,7 +4140,7 @@ class SourceHealthTests(unittest.TestCase):
                 R.render(self.state, self.template.replace("</footer>", "{{" + name + "}}</footer>"), self.config)
         doc = R.render(self.state, self.template, self.config)
         self.assertIn("{{CRON}}", self.template)
-        self.assertIn("· cron 30 */3 * * * UTC ·", api_dialog(doc))
+        self.assertIn("· hourly cron 30 * * * * UTC retries a missed slot ·", api_dialog(doc))
         self.assertEqual(doc.count(f"cron {R.SCHEDULE_CRON} UTC"), 1)
         self.assertIsNone(R.PLACEHOLDER.search(doc))
         for name in sorted(names):
@@ -4109,7 +4192,7 @@ class SourceHealthTests(unittest.TestCase):
         # Re-aging runs before the search-panel LED and the cards read HS/STALE.
         self.assertLess(script.index("H.grace_ms"), script.index("const HS={}"))
         self.assertNotIn(".tile", doc)
-        self.assertEqual(h["late"], " · update not yet published")
+        self.assertEqual(h["late"], " · update not yet published, retried hourly")
         self.assertEqual(h["stale"], "stale since ")
         self.assertNotIn("overdue", doc)
         self.assertEqual(R.stale_labels(self.state, self.config),
