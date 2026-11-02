@@ -1728,6 +1728,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(deploy, r"permissions:\n      pages: write\n      id-token: write\n    environment:")
         notify = self.block("notify")
         self.assertRegex(notify, r"permissions:\n      contents: read\n    steps:")
+        # The publish job is skipped on every scheduled run; without !cancelled() GitHub skipped notify too
+        # (2 Nov 2026 15:00 IST: six new openings, no notification).
+        self.assertIn("if: ${{ !cancelled() && needs.refresh.result == 'success' && needs.deploy.result == 'success' }}",
+                      notify)
         self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 5)
         for job in (gate, refresh, publish, notify):
             self.assertIn("persist-credentials: false", job)

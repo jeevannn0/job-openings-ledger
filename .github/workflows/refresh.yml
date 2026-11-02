@@ -237,7 +237,9 @@ jobs:
     # device names, and drops devices the service reports gone (they register again when the ledger is next opened
     # on them). Separate from deploy so the Pages deployment keeps its own permissions.
     needs: [refresh, deploy]
-    if: needs.refresh.result == 'success' && needs.deploy.result == 'success'
+    # !cancelled(): on scheduled runs the publish job is skipped, and GitHub skips every job downstream of a
+    # skipped job unless its condition says otherwise (the deploy job carries the same clause).
+    if: ${{ !cancelled() && needs.refresh.result == 'success' && needs.deploy.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
