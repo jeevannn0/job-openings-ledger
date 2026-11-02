@@ -1540,7 +1540,7 @@ class WorkflowTests(unittest.TestCase):
         return m.group(1)
 
     def test_triggers(self):
-        self.assertRegex(self.text, r'(?m)^  schedule:\n(?:    #[^\n]*\n)*    - cron: "35 \* \* \* \*"')
+        self.assertRegex(self.text, r'(?m)^  schedule:\n(?:    #[^\n]*\n)*    - cron: "20,35 0,3,6,9,12,15,18,21 \* \* \*"')
         self.assertEqual(R.REFRESH_CADENCE, dt.timedelta(hours=6))   # removal-hold confirmation spacing
         # Manual runs refresh at once by default; "slot" is what an external clock would send to arm a slot.
         self.assertRegex(self.text, r"(?m)^  workflow_dispatch:\n    inputs:\n      mode:\n(?:        [^\n]*\n)*"
@@ -1583,7 +1583,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(self.text, r"(?m)^permissions: \{\}$")
         gate, refresh, publish, deploy = (self.block("gate"), self.block("refresh"), self.block("publish"),
                                           self.block("deploy"))
-        self.assertRegex(gate, r"permissions:\n      contents: read\n    outputs:\n      due: ")
+        self.assertRegex(gate, r"permissions:\n      actions: read\n      contents: read\n    outputs:\n      due: ")
         self.assertRegex(refresh, r"permissions:\n      contents: write[^\n]*\n    steps:")
         self.assertRegex(publish, r"permissions:\n      contents: read\n    steps:")
         self.assertRegex(deploy, r"permissions:\n      pages: write\n      id-token: write\n    environment:")
@@ -1593,9 +1593,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("secrets.", gate)
 
     def test_concurrency_timeouts_runner(self):
-        self.assertRegex(self.text, r"(?m)^concurrency:\n  group: job-ledger-refresh\n  cancel-in-progress: false$")
+        # The producers and the deploy share one group; the gate stays outside it so a tick that arrives while a
+        # run is armed decides at once (and defers to it) instead of queueing behind it.
+        self.assertNotRegex(self.text, r"(?m)^concurrency:")
+        self.assertEqual(len(re.findall(r"(?m)^    concurrency:\n      group: job-ledger-refresh\n"
+                                        r"      cancel-in-progress: false$", self.text)), 3)
+        self.assertNotIn("concurrency", self.block("gate"))
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(timeouts, [5, 100, 10, 10])      # gate, refresh (lead wait + thirteen sources), publish, deploy
+        self.assertEqual(timeouts, [5, 60, 10, 10])       # gate, refresh (lead wait + thirteen sources), publish, deploy
         self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 4)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
@@ -1621,12 +1626,20 @@ class WorkflowTests(unittest.TestCase):
     def test_hourly_gate(self):
         """Every hour is a chance to serve the latest three-hourly slot; the gate says whether it is still open."""
         gate = self.block("gate")
-        self.assertIn('run: python3 scripts/refresh.py due --event "$EVENT" --mode "$MODE" --github-output '
-                      '"$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"', gate)
+        self.assertIn('run: python3 scripts/refresh.py due --event "$EVENT" --mode "$MODE" --active-runs "$ACTIVE" '
+                      '--github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"', gate)
         self.assertIn("EVENT: ${{ github.event_name }}", gate)
         self.assertIn("MODE: ${{ inputs.mode || 'now' }}", gate)
+        self.assertIn("ACTIVE: ${{ steps.active.outputs.count }}", gate)
         self.assertIn("until: ${{ steps.due.outputs.until }}", gate)
-        self.assertLess(gate.index("persist-credentials: false"), gate.index("refresh.py due"))
+        # Older active scheduled/manual runs are counted with the read-only token; newer ones are ignored.
+        self.assertIn("GH_TOKEN: ${{ github.token }}\n          RUN_ID: ${{ github.run_id }}", gate)
+        self.assertIn('gh run list --workflow refresh.yml --limit 20 --json databaseId,status,event', gate)
+        self.assertIn('select(.databaseId < $RUN_ID and .status != \\"completed\\"', gate)
+        self.assertIn('(.event == \\"schedule\\" or .event == \\"workflow_dispatch\\")', gate)
+        self.assertIn('echo "count=$n" >> "$GITHUB_OUTPUT"', gate)
+        self.assertLess(gate.index("persist-credentials: false"), gate.index("gh run list"))
+        self.assertLess(gate.index("gh run list"), gate.index("refresh.py due"))
         for line in gate.splitlines():
             if "${{" in line:
                 self.assertRegex(line, r"^\s+(if:|due:|until:|[A-Z_]+: \$\{\{)", line)
@@ -3390,6 +3403,7 @@ class AdapterIsolationTests(unittest.TestCase):
             os.path.join(ROOT, ".github", "workflows", "refresh.yml"))).group(1))
         # The refresh job may first wait up to the schedule lead for the slot, then needs the run budget plus slack.
         self.assertLessEqual(R.RUN_BUDGET_S, (timeout - 4) * 60 - R.SCHEDULE_LEAD.total_seconds())
+        self.assertEqual(timeout, 60)
         live = [c for c in config.companies if config.sources[c]["mode"] != "static"]
         self.assertLessEqual(sum(config.sources[c]["budget_s"] for c in live), R.RUN_BUDGET_S)
         for c in live:
@@ -3559,8 +3573,8 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(R.age_text(dt.timedelta(days=3, hours=1)), "3d ago")
 
     def test_schedule_slots_and_date_boundaries(self):
-        self.assertEqual(R.SCHEDULE_CRON, "35 * * * *")             # hourly ticks; the gate picks the slots below
-        self.assertEqual(R.SCHEDULE_LEAD, dt.timedelta(minutes=58))  # covers the tick 55 min before a slot, not 1 h 55
+        self.assertEqual(R.SCHEDULE_CRON, "20,35 0,3,6,9,12,15,18,21 * * *")   # fallback ticks: slot-10 and slot+5
+        self.assertEqual(R.SCHEDULE_LEAD, dt.timedelta(minutes=20))  # the clock arms at slot-15, the fallback at slot-10
         workflow = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
         self.assertIn(f'cron: "{R.SCHEDULE_CRON}"', workflow)
         self.assertEqual(workflow.count("cron:"), 1)
@@ -3606,34 +3620,40 @@ class SourceHealthTests(unittest.TestCase):
                 self.assertEqual(R.next_scheduled(got), R.next_scheduled(now))         # same window
         # 2 Nov 2026: the 03:00 slot's check was published at 03:45, the 06:00 tick never fired.
         self.state.checked_at = "2026-11-02T03:45+05:30"
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 4, 5)),                # tick an hour after: nothing
-                         (False, None, "slot 02 Nov 03:00 IST already published (02 Nov 03:45 IST); "
-                                       "next slot 02 Nov 06:00 IST"))
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 5)),                # the tick before: wait for it
-                         (True, ist(2026, 11, 2, 6, 0), "slot 02 Nov 06:00 IST in 55 min: waiting for it"))
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 50, 30)),           # same tick, fired 45 min late
+        far = (False, None, "slot 02 Nov 03:00 IST already published (02 Nov 03:45 IST); next slot 02 Nov 06:00 IST")
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 4, 5)), far)         # tick an hour after: nothing
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 5)), far)         # 55 min early: nothing
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 39, 59)), far)    # just outside the lead
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 40)),             # 20 min: in, wait for it
+                         (True, ist(2026, 11, 2, 6, 0), "slot 02 Nov 06:00 IST in 20 min: waiting for it"))
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 45)),             # the clock's dispatch
+                         (True, ist(2026, 11, 2, 6, 0), "slot 02 Nov 06:00 IST in 15 min: waiting for it"))
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 50, 30)),         # the fallback tick
                          (True, ist(2026, 11, 2, 6, 0), "slot 02 Nov 06:00 IST in 9 min: waiting for it"))
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 2))[:2], (True, ist(2026, 11, 2, 6, 0)))   # 58 min: in
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 5, 1, 59)), (False, None,  # just outside the lead
-                         "slot 02 Nov 03:00 IST already published (02 Nov 03:45 IST); next slot 02 Nov 06:00 IST"))
         for when in (ist(2026, 11, 2, 6, 0, 40), ist(2026, 11, 2, 6, 5), ist(2026, 11, 2, 7, 5)):   # fired late/dropped
             self.assertEqual(R.slot_due(self.state, when),
                              (True, None, "slot 02 Nov 06:00 IST unpublished (last published check 02 Nov 03:45 IST): "
                                           "refreshing now"), when)
+        # An older run that is still active already serves the slot, whatever the time says.
+        for when, nxt in ((ist(2026, 11, 2, 5, 45), "06:00"), (ist(2026, 11, 2, 6, 5), "09:00")):
+            self.assertEqual(R.slot_due(self.state, when, 1),
+                             (False, None, f"1 older run still active; next slot 02 Nov {nxt} IST"), when)
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 6, 5), 2)[2],
+                         "2 older runs still active; next slot 02 Nov 09:00 IST")
         self.state.checked_at = "2026-11-02T06:00+05:30"          # a check exactly at the slot counts
         self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 6, 5))[:2], (False, None))
         self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 7, 5))[:2], (False, None))
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 8, 5)), (True, ist(2026, 11, 2, 9, 0),
-                         "slot 02 Nov 09:00 IST in 55 min: waiting for it"))
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 8, 45)), (True, ist(2026, 11, 2, 9, 0),
+                         "slot 02 Nov 09:00 IST in 15 min: waiting for it"))
         self.state.checked_at = "2026-11-02T07:31+05:30"          # a manual run inside the window changes nothing
-        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 8, 5))[:2], (True, ist(2026, 11, 2, 9, 0)))
+        self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 8, 45))[:2], (True, ist(2026, 11, 2, 9, 0)))
         self.state.checked_at = None
         self.assertEqual(R.slot_due(self.state, ist(2026, 11, 2, 7, 5)),
                          (True, None, "slot 02 Nov 06:00 IST unpublished (no check published yet): refreshing now"))
-        self.assertEqual(R.LATE_TEXT, " · update not yet published, retried hourly")
+        self.assertEqual(R.LATE_TEXT, " · update not yet published, retrying")
 
     def test_wait_until_sleeps_to_the_slot_in_logged_steps(self):
-        clock = [dt.datetime(2026, 11, 2, 8, 6, 12, tzinfo=R.IST)]
+        clock = [dt.datetime(2026, 11, 2, 8, 46, 12, tzinfo=R.IST)]       # the clock's dispatch, 15 min ahead
         slept, logged = [], []
 
         def sleep(seconds):
@@ -3642,30 +3662,31 @@ class SourceHealthTests(unittest.TestCase):
 
         until = dt.datetime(2026, 11, 2, 9, 0, tzinfo=R.IST)
         waited = R.wait_until(until, lambda: clock[0], sleep, logged.append)
-        self.assertEqual(waited, 53 * 60 + 48)
+        self.assertEqual(waited, 13 * 60 + 48)
         self.assertEqual(clock[0], until)                                    # lands on the exact second
-        self.assertEqual(slept[:-1], [300.0] * 10)                           # five-minute steps, then the remainder
-        self.assertEqual(slept[-1], 228.0)
-        self.assertEqual(logged[0], "wait: slot 09:00 IST in 53 min 48 s")
-        self.assertEqual(logged[-1], "wait: slot 09:00 IST in 3 min 48 s")
-        self.assertEqual(len(logged), 11)
-        # Already past: no sleep. Too far ahead (not a slot the gate can have named): refused.
+        self.assertEqual(slept, [300.0, 300.0, 228.0])                       # five-minute steps, then the remainder
+        self.assertEqual(logged, ["wait: slot 09:00 IST in 13 min 48 s", "wait: slot 09:00 IST in 8 min 48 s",
+                                  "wait: slot 09:00 IST in 3 min 48 s"])
+        # Already past: no sleep. Beyond the lead plus slack (not a slot the gate can have named): refused.
         self.assertEqual(R.wait_until(until, lambda: until + dt.timedelta(seconds=1), sleep, logged.append), 0)
+        clock[0] = until - R.SCHEDULE_LEAD - dt.timedelta(minutes=5)
+        self.assertEqual(R.wait_until(until, lambda: clock[0], sleep, logged.append), 25 * 60)
+        clock[0] = until - R.SCHEDULE_LEAD - dt.timedelta(minutes=5, seconds=1)
         with self.assertRaises(ValueError):
-            R.wait_until(until + dt.timedelta(hours=2), lambda: until, sleep, logged.append)
+            R.wait_until(until, lambda: clock[0], sleep, logged.append)
 
     def test_due_and_wait_commands(self):
         self.state.checked_at = "2026-11-02T03:45+05:30"
         root = temp_repo(self, self.state, self.template, self.config)
         out, summary = os.path.join(root, "gh_output"), os.path.join(root, "summary.md")
 
-        def due(event, now, mode=None):
+        def due(event, now, mode=None, active=None):
             for path in (out, summary):
                 if os.path.exists(path):
                     os.remove(path)
             argv = ["--root", root, "due", "--event", event, "--now", now, "--github-output", out, "--summary", summary]
             with contextlib.redirect_stdout(io.StringIO()) as buf:
-                code = R.main(argv + (["--mode", mode] if mode else []))
+                code = R.main(argv + (["--mode", mode] if mode else []) + (["--active-runs", active] if active else []))
             self.assertEqual(code, 0)
             with open(out, encoding="utf-8") as fo, open(summary, encoding="utf-8") as fs:
                 return fo.read(), fs.read(), buf.getvalue()
@@ -3676,21 +3697,29 @@ class SourceHealthTests(unittest.TestCase):
                           "next slot 02 Nov 06:00 IST.\n",
                           "due: Nothing to do: slot 02 Nov 03:00 IST already published (02 Nov 03:45 IST); "
                           "next slot 02 Nov 06:00 IST.\n"))
-        self.assertEqual(due("schedule", "2026-11-02T05:05+05:30")[:2],
+        self.assertEqual(due("schedule", "2026-11-02T05:45+05:30")[:2],
                          ("due=true\nuntil=2026-11-02T06:00:00+05:30\n",
-                          "Refreshing: slot 02 Nov 06:00 IST in 55 min: waiting for it.\n"))
+                          "Refreshing: slot 02 Nov 06:00 IST in 15 min: waiting for it.\n"))
+        self.assertEqual(due("schedule", "2026-11-02T05:45+05:30", active="1")[:2],   # the clock's run is armed
+                         ("due=false\nuntil=\n", "Nothing to do: 1 older run still active; next slot 02 Nov 06:00 IST.\n"))
         self.assertEqual(due("schedule", "2026-11-02T07:05+05:30")[:2],
                          ("due=true\nuntil=\n", "Refreshing: slot 02 Nov 06:00 IST unpublished "
                                                  "(last published check 02 Nov 03:45 IST): refreshing now.\n"))
         self.assertEqual(due("workflow_dispatch", "2026-11-02T05:05+05:30")[:2],
                          ("due=true\nuntil=\n", "Refreshing: manual run: refreshing now.\n"))
-        self.assertEqual(due("workflow_dispatch", "2026-11-02T05:05+05:30", "slot")[0],   # an external clock's tick
+        self.assertEqual(due("workflow_dispatch", "2026-11-02T05:05+05:30", active="1")[:2],   # asked for: always
+                         ("due=true\nuntil=\n", "Refreshing: manual run: refreshing now.\n"))
+        self.assertEqual(due("workflow_dispatch", "2026-11-02T05:45+05:30", "slot")[0],   # the external clock's tick
                          "due=true\nuntil=2026-11-02T06:00:00+05:30\n")
+        self.assertEqual(due("workflow_dispatch", "2026-11-02T05:45+05:30", "slot", "1")[0], "due=false\nuntil=\n")
+        with contextlib.redirect_stderr(io.StringIO()):                                   # a count, never negative
+            self.assertEqual(R.main(["--root", root, "due", "--event", "schedule", "--active-runs", "-1",
+                                     "--now", "2026-11-02T05:45+05:30"]), 2)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):   # unknown events/modes refused
             R.main(["--root", root, "due", "--event", "push", "--now", "2026-11-02T07:00+05:30"])
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             R.main(["--root", root, "due", "--event", "schedule", "--mode", "later", "--now", "2026-11-02T07:00+05:30"])
-        for text in due("schedule", "2026-11-02T05:05+05:30"):   # times only, never a job or a private detail
+        for text in due("schedule", "2026-11-02T05:45+05:30"):   # times only, never a job or a private detail
             self.assertNotRegex(text, r"[A-Z]{2,}-?\d{4,}|https?:")
         # wait: empty or past is a no-op; malformed is an error (exit 2); the sleep itself is covered above.
         with contextlib.redirect_stdout(io.StringIO()) as buf:
@@ -4026,8 +4055,8 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="h-scope">', '<div class="ch-head"',
                  '<ol class="ch-list"', prompt + "signal sources --help</p>", '<dl class="h-key">',
                  '<p class="h-note">', prompt + "signal schedule</p>",
-                 '<p class="kv">every 3 h on the hour IST · hourly cron 35 * * * * UTC waits for the slot or retries '
-                 'a missed one · last 6 pulls kept per source</p>',
+                 '<p class="kv">every 3 h on the hour IST · armed 15 min ahead by an external clock · cron '
+                 '20,35 0,3,6,9,12,15,18,21 * * * UTC as fallback · last 6 pulls kept per source</p>',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb" style="--d:(\d)">', dialog), list("01234"))
@@ -4280,7 +4309,8 @@ class SourceHealthTests(unittest.TestCase):
                 R.render(self.state, self.template.replace("</footer>", "{{" + name + "}}</footer>"), self.config)
         doc = R.render(self.state, self.template, self.config)
         self.assertIn("{{CRON}}", self.template)
-        self.assertIn("· hourly cron 35 * * * * UTC waits for the slot or retries a missed one ·", api_dialog(doc))
+        self.assertIn("· armed 15 min ahead by an external clock · cron 20,35 0,3,6,9,12,15,18,21 * * * UTC as "
+                      "fallback ·", api_dialog(doc))
         self.assertEqual(doc.count(f"cron {R.SCHEDULE_CRON} UTC"), 1)
         self.assertIsNone(R.PLACEHOLDER.search(doc))
         for name in sorted(names):
@@ -4332,7 +4362,7 @@ class SourceHealthTests(unittest.TestCase):
         # Re-aging runs before the search-panel LED and the cards read HS/STALE.
         self.assertLess(script.index("H.grace_ms"), script.index("const HS={}"))
         self.assertNotIn(".tile", doc)
-        self.assertEqual(h["late"], " · update not yet published, retried hourly")
+        self.assertEqual(h["late"], " · update not yet published, retrying")
         self.assertEqual(h["stale"], "stale since ")
         self.assertNotIn("overdue", doc)
         self.assertEqual(R.stale_labels(self.state, self.config),

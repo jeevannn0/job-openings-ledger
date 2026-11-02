@@ -939,15 +939,16 @@ def checked_html(state: State) -> str:
 # scheduler runs cron slots hours late at busy times and sometimes drops them outright (two of the four
 # six-hourly slots on 1 Nov 2026 never ran). A run that finds nothing new is cheap and says "no change".
 FRESHNESS_THRESHOLD = dt.timedelta(hours=6, minutes=30)   # two schedule slots plus slack: one dropped slot never goes stale
-# The refresh slots are on the hour in IST (minute 30 UTC, UTC+5:30), every three hours. GitHub's scheduler
-# is best-effort: it fires cron ticks late at busy times (45 min on 2 Nov 2026) and sometimes not at all (the
-# 06:00 IST slot that day), so the workflow's cron ticks hourly at minute 35 UTC, 55 minutes before each slot
-# and 5 minutes after it. The tick before a slot waits inside the run for the slot's exact time (SCHEDULE_LEAD),
-# the tick after serves a slot whose check is still unpublished, and the other ticks do nothing (slot_due).
-SCHEDULE_CRON = "35 * * * *"            # UTC; must match .github/workflows/refresh.yml
+# The refresh slots are on the hour in IST (minute 30 UTC, UTC+5:30), every three hours. A run dispatched
+# within SCHEDULE_LEAD of a slot waits inside the run and starts the crawl on the slot's exact second. An
+# external clock (a Cloudflare Worker with a cron trigger and a Durable Object alarm) dispatches such a run
+# 15 minutes before every slot. GitHub's own scheduler is best-effort (ticks fired 45 min late and not at all
+# on 2 Nov 2026), so its cron is only the fallback: a tick 10 minutes before a slot arms it if the clock did
+# not, and a tick 5 minutes after serves a slot whose check is still unpublished (slot_due).
+SCHEDULE_CRON = "20,35 0,3,6,9,12,15,18,21 * * *"   # UTC; must match .github/workflows/refresh.yml
 SCHEDULE_UTC_MINUTE = 30
 SCHEDULE_UTC_HOURS = (0, 3, 6, 9, 12, 15, 18, 21)   # refresh slots: 00:00, 03:00, 06:00, ... 21:00 IST
-SCHEDULE_LEAD = dt.timedelta(minutes=58)             # a run this close to the next slot waits for it
+SCHEDULE_LEAD = dt.timedelta(minutes=20)             # a run this close to the next slot waits for it
 HEALTH_STATES = ("live", "degraded", "stale", "failed", "unknown")     # display order
 HEALTH_SEVERITY = ("live", "degraded", "unknown", "stale", "failed")   # least to most severe
 HEALTH_LABELS = {"live": "LIVE", "degraded": "DEGRADED/CACHED", "stale": "STALE", "failed": "FAILED",
@@ -986,7 +987,7 @@ HEALTH_MEANINGS = {
     "failed": "No successful refresh yet.",
     "unknown": "No automated check yet (snapshot or static source).",
 }
-LATE_TEXT = " · update not yet published, retried hourly"   # next slot + grace passed with no newer page
+LATE_TEXT = " · update not yet published, retrying"      # next slot + grace passed with no newer page
 STALE_PREFIX = "stale since "                  # company label once cached data passes the threshold
 _DATETIME_ATTR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30")
 
@@ -1099,13 +1100,18 @@ def latest_slot(now: dt.datetime) -> dt.datetime:
     raise AssertionError("unreachable: a slot exists within one day")
 
 
-def slot_due(state: State, now: dt.datetime) -> tuple[bool, dt.datetime | None, str]:
+def slot_due(state: State, now: dt.datetime, active: int = 0) -> tuple[bool, dt.datetime | None, str]:
     """What a scheduled tick should do: (refresh?, wait until this slot first, reason naming times only).
 
-    A slot whose check is still unpublished is refreshed at once (the tick after a slot catches a tick
-    the scheduler delayed past it or dropped). Otherwise a tick within SCHEDULE_LEAD of the next slot
-    refreshes at that slot's exact time, waiting inside the run; any other tick does nothing."""
+    An older run that is still active (armed and waiting, or crawling) already serves the slot, so a later
+    tick does nothing. Otherwise a slot whose check is still unpublished is refreshed at once (the tick
+    after a slot catches one the scheduler delayed past it or dropped), a tick within SCHEDULE_LEAD of
+    the next slot refreshes at that slot's exact time, waiting inside the run, and any other tick does
+    nothing."""
     latest, nxt = latest_slot(now), next_scheduled(now)
+    if active:
+        return False, None, (f"{active} older run{'' if active == 1 else 's'} still active; "
+                             f"next slot {nxt:%d %b %H:%M} IST")
     ref = iso_time(state.checked_at)
     if ref is None or ref < latest:
         last = "no check published yet" if ref is None else f"last published check {ref.astimezone(IST):%d %b %H:%M} IST"
@@ -3699,12 +3705,14 @@ def cmd_refresh(args, root: str) -> int:
 
 def cmd_due(args, root: str) -> int:
     """Gate for the workflow: what this run should do (see slot_due). A manual run in mode "now" refreshes at
-    once; mode "slot" behaves like a scheduled tick, which is what an external clock would send."""
+    once; mode "slot" behaves like a scheduled tick, which is what the external clock sends."""
     _config, state, _template = load_all(root)
+    if args.active_runs < 0:
+        raise ValueError("due: --active-runs must be a count")
     if args.event == "workflow_dispatch" and args.mode == "now":
         due, until, why = True, None, "manual run: refreshing now"
     else:
-        due, until, why = slot_due(state, _now(args.now))
+        due, until, why = slot_due(state, _now(args.now), args.active_runs)
     if args.github_output:
         with open(args.github_output, "a", encoding="utf-8") as fh:
             fh.write(f"due={'true' if due else 'false'}\n"
@@ -3824,6 +3832,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("due", help="workflow gate: refresh now, wait for the next slot, or nothing to do")
     p.add_argument("--event", required=True, choices=("schedule", "workflow_dispatch"), help="GITHUB_EVENT_NAME")
     p.add_argument("--mode", default="now", choices=("now", "slot"), help="manual runs: refresh now or act as a tick")
+    p.add_argument("--active-runs", type=int, default=0, help="older scheduled/manual runs still active")
     p.add_argument("--now", help="override the current time (ISO 8601)")
     p.add_argument("--github-output", help="append due=true|false and until=<time or empty> lines to this file")
     p.add_argument("--summary", help="append a one-line Markdown summary to this file")

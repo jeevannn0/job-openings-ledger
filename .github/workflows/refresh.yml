@@ -2,11 +2,12 @@ name: Refresh job ledger
 
 on:
   schedule:
-    # UTC. The refresh slots are 00:00, 03:00, ... 21:00 IST (minute 30 UTC). GitHub fires cron ticks late at
-    # busy times and sometimes not at all, so this ticks hourly at minute 35: the tick 55 minutes before a
-    # slot waits inside the run for the slot's exact time, the tick 5 minutes after a slot serves it if its
-    # check is still unpublished, and the other ticks do nothing. The gate job decides.
-    - cron: "35 * * * *"
+    # UTC. The refresh slots are 00:00, 03:00, ... 21:00 IST (minute 30 UTC). An external clock dispatches
+    # a run 15 minutes before each slot (mode=slot) and that run waits for the slot's exact time. GitHub
+    # fires cron ticks late at busy times and sometimes not at all, so this cron is only the fallback: the
+    # tick 10 minutes before a slot arms it if the clock did not, the tick 5 minutes after a slot serves it
+    # if its check is still unpublished, and a tick that finds an older run active does nothing.
+    - cron: "20,35 0,3,6,9,12,15,18,21 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -21,9 +22,8 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: job-ledger-refresh
-  cancel-in-progress: false
+# One refresh, publish or deploy at a time (job-level, see each job). The gate stays outside the group so
+# a tick that arrives while a run is armed decides at once instead of queueing behind it.
 
 jobs:
   gate:
@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
     outputs:
       due: ${{ steps.due.outputs.due }}
@@ -44,6 +45,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # An older scheduled or manual run that is still active (armed and waiting, or crawling) already
+      # serves the slot; this tick then does nothing. Newer runs are ignored so two ticks never both yield.
+      - name: Count older runs still active
+        id: active
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          n="$(gh run list --workflow refresh.yml --limit 20 --json databaseId,status,event \
+                --jq "[.[] | select(.databaseId < $RUN_ID and .status != \"completed\"
+                       and (.event == \"schedule\" or .event == \"workflow_dispatch\"))] | length")"
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+
       # Refresh now (latest slot unpublished, or a manual run), wait for the next slot (a tick within the
       # schedule lead), or nothing to do. The decision and times go to the step summary.
       - name: Decide what this tick does
@@ -51,13 +66,17 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           MODE: ${{ inputs.mode || 'now' }}
-        run: python3 scripts/refresh.py due --event "$EVENT" --mode "$MODE" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          ACTIVE: ${{ steps.active.outputs.count }}
+        run: python3 scripts/refresh.py due --event "$EVENT" --mode "$MODE" --active-runs "$ACTIVE" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
   refresh:
     needs: gate
     if: needs.gate.result == 'success' && needs.gate.outputs.due == 'true'
+    concurrency:
+      group: job-ledger-refresh
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
-    timeout-minutes: 100   # up to the schedule lead waiting for the slot, then the run budget
+    timeout-minutes: 60    # up to the schedule lead waiting for the slot, then the run budget
     permissions:
       contents: write   # persist state/jobs.json and index.html
     steps:
@@ -136,6 +155,9 @@ jobs:
     # The committed index.html must already match the committed state (the check step), so this
     # job only proves the tree is consistent and ships it.
     if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && github.actor != 'github-actions[bot]'
+    concurrency:
+      group: job-ledger-refresh
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -177,6 +199,9 @@ jobs:
     needs: [refresh, publish]
     # Exactly one of the two producers runs per event; deploy follows whichever succeeded.
     if: ${{ !cancelled() && (needs.refresh.result == 'success' || needs.publish.result == 'success') }}
+    concurrency:
+      group: job-ledger-refresh
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
