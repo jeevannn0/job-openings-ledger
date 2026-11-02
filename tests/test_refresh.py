@@ -5054,7 +5054,8 @@ class SourceHealthTests(unittest.TestCase):
         # One flat stream of cards; only the first 12 animate, and only on the first render.
         for snippet in ('const card=(r,i,more,g,open,sub)=>{const[c,id,t,e,d,a,l,u,b,cd,nw,sb]=r,', 'anim=!booted&&i<12',
                         '<span class="av" aria-hidden="true">${esc(ini(c))}${lg(c)}</span>',
-                        '<h3 class="c-l"><span class="c-co">${esc(c)}</span> ${sb?"lists":"posted"} <a class="job" '
+                        # "Company – Title": a dash, not a verb, so sources with and without posting dates read alike.
+                        '<h3 class="c-l"><span class="c-co">${esc(c)}</span> – <a class="job" '
                         'href="${esc(u)}" rel="noopener noreferrer">${esc(t)}</a></h3>',
                         'ini=c=>{const w=c.split(/\\s+/).filter(Boolean);return(w.length>1?w[0][0]+w[1][0]:c.slice(0,2))'
                         '.toUpperCase()}',
@@ -5080,10 +5081,10 @@ class SourceHealthTests(unittest.TestCase):
                         # Posting age tints the card: hue 152 (green) today, sliding to 28 (orange) at 30 days and
                         # beyond; the hue rides on the card as --ah and one CSS rule paints every card.
                         'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30);return `',
-                        # Sources without posting dates read "lists" / "seen N days ago" (row 11 = 1).
-                        '<span class="c-co">${esc(c)}</span> ${sb?"lists":"posted"} <a class="job"',
+                        # The posting date the portal shows (first-seen date for sources without one, row 11 = 1) sits
+                        # beside the relative age in the meta line: "Oct 31 · 1 day ago", or "Nov 2 · seen today".
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
-                        '<span class="vh">${sb?"First seen":"Posted"} ${esc(d)}, </span>${ago}</span>'):
+                        '<span><span class="vh">${sb?"First seen":"Posted"} </span>${esc(d)}</span><span>${ago}</span>'):
             self.assertIn(snippet, script, snippet)
         # The button keeps its own box inside the overflow-hidden meta line (so focusing it cannot scroll the line)
         # and widens its hit area with a pseudo-element.
