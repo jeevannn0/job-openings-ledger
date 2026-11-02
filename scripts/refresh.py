@@ -45,6 +45,7 @@ Usage (run from anywhere; paths resolve against the repository root):
 from __future__ import annotations
 
 import argparse
+import base64
 import dataclasses
 import datetime as dt
 import email.utils
@@ -340,16 +341,25 @@ FORBIDDEN_PATTERNS = tuple(re.compile(p, re.I) for p in (
 
 ALLOWED_FILES = frozenset({
     ".gitignore",
+    ".github/workflows/push-test.yml",
     ".github/workflows/refresh.yml",
     "README.md",
     "index.html",
+    "manifest.webmanifest",
     "config/public_sources.json",
+    "scripts/push.mjs",
+    "scripts/push.test.mjs",
     "scripts/refresh.py",
     "state/jobs.json",
     "templates/index.template.html",
     "tests/test_refresh.py",
 })
 ALLOWED_FIXTURE = re.compile(r"tests/fixtures/[a-z0-9_.-]+\.(?:html|json)")
+# The only binary files: the Home Screen icons, plain PNGs of exactly these sizes (png_problem checks them).
+ALLOWED_PNG = {"icon-180.png": 180, "icon-192.png": 192, "icon-512.png": 512}
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_CHUNKS = frozenset({b"IHDR", b"PLTE", b"tRNS", b"sRGB", b"gAMA", b"pHYs", b"IDAT", b"IEND"})
+PNG_MAX_BYTES = 65536
 
 CHALLENGE_TITLES = ("just a moment", "attention required", "access denied", "request rejected",
                     "pardon our interruption", "security check", "are you a robot")
@@ -473,6 +483,27 @@ def find_forbidden(text: str) -> list[str]:
     return [p.pattern for p in FORBIDDEN_PATTERNS if p.search(text or "")]
 
 
+def png_problem(raw: bytes, side: int) -> str | None:
+    """None when raw is a small PNG of side x side pixels made only of plain image chunks (no text, time or
+    other metadata chunks, which could carry anything); otherwise the rule that failed, never the content."""
+    if raw[:8] != PNG_SIGNATURE or len(raw) > PNG_MAX_BYTES:
+        return "not a small PNG"
+    pos, kinds = 8, []
+    while pos + 12 <= len(raw):
+        length = int.from_bytes(raw[pos:pos + 4], "big")
+        kind = raw[pos + 4:pos + 8]
+        if kind not in PNG_CHUNKS:
+            return "unexpected PNG chunk"
+        if kind == b"IHDR" and (length != 13 or int.from_bytes(raw[pos + 8:pos + 12], "big") != side
+                                or int.from_bytes(raw[pos + 12:pos + 16], "big") != side):
+            return f"PNG is not {side}x{side}"
+        kinds.append(kind)
+        pos += 12 + length
+    if pos != len(raw) or kinds[:1] != [b"IHDR"] or kinds[-1:] != [b"IEND"]:
+        return "PNG structure"
+    return None
+
+
 def js_json(value: object) -> str:
     """JSON that is inert inside an inline <script>: no '<' or '>' and no JS line terminators."""
     out = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -511,6 +542,7 @@ class Config:
     hosts: dict
     companies: tuple          # ordered company names (page order)
     sources: dict             # company -> dict (mode + tunables)
+    vapid_public_key: str     # the page's Web Push application server key (base64url P-256 point)
 
     @property
     def fetch_hosts(self) -> frozenset:
@@ -553,9 +585,27 @@ def _num(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+# P-256 (secp256r1): the field prime and the curve constant b, to check a published key is a real point.
+_P256_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
+_P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+VAPID_PUBLIC_KEY_RE = re.compile(r"[A-Za-z0-9_-]{87}")      # 65 bytes, base64url without padding
+
+
+def check_vapid_public_key(value: object) -> str:
+    """The page's Web Push application server key (RFC 8292): an uncompressed P-256 point that lies on the
+    curve, base64url. The matching private key is a repository secret the sender (scripts/push.mjs) uses."""
+    _check(isinstance(value, str) and VAPID_PUBLIC_KEY_RE.fullmatch(value) is not None, "config: push.vapid_public_key")
+    raw = base64.urlsafe_b64decode(value + "=")
+    _check(len(raw) == 65 and raw[0] == 4, "config: push.vapid_public_key is not an uncompressed point")
+    x, y = int.from_bytes(raw[1:33], "big"), int.from_bytes(raw[33:], "big")
+    _check(0 < x < _P256_P and 0 < y < _P256_P and (y * y - (x * x * x - 3 * x + _P256_B)) % _P256_P == 0,
+           "config: push.vapid_public_key is not on P-256")
+    return value
+
+
 def load_config(data: dict) -> Config:
     _check(isinstance(data, dict) and data.get("schema") == 1, "config: schema must be 1")
-    _check(set(data) == {"schema", "timezone", "filters", "hosts", "companies"}, "config: unexpected keys")
+    _check(set(data) == {"schema", "timezone", "filters", "hosts", "companies", "push"}, "config: unexpected keys")
     _check(data["timezone"] == "Asia/Kolkata", "config: timezone must be Asia/Kolkata")
     f = data["filters"]
     _check(isinstance(f, dict) and set(f) == {"max_age_days", "max_years", "regions"}, "config: bad filters")
@@ -564,6 +614,9 @@ def load_config(data: dict) -> Config:
     _check(isinstance(f["regions"], list) and f["regions"] and len(set(f["regions"])) == len(f["regions"]) and
            all(isinstance(r, str) and r in REGION_TERMS for r in f["regions"]), "config: regions")
     cities = tuple(dict.fromkeys(term for r in f["regions"] for term in REGION_TERMS[r]))
+    push = data["push"]
+    _check(isinstance(push, dict) and set(push) == {"vapid_public_key"}, "config: push must be exactly {vapid_public_key}")
+    vapid_public_key = check_vapid_public_key(push["vapid_public_key"])
 
     hosts: dict[str, HostPolicy] = {}
     _check(isinstance(data["hosts"], dict), "config: hosts")
@@ -614,7 +667,8 @@ def load_config(data: dict) -> Config:
     # Budgets must not oversubscribe the run, or late sources would always be cut short.
     _check(sum(s["budget_s"] for s in sources.values() if s["mode"] != "static") <= RUN_BUDGET_S,
            "config: source budgets must sum to at most the run budget")
-    return Config(f["max_age_days"], float(f["max_years"]), tuple(f["regions"]), cities, hosts, tuple(companies), sources)
+    return Config(f["max_age_days"], float(f["max_years"]), tuple(f["regions"]), cities, hosts, tuple(companies), sources,
+                  vapid_public_key)
 
 
 def load_excluded(data: dict, config: Config) -> dict[str, frozenset]:
@@ -1325,7 +1379,8 @@ def health_js() -> str:
 
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
-                               "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS"})
+                               "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS",
+                               "VAPID_JS"})
 LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
 
 
@@ -1367,6 +1422,7 @@ def render(state: State, template: str, config: Config) -> str:
         "EMPTY_JS": "[\n" + ",\n".join(js_json(list(e)) for e in state.empty_companies) + "]",
         "ORDER_JS": js_json(list(config.companies)),
         "LOGOS_JS": js_json(logo_urls(config)),
+        "VAPID_JS": js_json(config.vapid_public_key),      # the key the page subscribes with (push.mjs signs with its pair)
         "STALE_JS": js_json(stale_labels(state, config)),
         "AS_OF_JS": js_json(state.as_of.isoformat()),
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),
@@ -3626,6 +3682,12 @@ def scan_repo(root: str) -> list[str]:
     """Recursive public-boundary scan. Problems name the path and rule, never matched content."""
     problems = []
     for rel in _repo_files(root):
+        if rel in ALLOWED_PNG:
+            with open(os.path.join(root, rel), "rb") as fh:
+                problem = png_problem(fh.read(), ALLOWED_PNG[rel])
+            if problem:
+                problems.append(f"{rel}: {problem}")
+            continue
         if rel not in ALLOWED_FILES and not ALLOWED_FIXTURE.fullmatch(rel):
             problems.append(f"{rel}: file not in allowlist")
             continue

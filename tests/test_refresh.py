@@ -1335,6 +1335,10 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue({"kochi", "thiruvananthapuram", "trivandrum", "kozhikode", "thrissur"} <= set(config.cities))
         self.assertEqual(R.REGION_LABELS, {"bengaluru": "Bengaluru", "kerala": "Kerala"})
         self.assertNotIn("careers.gehealthcare.com", config.link_hosts)     # stale Phenom aliases stay out
+        self.assertEqual(config.vapid_public_key, R.check_vapid_public_key(config.vapid_public_key))
+        self.assertEqual(R.check_vapid_public_key(
+            "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"),
+            "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8")   # RFC 8291 §5
 
     def test_endpoints_stay_on_company_hosts(self):
         for company, urls in {"JPMorganChase": (R.JPM_SEARCH, R.JPM_DETAIL, R.JPM_FRONT),
@@ -1375,6 +1379,14 @@ class ConfigTests(unittest.TestCase):
             "repeated region": lambda d: d["filters"].__setitem__("regions", ["kerala", "kerala"]),
             "city list": lambda d: (d["filters"].pop("regions"), d["filters"].__setitem__("cities", ["Bengaluru"])),
             "budgets over run": lambda d: d["companies"][6].__setitem__("budget_s", 2000),
+            # The push block is required: the page subscribes with this key and the sender signs with its pair.
+            "no push": lambda d: d.pop("push"),
+            "push extra key": lambda d: d["push"].__setitem__("subject", "x"),
+            "vapid short": lambda d: d["push"].__setitem__("vapid_public_key", "BFW2"),
+            "vapid not a point": lambda d: d["push"].__setitem__("vapid_public_key", "C" + d["push"]["vapid_public_key"][1:]),
+            "vapid off curve": lambda d: d["push"].__setitem__("vapid_public_key", d["push"]["vapid_public_key"][:-1] +
+                                                              ("A" if d["push"]["vapid_public_key"][-1] != "A" else "B")),
+            "vapid not base64url": lambda d: d["push"].__setitem__("vapid_public_key", d["push"]["vapid_public_key"][:-1] + "+"),
         }
         for name, mutate in mutations.items():
             with self.subTest(name), self.assertRaises(R.ConfigError):
@@ -1464,6 +1476,113 @@ class LogoTests(unittest.TestCase):
         for url in re.findall(r"https://[^\s\"'<>)\\]+", logos):
             self.assertIsNone(R.check_url(url, self.config.link_hosts), url)
         self.assertEqual(doc.count("<img"), 1)                       # the one template string in the script
+
+
+class PushTests(unittest.TestCase):
+    """Phone notifications: the page can subscribe (as a Home Screen web app) with the published VAPID key, the
+    workflow sends a Declarative Web Push message after each refresh that found new openings, and the only
+    files added for it are the manifest, three plain PNG icons and the dependency-free sender."""
+
+    def setUp(self):
+        self.config, _e, self.state, self.template = env()
+        self.doc = R.render(self.state, self.template, self.config)
+
+    def test_head_declares_the_home_screen_web_app(self):
+        head = self.doc[:self.doc.index("<style>")]
+        for tag in ('<meta name="theme-color" content="hsl(262 22% 7%)">',
+                    '<meta name="apple-mobile-web-app-capable" content="yes">',
+                    '<meta name="apple-mobile-web-app-title" content="K9">',
+                    '<link rel="manifest" href="manifest.webmanifest">',
+                    '<link rel="apple-touch-icon" href="icon-180.png">'):
+            self.assertEqual(head.count(tag), 1, tag)
+        self.assertLess(head.index('name="theme-color"'), head.index("<base "))
+        manifest = json.loads(R.read_text(os.path.join(ROOT, "manifest.webmanifest")))
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertEqual((manifest["start_url"], manifest["scope"], manifest["short_name"]), ("./", "./", "K9"))
+        self.assertEqual([i["src"] for i in manifest["icons"]], ["icon-192.png", "icon-512.png"])
+        self.assertEqual(manifest["theme_color"], manifest["background_color"])
+        self.assertNotIn("http", json.dumps(manifest))                     # nothing off-site
+        for name, side in R.ALLOWED_PNG.items():
+            with open(os.path.join(ROOT, name), "rb") as fh:
+                self.assertIsNone(R.png_problem(fh.read(), side), name)
+
+    def test_page_carries_the_key_and_the_subscribe_controls(self):
+        key = re.search(r"\nconst VAPID=(\"[^\"]+\");\n", self.doc).group(1)     # its own line, like LOGOS
+        self.assertEqual(json.loads(key), self.config.vapid_public_key)
+        self.assertIn("VAPID_JS", R.ONCE_PLACEHOLDERS)
+        dialog = api_dialog(self.doc)
+        self.assertIn('<div class="tb" id="push" style="--d:4" hidden><p class="pl"><span class="pu">ops@job-signal</span> '
+                      '<span class="pp">~ %</span> signal notify</p>\n<p class="kv">Phone alerts: <b id="pn-state" data-s="off">off'
+                      '</b></p>', dialog)
+        self.assertIn('<p class="pn-act"><button class="ob" id="pn-on" type="button">Turn on</button><button class="ob" '
+                      'id="pn-copy" type="button" hidden>Copy code</button><button class="ob" id="pn-off" type="button" hidden>'
+                      'Turn off</button></p>', dialog)
+        self.assertIn('<textarea class="pn-sub" id="pn-sub" readonly spellcheck="false" aria-label="Subscription code">'
+                      '</textarea></div></div>', dialog)
+        self.assertEqual(self.doc.count("<textarea"), 1)
+        script = main_script(self.doc)
+        # Shown only where the browser exposes window.pushManager (a Home Screen web app on iOS); the Notification
+        # permission is requested inside the tap, the subscription uses the page's key, and the code is copied by hand.
+        for snippet in ('const pm=window.pushManager,pn=$("#push");if(pm&&pn){',
+                        'pn.hidden=false;pm.getSubscription().then(show,()=>show(null));',
+                        'if(await Notification.requestPermission()!=="granted")return fail(',
+                        'show(await pm.subscribe({userVisibleOnly:true,applicationServerKey:b64(VAPID)}))',
+                        'ta.value=ok?JSON.stringify(s.toJSON()):""',
+                        'await navigator.clipboard.writeText(ta.value);cp.textContent="Copied"',
+                        'if(s)await s.unsubscribe()'):
+            self.assertIn(snippet, script, snippet)
+        self.assertNotIn("serviceWorker", self.doc)                          # declarative push: no worker
+        style = style_of(self.doc)
+        self.assertIn(".pn-act{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}", style)
+        self.assertIn("#pn-state[data-s=on]{color:hsl(var(--ok))}", style)
+
+    def test_key_check_fails_closed(self):
+        good = self.config.vapid_public_key
+        self.assertEqual(R.check_vapid_public_key(good), good)
+        for bad in (good[:-1], good + "A", "C" + good[1:], good[:-1] + ("A" if good[-1] != "A" else "B"),
+                    good.replace("-", "+", 1) if "-" in good else good[:-1] + "+", 42, None, good.lower()):
+            with self.subTest(str(bad)[:12]), self.assertRaises(R.ConfigError):
+                R.check_vapid_public_key(bad)
+
+    def test_scan_accepts_only_plain_icons(self):
+        with open(os.path.join(ROOT, "icon-180.png"), "rb") as fh:
+            raw = fh.read()
+        self.assertIsNone(R.png_problem(raw, 180))
+        self.assertEqual(R.png_problem(raw, 192), "PNG is not 192x192")
+        self.assertEqual(R.png_problem(b"GIF89a" + raw, 180), "not a small PNG")
+        self.assertEqual(R.png_problem(raw + b"\0" * 64 * 1024, 180), "not a small PNG")
+        self.assertEqual(R.png_problem(raw[:-12], 180), "PNG structure")
+        text_chunk = (4).to_bytes(4, "big") + b"tEXt" + b"abcd" + b"\0\0\0\0"
+        self.assertEqual(R.png_problem(raw[:-12] + text_chunk + raw[-12:], 180), "unexpected PNG chunk")
+        self.assertNotIn("icon-180.png", R.ALLOWED_FILES)                  # binaries are allowlisted by size, separately
+
+    def test_scan_flags_tampered_or_stray_images(self):
+        root = BoundaryScanTests.copy_repo(self)
+        with open(os.path.join(root, "icon-192.png"), "ab") as fh:
+            fh.write(b"\0")
+        with open(os.path.join(root, "extra.png"), "wb") as fh:
+            fh.write(R.PNG_SIGNATURE)
+        problems = R.scan_repo(root)
+        self.assertIn("icon-192.png: PNG structure", problems)
+        self.assertIn("extra.png: file not in allowlist", problems)
+
+    def test_sender_and_test_workflow_are_the_only_additions(self):
+        for rel in ("scripts/push.mjs", "scripts/push.test.mjs", ".github/workflows/push-test.yml", "manifest.webmanifest"):
+            self.assertIn(rel, R.ALLOWED_FILES, rel)
+            self.assertEqual(R.find_forbidden(R.read_text(os.path.join(ROOT, rel))), [], rel)
+        sender = R.read_text(os.path.join(ROOT, "scripts", "push.mjs"))
+        self.assertRegex(sender, r'(?m)^import \{[^}]*\} from "node:crypto";$')
+        self.assertNotRegex(sender, r'from "(?!node:)')                        # standard library only
+        self.assertIn("web_push:8030", sender.replace(" ", ""))                 # the declarative format
+        self.assertIn("if (status === 404 || status === 410) return { status, outcome: \"expired\" };", sender)
+        self.assertNotRegex(sender, r"console\.log\([^\n]*(endpoint|VAPID_PRIVATE_KEY|PUSH_SUBSCRIPTIONS)[^\n]*\)")
+        test_wf = R.read_text(os.path.join(ROOT, ".github", "workflows", "push-test.yml"))
+        self.assertRegex(test_wf, r"(?m)^on:\n  workflow_dispatch:\n")
+        self.assertNotRegex(test_wf, r"(?m)^  (schedule|push|pull_request)")
+        self.assertIn("run: node scripts/push.mjs --test --ledger-url", test_wf)
+        self.assertRegex(test_wf, r"(?m)^permissions: \{\}$")
+        self.assertIn("persist-credentials: false", test_wf)
+        self.assertNotIn("refresh.py", test_wf)
 
 
 class BoundaryScanTests(unittest.TestCase):
@@ -1587,10 +1706,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(refresh, r"permissions:\n      contents: write[^\n]*\n    steps:")
         self.assertRegex(publish, r"permissions:\n      contents: read\n    steps:")
         self.assertRegex(deploy, r"permissions:\n      pages: write\n      id-token: write\n    environment:")
-        self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 4)
-        for job in (gate, refresh, publish):
+        notify = self.block("notify")
+        self.assertRegex(notify, r"permissions:\n      contents: read\n    steps:")
+        self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 5)
+        for job in (gate, refresh, publish, notify):
             self.assertIn("persist-credentials: false", job)
-        self.assertNotIn("secrets.", gate)
+        for job in (gate, publish, deploy):
+            self.assertNotIn("secrets.", job)
 
     def test_concurrency_timeouts_runner(self):
         # The producers and the deploy share one group; the gate stays outside it so a tick that arrives while a
@@ -1600,15 +1722,16 @@ class WorkflowTests(unittest.TestCase):
                                         r"      cancel-in-progress: false$", self.text)), 3)
         self.assertNotIn("concurrency", self.block("gate"))
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(timeouts, [5, 60, 10, 10])       # gate, refresh (lead wait + thirteen sources), publish, deploy
-        self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 4)
+        self.assertEqual(timeouts, [5, 60, 10, 10, 5])    # gate, refresh (lead wait + thirteen sources), publish, deploy, notify
+        self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 5)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
         uses = re.findall(r"uses: (\S+)", self.text)
         self.assertEqual(sorted(uses), sorted([
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",            # gate + refresh + publish
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",            # gate + refresh + publish + notify
             "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d",
@@ -1659,9 +1782,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertNotRegex(self.text, r"--force|-f\b|\+HEAD|reset --hard")
         self.assertIn('push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"', refresh)
-        for line in refresh.splitlines():   # expressions only in if:/env:, never inlined into run scripts
+        for line in refresh.splitlines():   # expressions only in if:/env:/outputs:, never inlined into run scripts
             if "${{" in line:
-                self.assertRegex(line, r"^\s+(if:|[A-Z_]+: \$\{\{)", line)
+                self.assertRegex(line, r"^\s+(if:|alert:|[A-Z_]+: \$\{\{)", line)
         self.assertIn("needs: [refresh, publish]", self.block("deploy"))
 
 
@@ -1950,8 +2073,8 @@ class PrivateExclusionTests(unittest.TestCase):
         files = R._repo_files(ROOT)
         self.assertNotIn(R.EXCLUDED_LOCAL_PATH, files)       # git-ignored, never listed
         for rel in files:
-            with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
-                text = fh.read()
+            with open(os.path.join(ROOT, rel), "rb") as fh:
+                text = fh.read().decode("latin-1")     # the icons are binary; IDs are ASCII either way
             for jid in private:
                 self.assertIsNone(re.search(rf"(?<![A-Za-z0-9]){jid}(?![0-9])", text), rel)
 
@@ -1964,10 +2087,17 @@ class PrivateExclusionTests(unittest.TestCase):
 
     def test_workflow_passes_secret_only_to_refresh_step(self):
         text = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
-        self.assertEqual(text.count("secrets."), 1)
+        self.assertEqual(text.count("secrets."), 3)
         step = re.search(r"- name: Refresh public sources\n(.*?)(?=\n      - name:)", text, re.S).group(1)
         self.assertIn("EXCLUDED_PUBLIC_IDS_JSON: ${{ secrets.EXCLUDED_PUBLIC_IDS_JSON }}", step)
         self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*EXCLUDED_PUBLIC_IDS_JSON")
+        # The two push secrets reach only the notify job's send step, as environment, never a run script.
+        notify = re.search(r"^  notify:\n(.*)\Z", text, re.S | re.M).group(1)
+        send = re.search(r"- name: Send the phone notification\n(.*)\Z", notify, re.S).group(1)
+        self.assertIn("VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}", send)
+        self.assertIn("PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}", send)
+        self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*(VAPID_PRIVATE_KEY|PUSH_SUBSCRIPTIONS)")
+        self.assertEqual(text.count("secrets.VAPID_PRIVATE_KEY") + text.count("secrets.PUSH_SUBSCRIPTIONS"), 2)
 
 
 class DryRunTests(unittest.TestCase):
@@ -2588,7 +2718,7 @@ class AlertTests(unittest.TestCase):
         build = re.search(r"- name: Build Pages artifact\n(.*?)(?=\n      - name:)", refresh, re.S).group(1)
         self.assertIn("set -euo pipefail", build)
         self.assertIn("path: dist", refresh)
-        self.assertEqual(refresh.count("alerts.json"), 2)                     # built and listed; never staged
+        self.assertEqual(refresh.count("alerts.json"), 3)                     # built, listed, exported; never staged
         self.assertNotIn("alerts.json", re.search(r"git add[^\n]*", refresh).group(0))
         self.assertNotIn("alerts.json", re.search(r"(?m)^\s*git add[^\n]*", text).group(0))
         self.assertEqual(text.count("git add"), 1)                            # only the refresh job commits
@@ -2600,7 +2730,8 @@ class AlertTests(unittest.TestCase):
         self.assertNotIn("refresh-outcome", publish)
         self.assertNotIn("alert --outcome", publish)
         self.assertIn("refresh.py alert-verify dist/alerts.json", publish)
-        self.assertEqual(publish.count('test "$(ls -A dist | tr \'\\n\' \' \')" = "alerts.json index.html "'), 1)
+        self.assertEqual(publish.count('test "$(ls -A dist | tr \'\\n\' \' \')" = "alerts.json icon-180.png icon-192.png '
+                                       'icon-512.png index.html manifest.webmanifest "'), 1)
 
 
 # --------------------------------------------------------------------------- live adapters: JPMorganChase, GE HealthCare, ZS
@@ -3982,8 +4113,11 @@ class SourceHealthTests(unittest.TestCase):
                       "stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .64 0 0 0 0 .36 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E"
                       "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
-        self.assertNotRegex(doc, r"(?i)<link\b|<iframe\b|<script\s+src|\bfetch\(|XMLHttpRequest|"
-                                 r"setInterval|requestAnimationFrame|<table")
+        self.assertNotRegex(doc, r"(?i)<iframe\b|<script\s+src|\bfetch\(|XMLHttpRequest|setInterval|requestAnimationFrame|<table")
+        # The only <link>s name this site's own web app manifest and Home Screen icon by relative path (the page
+        # still names no host); nothing else is linked, preloaded or prefetched.
+        self.assertEqual(re.findall(r"<link\b[^>]*>", doc), ['<link rel="manifest" href="manifest.webmanifest">',
+                                                             '<link rel="apple-touch-icon" href="icon-180.png">'])
         # The one inline SVG is the brand mark: flat rects only, nothing that references, loads or runs anything.
         svgs = re.findall(r"<svg\b.*?</svg>", doc, re.S | re.I)
         self.assertEqual(len(svgs), 1)
@@ -4052,7 +4186,7 @@ class SourceHealthTests(unittest.TestCase):
                       'aria-label="Close"></button><span class="dot dot-m" aria-hidden="true"></span><span class="dot '
                       'dot-z" aria-hidden="true"></span></span><span id="api-h">ops@job-signal — requests — zsh</span>'
                       '<span class="term-esc" aria-hidden="true">esc</span></div>', dialog)
-        self.assertEqual(dialog.count("<button"), 1)
+        self.assertEqual(dialog.count("<button"), 4)          # close, then the notify block's on / copy / off
         # Four commands and a final prompt, in order; each block is one staggered output group. The status
         # block comes first, so the reader sees when the latest refresh ran and what it found.
         prompt = '<p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
@@ -4064,9 +4198,10 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="h-note">', prompt + "signal schedule</p>",
                  '<p class="kv">every 3 h on the hour IST · armed 15 min ahead by an external clock · cron '
                  '20,35 0,3,6,9,12,15,18,21 * * * UTC as fallback · last 6 pulls kept per source</p>',
+                 prompt + "signal notify</p>", 'id="pn-state"', 'id="pn-on"', 'id="pn-sub"',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
-        self.assertEqual(re.findall(r'<div class="tb" style="--d:(\d)">', dialog), list("01234"))
+        self.assertEqual(re.findall(r'<div class="tb"(?: id="push")? style="--d:(\d)"', dialog), list("012345"))
         self.assertIn('<div class="tb" style="--d:0">' + prompt + 'signal status</p>\n<dl class="kvs">', dialog)
         self.assertLess(doc.index('<dialog id="api"'), doc.index('<dl class="kvs">'))
         self.assertLess(doc.index("</dl></div>", doc.index('<dl class="kvs">')),
@@ -4817,8 +4952,8 @@ class SourceHealthTests(unittest.TestCase):
                         'setTimeout(bye,2200,1)}}'):
             self.assertIn(snippet, main_script(doc), snippet)
         self.assertNotIn("bye()}", main_script(doc))      # every path that saw the splash passes the flag
-        steps = [int(d) for d in re.findall(r'<div class="tb" style="--d:(\d+)">', doc)]
-        self.assertEqual(steps, [0, 1, 2, 3, 4])
+        steps = [int(d) for d in re.findall(r'<div class="tb"(?: id="push")? style="--d:(\d+)"', doc)]
+        self.assertEqual(steps, [0, 1, 2, 3, 4, 5])
         self.assertLess(max(steps) * 0.09 + 0.24, 0.7)
         self.assertIn("anim=!booted&&i<12", doc)
         self.assertIn('<main id="main" class="container boot-in">', doc)

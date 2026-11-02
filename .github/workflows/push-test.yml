@@ -1,0 +1,30 @@
+name: Test the phone notification
+
+# Sends one fixed test notification to every subscription in PUSH_SUBSCRIPTIONS, without touching any
+# employer site or the ledger's state. Run it from the Actions tab after subscribing a device.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  send:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (tag verified with git ls-remote)
+        with:
+          persist-credentials: false
+
+      - name: Sender tests
+        run: node --test scripts/push.test.mjs
+
+      - name: Send a test notification
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+        run: node scripts/push.mjs --test --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"

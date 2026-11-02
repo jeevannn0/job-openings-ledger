@@ -77,6 +77,8 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 60    # up to the schedule lead waiting for the slot, then the run budget
+    outputs:
+      alert: ${{ steps.build.outputs.alert }}   # this run's alert payload on one line, for the notify job
     permissions:
       contents: write   # persist state/jobs.json and index.html
     steps:
@@ -87,6 +89,9 @@ jobs:
 
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
+
+      - name: Sender tests
+        run: node --test scripts/push.test.mjs
 
       - name: Verify index.html matches state
         run: python3 scripts/refresh.py check   # fails loudly if index.html was edited outside the state
@@ -111,14 +116,18 @@ jobs:
         run: python3 scripts/refresh.py scan
 
       - name: Build Pages artifact
+        id: build
         run: |
           set -euo pipefail
           python3 scripts/refresh.py render --out dist/index.html
           cmp dist/index.html index.html
+          cp manifest.webmanifest icon-180.png icon-192.png icon-512.png dist/
           # Phone alert for this run; fails (and so blocks the deploy) if the outcome does not match the state.
           python3 scripts/refresh.py alert --outcome "$RUNNER_TEMP/refresh-outcome.json" --out dist/alerts.json \
             --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
-          test "$(ls -A dist | tr '\n' ' ')" = "alerts.json index.html "
+          test "$(ls -A dist | tr '\n' ' ')" = "alerts.json icon-180.png icon-192.png icon-512.png index.html manifest.webmanifest "
+          # The same public payload on one line, for the notify job below.
+          printf 'alert=%s\n' "$(python3 -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' dist/alerts.json)" >> "$GITHUB_OUTPUT"
 
       - name: Commit refreshed state
         if: steps.refresh.outputs.changed == 'true'
@@ -171,6 +180,9 @@ jobs:
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
 
+      - name: Sender tests
+        run: node --test scripts/push.test.mjs
+
       - name: Verify index.html matches state
         run: python3 scripts/refresh.py check
 
@@ -182,13 +194,14 @@ jobs:
           set -euo pipefail
           python3 scripts/refresh.py render --out dist/index.html
           cmp dist/index.html index.html
+          cp manifest.webmanifest icon-180.png icon-192.png icon-512.png dist/
           # The phone alert describes the latest source refresh, which this path does not repeat, so the
           # live copy is carried forward unchanged. It must parse, pass the alert checks, and describe the
           # committed state's own checked_at; otherwise the run fails and nothing is deployed.
           curl -fsSL --retry 3 --retry-delay 5 --max-time 30 -o dist/alerts.json \
             "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/alerts.json"
           python3 scripts/refresh.py alert-verify dist/alerts.json
-          test "$(ls -A dist | tr '\n' ' ')" = "alerts.json index.html "
+          test "$(ls -A dist | tr '\n' ' ')" = "alerts.json icon-180.png icon-192.png icon-512.png index.html manifest.webmanifest "
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0 (tag verified with git ls-remote)
@@ -217,3 +230,27 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1 (tag verified with git ls-remote)
+
+  notify:
+    # Once a refresh is live, tell the subscribed phone when it found new openings (scripts/push.mjs sends a Web
+    # Push message to the push service each subscription names; nothing else is contacted). Separate from deploy
+    # so the Pages deployment keeps its own permissions, and so a dead subscription fails only this job: the
+    # ledger is already published, and the owner sees the failure and re-subscribes.
+    needs: [refresh, deploy]
+    if: needs.refresh.result == 'success' && needs.deploy.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (tag verified with git ls-remote)
+        with:
+          persist-credentials: false
+
+      - name: Send the phone notification
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+          ALERT: ${{ needs.refresh.outputs.alert }}
+        run: node scripts/push.mjs --alert-env ALERT --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
