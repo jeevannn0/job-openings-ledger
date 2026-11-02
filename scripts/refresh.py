@@ -3457,15 +3457,20 @@ def load_outcome(data: object, config: Config) -> dict:
     return {k: data[k] for k in OUTCOME_FIELDS}
 
 
+NOTIFICATION_TITLE = "New openings listed"      # the phone notification's title whenever a refresh found news
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 def notification_text(new_by_company: list[tuple[str, int]], closing_count: int, total: int,
                       companies: int) -> tuple[str, str]:
-    """Plain-text popup title and body (at most ALERT_BODY_MAX characters, no markup)."""
+    """Plain-text popup title and body (at most ALERT_BODY_MAX characters, no markup).
+
+    The title is fixed wording (iOS appends the web app's own name to it); the counts live in the body."""
     new_count = sum(n for _c, n in new_by_company)
-    title = _plural(new_count, "new job opening") if new_count else "No new job openings"
+    title = NOTIFICATION_TITLE if new_count else "No new job openings"
     tail = (f"{closing_count} closing within {ALERT_CLOSING_DAYS} days. {_plural(total, 'job')} across "
             f"{companies} {'company' if companies == 1 else 'companies'}.")
     if new_count:

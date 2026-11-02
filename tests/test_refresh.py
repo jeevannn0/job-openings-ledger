@@ -2536,7 +2536,7 @@ class AlertTests(unittest.TestCase):
             r = rows[j["job_id"]]
             self.assertEqual(j, {"company": r.company, "job_id": r.job_id, "title": r.title,
                                  "canonical_url": r.canonical_url})
-        self.assertEqual(a["notification_title"], "13 new job openings")
+        self.assertEqual(a["notification_title"], "New openings listed")
         self.assertTrue(a["notification_body"].startswith("New: Siemens 1, JPMorganChase 1, GE HealthCare 1, "))
         self.assertNotIn("mode", a)                                           # run mode stays internal
         for title in {j["title"] for j in a["new_jobs"]}:
@@ -2576,7 +2576,7 @@ class AlertTests(unittest.TestCase):
         a = alert_for(self.state, self.config, added=keys)
         self.assertEqual((a["new_count"], len(a["new_jobs"]), a["remaining_new_count"]), (11, 8, 3))
         self.assertEqual([(j["company"], j["job_id"]) for j in a["new_jobs"]], keys[:8])   # page order
-        self.assertEqual(a["notification_title"], "11 new job openings")
+        self.assertEqual(a["notification_title"], "New openings listed")
 
     def test_closing_soon_window_and_order(self):
         state = with_closing(self.state, {0: self.day(7), 1: self.day(0), 2: self.day(8), 3: self.day(-1),
@@ -2609,10 +2609,11 @@ class AlertTests(unittest.TestCase):
         self.assertNotRegex(a["notification_title"] + a["notification_body"], r"[<>&\n]")
         long_names = [("Company " + "x" * 90, 1), ("Company " + "y" * 90, 2), ("Company " + "z" * 90, 3)]
         title, body = R.notification_text(long_names, 12, 999, 6)
-        self.assertEqual(title, "6 new job openings")
+        self.assertEqual(title, "New openings listed")                                  # fixed; the count is in the body
+        self.assertEqual(R.NOTIFICATION_TITLE, "New openings listed")
         self.assertEqual(body, "New: 6. 12 closing within 7 days. 999 jobs across 6 companies.")
         self.assertEqual(R.notification_text([("ZS", 1)], 1, 1, 1),
-                         ("1 new job opening", "New: ZS 1. 1 closing within 7 days. 1 job across 1 company."))
+                         ("New openings listed", "New: ZS 1. 1 closing within 7 days. 1 job across 1 company."))
 
     # ---- safety
 
