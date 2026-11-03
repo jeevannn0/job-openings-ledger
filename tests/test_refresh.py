@@ -5191,7 +5191,11 @@ class SourceHealthTests(unittest.TestCase):
                         'ini=c=>{const w=c.split(/\\s+/).filter(Boolean);return(w.length>1?w[0][0]+w[1][0]:c.slice(0,2))'
                         '.toUpperCase()}',
                         'const BAND={n:"No number",1:"≤ 1 year",2:"≤ 2 years"}',
-                        '${ns?"":`<p class="c-x"><span class="vh">Minimum experience stated: </span>${esc(e)}</p>`}',
+                        # The detail line never repeats the band: for a "no number" posting it shows only what the posting
+                        # asks for, and nothing when the posting says nothing.
+                        'x=(b==="n"?e.replace(/^No number of years stated — /,""):e).replace(/^./,m=>m.toUpperCase()),'
+                        'ns=!x||x==="Not stated"||x==="See posting for required experience",',
+                        '${ns?"":`<p class="c-x"><span class="vh">Minimum experience stated: </span>${esc(x)}</p>`}',
                         '<span class="vh">Job ID </span>${esc(id)}</span>${cd?',
                         '</p>`}</div></div></article>`};',
                         # Identical openings (same company, title, location and band) collapse into one card whose
@@ -5203,7 +5207,7 @@ class SourceHealthTests(unittest.TestCase):
                         '{const open=xg.has(g);return card(r,ki++,rest.length,g,open)+(open?rest.map(x=>card(x,ki++,0,g,false,1))'
                         '.join(""):"")}).join("")||\'<p class="none">No openings match these filters.</p>\'',
                         '${more?`<button class="mo" type="button" data-g="${esc(g)}" aria-expanded="${open}">${open?"−":"+"}'
-                        '${more} more<span class="vh"> openings with this title, ${open?"hide them":"show them"}</span></button>`:""}</p>',
+                        '${more} more<span class="vh"> openings with this title, ${open?"hide them":"show them"}</span></button>`:""}</span></p>',
                         'const xg=new Set();out.addEventListener("click",e=>{const b=e.target.closest(".mo");if(!b)return;'
                         'const g=b.dataset.g;xg.has(g)?xg.delete(g):xg.add(g);render();const n=out.querySelector(`.mo[data-g="${CSS.escape(g)}"]`);'
                         'if(n)n.focus()});',
@@ -5215,7 +5219,7 @@ class SourceHealthTests(unittest.TestCase):
                         # The posting date the portal shows (first-seen date for sources without one, row 11 = 1) sits
                         # beside the relative age in the meta line: "Oct 31 · 1 day ago", or "Nov 2 · seen today".
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
-                        '<span><span class="vh">${sb?"First seen":"Posted"} </span>${esc(d)}</span><span class="ag">${ago}</span>'):
+                        '<span class="ag"><span class="vh">${sb?"First seen":"Posted"} </span>${ago} <span class="pdt">(${esc(d)})</span></span>'):
             self.assertIn(snippet, script, snippet)
         # The button keeps its own box inside the overflow-hidden meta line (so focusing it cannot scroll the line)
         # and widens its hit area with a pseudo-element.
@@ -5257,13 +5261,25 @@ class SourceHealthTests(unittest.TestCase):
                         '?ftog:el).focus()});',
                         'q.value.trim()||onlyNew||+af.value<30',
                         'clf.value="";onlyNew=false;render();q.focus()};',
-                        '<p class="c-m">${nw===0?\'<span class="nw">New</span>\':""}<span class="bd" data-b="${esc(b)}">'):
+                        # Two groups: where/when (loud) first, details (quiet) second; the groups share a line when there
+                        # is room and stack on phones, so each fact has a fixed place.
+                        '<p class="c-m"><span class="mg">${nw===0?\'<span class="nw">New</span>\':""}<span class="wh">${esc(l)}</span>',
+                        '<span class="mg"><span class="bd" data-b="${esc(b)}"><span class="vh">Experience: </span>'
+                        '<span class="xl" aria-hidden="true">Exp</span>${esc(BAND[b]||"")}</span><span class="c-id">'):
             self.assertIn(snippet, script, snippet)
         self.assertIn(".tgl{display:flex;gap:6px}.tgl>.tgl{margin-left:6px}", style_of(doc))
         self.assertIn(".nw{font-weight:700;color:hsl(var(--signal))}", style_of(doc))
         # The relative age is the freshness cue, so it takes the line's emphasis (600, steel) and the posting date
         # beside it stays muted; the two no longer read as one token.
-        self.assertIn(".ag{font-weight:600;color:hsl(var(--steel))}", style_of(doc))
+        self.assertIn(".wh,.ag{font-weight:600;color:hsl(var(--steel))}", style_of(doc))
+        self.assertIn(".pdt,.xl{font-weight:500;color:hsl(var(--steel-muted))}", style_of(doc))
+        base, blocks = media_blocks(style_of(doc))
+        rules = dict((tuple(sel), body) for sel, body in css_rules(base))
+        self.assertEqual(rules[(".mg",)], "display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px var(--mg);min-width:0")
+        self.assertIn("gap:4px 32px", rules[(".c-m",)])                                        # wider than the dot gaps
+        self.assertIn('.mg>*+*:not(.bd):before{content:"·";content:"·"/"";position:absolute;top:0;left:calc(-1 * var(--mg));', base)
+        self.assertNotIn(".nw:after", base)                                                     # no stray dot after New
+        self.assertIn(".c-m{--mg:14px;gap:2px 24px;letter-spacing:.1em}.mg{gap:2px var(--mg)}", blocks[PHONE_MQ])
         self.assertIn('<option value="0">Today</option>', doc)
         self.assertNotIn("r[5]===0", script)
         # Row 10 of the job data is days since first seen, and the stats "New today" counts the published rows
