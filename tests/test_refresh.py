@@ -247,10 +247,11 @@ class SeedAndRenderTests(unittest.TestCase):
         legacy = R.read_text(LEGACY_PAGE)
         legacy_lines = set(re.search(r"\nconst jobs=\[\n(.*?)\n\];", legacy, re.S).group(1).split(",\n"))
         new_lines = set(re.search(r"\nconst jobs=\[\n(.*?)\n\];", first, re.S).group(1).split(",\n"))
-        # Rows gained an 11th field (days since first seen) and a 12th (seen-basis flag) after the legacy page;
-        # the first ten still match.
+        # Rows gained an 11th field (days since first seen), a 12th (seen-basis flag) and a 13th (apply URL) after
+        # the legacy page; the first ten still match.
         trimmed = {R.js_json(json.loads(line)[:10]) for line in new_lines}
-        self.assertTrue(all(len(json.loads(line)) == 12 and json.loads(line)[11] == 0 for line in new_lines))
+        self.assertTrue(all(len(json.loads(line)) == 13 and json.loads(line)[11] == 0
+                            and json.loads(line)[12].startswith("https://") for line in new_lines))
         self.assertEqual(trimmed, legacy_lines)
 
     def test_committed_index_matches_committed_state(self):
@@ -1125,8 +1126,8 @@ class NewSourceHelperTests(unittest.TestCase):
         self.assertNotIn("/jd", template)                            # the route reaches the page only as a placeholder
         card = script[script.index("const card="):script.index("function render()")]
         self.assertIn('<button class="jd" type="button" data-u="${esc(u)}" data-t="${esc(t)}" data-c="${esc(c)}" data-l="${esc(l)}">JD'
-                      '<span class="vh"> — read the job description here</span></button>${more?', card)
-        self.assertEqual(card.count("<a "), 1)                       # the title is still the card's only link
+                      '<span class="vh"> — read the job description here</span></button><a class="ap" ', card)
+        self.assertEqual(card.count("<a "), 2)                       # the title and the Apply link
         self.assertEqual(card.count("<button"), 2)                   # JD and "+N more"
         for snippet in ('const jdl=$("#jd"),jdw=$("#jd .term-win"),jdB=$("#jd-b"),jdT=$("#jd-t"),jdM=$("#jd-m"),jdL=$("#jd-l");',
                         'if(x.startsWith("\\u2022 ")){ul.push(x.slice(2));continue}',
@@ -1529,8 +1530,78 @@ class LogoTests(unittest.TestCase):
         self.assertGreaterEqual(len(logo_only), 10)
         self.assertEqual(logo_only & self.config.fetch_hosts, set())
         register_host = R.urllib.parse.urlsplit(self.config.register_url).hostname
-        self.assertEqual(set(self.config.link_hosts), source_hosts | logo_only | {register_host})
+        apply_only = {R.COMPANY_SPECS[c].apply_host for c in self.config.companies
+                      if "{url}" not in R.COMPANY_SPECS[c].apply} - source_hosts
+        self.assertEqual(set(self.config.link_hosts), source_hosts | logo_only | apply_only | {register_host})
         self.assertFalse(self.config.hosts[register_host].fetch)                # the refresh never calls the registry
+        for host in apply_only:
+            self.assertFalse(self.config.hosts[host].fetch, host)               # apply-only hosts are never fetched
+
+    def test_every_card_gets_an_allowlisted_apply_link(self):
+        """Each company's Apply link opens where the employer's own apply flow starts (its posting's /apply page,
+        the portal's sign-in, or the posting itself where no direct page exists); never anywhere else."""
+        expected = {
+            "Siemens": "https://jobs.siemens.com/en_US/externaljobs/ApplicationMethods?folderId={id}",
+            "GE Vernova": "https://gevernova.wd5.myworkdayjobs.com/Vernova_ExternalSite/job/Bengaluru/Apply_{id}/apply",
+            "IQVIA": "https://iqvia.wd1.myworkdayjobs.com/IQVIA/job/Bengaluru/Apply_{id}/apply",
+            "JPMorganChase": "{url}/apply/email", "GE HealthCare": "{url}/apply",
+            "ZS": "https://incareers-zs.icims.com/jobs/{id}/login",
+            "Accenture": "https://mycareer.accenture.com/?source=careers&JRID={id}",
+            "Lilly": "{url}/apply", "AstraZeneca": "{url}", "Shell": "{url}/apply", "GE Aerospace": "{url}/apply",
+            "Fractal": "{url}/apply",
+            "D. E. Shaw India": "https://www.apply.deshawindia.com/ApplicationPage1.html?entity=DESIS",
+            "Honeywell": "{url}/apply/email", "AMD": "https://global-external-amd.icims.com/jobs/{id}/login",
+            "Qualcomm": "https://careers.qualcomm.com/careers/apply?pid={id}",
+        }
+        self.assertEqual({c: R.COMPANY_SPECS[c].apply for c in self.config.companies}, expected)
+        self.assertEqual(R.APPLY_WORKDAY, "{url}/apply")
+        self.assertEqual(R.APPLY_ORACLE, "{url}/apply/email")
+        seen = set()
+        for r in self.state.jobs:
+            url = R.apply_url(r, self.config)
+            parts = R.urllib.parse.urlsplit(url)
+            self.assertEqual(parts.scheme, "https")
+            self.assertFalse(parts.fragment)
+            self.assertIsNone(R.check_url(url, self.config.link_hosts), url)
+            self.assertTrue(R.APPLY_URL.fullmatch(url), url)
+            if "{id}" in expected[r.company]:
+                self.assertIn(r.job_id, url)
+            elif expected[r.company].startswith("{url}"):
+                self.assertTrue(url.startswith(r.canonical_url), url)
+            seen.add(r.company)
+        self.assertGreaterEqual(len(seen), 6)
+        row = self.state.jobs[0]
+        self.assertEqual(R.apply_url(dataclasses.replace(row, company="Lilly", job_id="R-114339",
+                                                         canonical_url="https://lilly.wd115.myworkdayjobs.com/LLY/job/India-Bengaluru/eCOA-Build-Programmer_R-114339"),
+                                     self.config), "https://lilly.wd115.myworkdayjobs.com/LLY/job/India-Bengaluru/eCOA-Build-Programmer_R-114339/apply")
+        self.assertEqual(R.apply_url(dataclasses.replace(row, company="JPMorganChase", job_id="210802395",
+                                                         canonical_url="https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210802395"),
+                                     self.config), "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210802395/apply/email")
+        # Fail closed: a template that leaves the allowlist, or a URL shape with a fragment or odd characters.
+        zs = R.COMPANY_SPECS["ZS"]
+        zs_row = next(r for r in self.state.jobs if r.company == "ZS")
+        for bad in ("https://apply.example/{id}", "https://jobs.zs.com/jobs/{id}#apply", "https://jobs.zs.com/jobs/{id}/a b",
+                    "http://jobs.zs.com/jobs/{id}/apply", "https://jobs.zs.com/jobs/{id}?x=<y>"):
+            with self.subTest(bad), mock.patch.dict(R.COMPANY_SPECS, {"ZS": dataclasses.replace(zs, apply=bad)}):
+                with self.assertRaises(ValueError):
+                    R.apply_url(zs_row, self.config)
+                with self.assertRaises(ValueError):
+                    R.render(self.state, self.template, self.config)
+        # Row 12 of the page data is the apply URL, and each card links to it with the usual link hygiene.
+        doc = R.render(self.state, self.template, self.config)
+        rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
+        by_id = {r.job_id: r for r in self.state.jobs}
+        self.assertTrue(all(len(r) == 13 for r in rows))
+        for r in rows:
+            self.assertEqual(r[12], R.apply_url(by_id[r[1]], self.config))
+        script = main_script(doc)
+        self.assertIn('const card=(r,i,more,g,open,sub)=>{const[c,id,t,e,d,a,l,u,b,cd,nw,sb,ap]=r,', script)
+        self.assertIn('<a class="ap" href="${esc(ap)}" rel="noopener noreferrer">Apply<span class="vh"> on the employer\'s site'
+                      '</span></a>${more?', script)
+        style = style_of(doc)
+        self.assertIn('.ap{padding:1px 7px;border:1px solid hsl(var(--signal)/.55);font-weight:700;color:hsl(var(--signal))}'
+                      '.ap:after{content:"";position:absolute;inset:-8px -4px}.ap:hover,.ap:focus-visible{background:hsl(var(--signal)/.12)}',
+                      style)
 
     def test_logo_url_outside_the_allowlist_or_shape_fails_closed(self):
         zs = R.COMPANY_SPECS["ZS"]
@@ -1744,7 +1815,7 @@ class BoundaryScanTests(unittest.TestCase):
         self.assertIn("index.html: does not match render(state/jobs.json)", problems)
 
     def test_scan_flags_fixture_urls_off_the_allowlist(self):
-        for url in ("https://careers.gehealthcare.com/global/en/job/R4048338", "https://incareers-zs.icims.com/jobs/1"):
+        for url in ("https://careers.gehealthcare.com/global/en/job/R4048338", "https://careers-other.icims.com/jobs/1"):
             with self.subTest(url):
                 root = self.copy_repo()
                 with open(os.path.join(root, "tests", "fixtures", "extra.json"), "w", encoding="utf-8") as fh:
@@ -5183,7 +5254,7 @@ class SourceHealthTests(unittest.TestCase):
         doc = R.render(self.state, self.template, self.config)
         script = main_script(doc)
         # One flat stream of cards; only the first 12 animate, and only on the first render.
-        for snippet in ('const card=(r,i,more,g,open,sub)=>{const[c,id,t,e,d,a,l,u,b,cd,nw,sb]=r,', 'anim=!booted&&i<12',
+        for snippet in ('const card=(r,i,more,g,open,sub)=>{const[c,id,t,e,d,a,l,u,b,cd,nw,sb,ap]=r,', 'anim=!booted&&i<12',
                         '<span class="av" aria-hidden="true">${esc(ini(c))}${lg(c)}</span>',
                         # "Company – Title": a dash, not a verb, so sources with and without posting dates read alike.
                         '<h3 class="c-l"><span class="c-co">${esc(c)}</span> – <a class="job" '
@@ -5231,8 +5302,8 @@ class SourceHealthTests(unittest.TestCase):
         for gone in ('class="sec"', "groups.set(", "<ol class=\"rows\">", 'class="c-f"', 'class="tags"', 'class="tg',
                      'class="go"', "open ↗", "slug", "lb=STALE"):
             self.assertNotIn(gone, script, gone)
-        # The title is the card's only link.
-        self.assertEqual(script[script.index("const card="):script.index("function render()")].count("<a "), 1)
+        # The title and the Apply link are the card's only links.
+        self.assertEqual(script[script.index("const card="):script.index("function render()")].count("<a "), 2)
         # Sorting: newest = age then configured company order; closing soon = known deadlines first.
         self.assertIn("byNew=(x,y)=>x[5]-y[5]||oi(x[0])-oi(y[0]),byClose=(x,y)=>{const a=daysToClose(x[9]),"
                       "b=daysToClose(y[9]);return a===b?byNew(x,y):a===null?1:b===null?-1:a-b}", script)
@@ -5285,7 +5356,7 @@ class SourceHealthTests(unittest.TestCase):
         # Row 10 of the job data is days since first seen, and the stats "New today" counts the published rows
         # where it is 0.
         rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))
-        self.assertTrue(all(len(r) == 12 and isinstance(r[10], int) and r[10] >= 0 and r[11] in (0, 1) for r in rows))
+        self.assertTrue(all(len(r) == 13 and isinstance(r[10], int) and r[10] >= 0 and r[11] in (0, 1) for r in rows))
         by_id = {r.job_id: r for r in self.state.jobs}
         for r in rows:
             first = dt.date.fromisoformat(by_id[r[1]].first_seen)

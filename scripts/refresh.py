@@ -120,14 +120,29 @@ class CompanySpec:
     modes: frozenset
     hosts: frozenset          # hosts the company's links and fetches may use
     logo: str                 # the employer's own site icon; the visitor's browser loads it, this script never does
+    apply: str                # the posting's apply page: a template over {url} (the posting) and {id} (its job ID)
 
     @property
     def logo_host(self) -> str:
         return urllib.parse.urlsplit(self.logo).hostname or ""
 
+    @property
+    def apply_host(self) -> str:
+        return urllib.parse.urlsplit(self.apply.format(url="https://x.invalid/", id="0")).hostname or ""
 
-def _spec(url_re: str, modes: Iterable[str], hosts: Iterable[str], logo: str) -> CompanySpec:
-    return CompanySpec(re.compile(url_re), frozenset(modes) | {"static"}, frozenset(hosts), logo)
+
+def _spec(url_re: str, modes: Iterable[str], hosts: Iterable[str], logo: str, apply: str = "{url}") -> CompanySpec:
+    return CompanySpec(re.compile(url_re), frozenset(modes) | {"static"}, frozenset(hosts), logo, apply)
+
+
+# Where each portal's apply flow starts, checked in a browser on 4 Nov 2026. Workday: the posting's own path plus
+# /apply (sign-in, then the form; the slug is ignored, only the ID matters). Oracle Recruiting: /apply/email.
+# Avature (Siemens): the ApplicationMethods page. Jibe (ZS, AMD): the iCIMS sign-in the portal's own Apply button
+# opens. Eightfold (Qualcomm): /careers/apply?pid=. Accenture: mycareer.accenture.com with the requisition ID.
+# D. E. Shaw: one application form for every role. AstraZeneca's Apply button opens an Eightfold page whose ID is
+# not derivable from the posting, so its button opens the posting itself (the default).
+APPLY_WORKDAY = "{url}/apply"
+APPLY_ORACLE = "{url}/apply/email"
 
 
 # Card logos are the icons the employers publish for their own sites (favicon / apple-touch-icon), referenced
@@ -136,57 +151,66 @@ def _spec(url_re: str, modes: Iterable[str], hosts: Iterable[str], logo: str) ->
 # Chromium and WebKit on 2 Nov 2026, and one that stops loading falls back to the company's initials.
 COMPANY_SPECS = {
     "Siemens": _spec(r"https://jobs\.siemens\.com/en_US/externaljobs/JobDetail/(\d{5,7})",
-                     {"siemens_avature_html"}, {"jobs.siemens.com"}, "https://www.siemens.com/_static/favicon.svg"),
+                     {"siemens_avature_html"}, {"jobs.siemens.com"}, "https://www.siemens.com/_static/favicon.svg",
+                     "https://jobs.siemens.com/en_US/externaljobs/ApplicationMethods?folderId={id}"),
     "GE Vernova": _spec(r"https://careers\.gevernova\.com/[a-z0-9]+(?:-[a-z0-9]+)*/job/(R\d{6,8})",
                         {"gevernova_paradox_api"}, {"careers.gevernova.com"},
-                        "https://careers.gevernova.com/favicon-192x192.png"),
+                        "https://careers.gevernova.com/favicon-192x192.png",
+                        "https://gevernova.wd5.myworkdayjobs.com/Vernova_ExternalSite/job/Bengaluru/Apply_{id}/apply"),
     "IQVIA": _spec(r"https://jobs\.iqvia\.com/en/jobs/(R\d{6,8})-0",
                    {"iqvia_workday_cxs"}, {"jobs.iqvia.com", "iqvia.wd1.myworkdayjobs.com"},
-                   "https://www.iqvia.com/Content/Shotgun/img/favicon/apple-icon-precomposed.png?v=4"),
+                   "https://www.iqvia.com/Content/Shotgun/img/favicon/apple-icon-precomposed.png?v=4",
+                   "https://iqvia.wd1.myworkdayjobs.com/IQVIA/job/Bengaluru/Apply_{id}/apply"),
     "JPMorganChase": _spec(r"https://jpmc\.fa\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/(\d{6,12})",
                            {"jpm_oracle_ce"}, {"jpmc.fa.oraclecloud.com"},
                            "https://www.jpmorganchase.com/etc.clientlibs/cws/clientlibs/clientlib-base/resources/jpmc/images/"
-                           "jpmc-favicon-152.png"),
+                           "jpmc-favicon-152.png", APPLY_ORACLE),
     "GE HealthCare": _spec(r"https://gehc\.wd5\.myworkdayjobs\.com/GEHC_ExternalSite/job/[A-Za-z0-9-]+/"
                            r"[A-Za-z0-9-]+_(R\d{6,8})(?:-\d{1,3})?",
                            {"gehc_workday_cxs"}, {"gehc.wd5.myworkdayjobs.com"},
                            "https://www.gehealthcare.com/etc.clientlibs/gehealthcare/clientlibs/clientlib-site/resources/favicons/"
-                           "favicon-512x512.png"),
+                           "favicon-512x512.png", APPLY_WORKDAY),
     # zs.com publishes its mark as the Organization logo of its home page; its favicons are 32 px bitmaps.
     "ZS": _spec(r"https://jobs\.zs\.com/jobs/(\d{3,8})", {"zs_jibe_api"}, {"jobs.zs.com"},
-                "https://www.zs.com/media_1b8724fe009e8982e66a149bbca1eb3e1e1d909e9.svg"),
+                "https://www.zs.com/media_1b8724fe009e8982e66a149bbca1eb3e1e1d909e9.svg",
+                "https://incareers-zs.icims.com/jobs/{id}/login"),
     "Accenture": _spec(r"https://www\.accenture\.com/in-en/careers/jobdetails\?id=([A-Za-z0-9-]{6,40})_en",
                        {"accenture_findjobs_api"}, {"www.accenture.com"},
-                       "https://www.accenture.com/content/dam/accenture/final/images/icons/symbol/Acc_GT_Dimensional_RGB.svg"),
+                       "https://www.accenture.com/content/dam/accenture/final/images/icons/symbol/Acc_GT_Dimensional_RGB.svg",
+                       "https://mycareer.accenture.com/?source=careers&JRID={id}"),
     "Lilly": _spec(r"https://lilly\.wd115\.myworkdayjobs\.com/LLY/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
                    r"_(R-\d{5,7})(?:-\d{1,3})?", {"workday_cxs"}, {"lilly.wd115.myworkdayjobs.com"},
-                   "https://www.lilly.com/apple-touch-icon.png"),
+                   "https://www.lilly.com/apple-touch-icon.png", APPLY_WORKDAY),
     "AstraZeneca": _spec(r"https://careers\.astrazeneca\.com/job/[^/\s\"]+/[^/\s\"]+/\d{3,6}/(\d{6,14})",
                          {"astrazeneca_talentbrew_html"}, {"careers.astrazeneca.com"},
                          "https://www.astrazeneca.com/etc/designs/az/img/favicons/icon-apple-touch-icon-152x152.png"),
     "Shell": _spec(r"https://shell\.wd3\.myworkdayjobs\.com/ShellCareers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
                    r"_(R\d{5,8})(?:-\d{1,3})?", {"workday_cxs"}, {"shell.wd3.myworkdayjobs.com"},
-                   "https://www.shell.com/etc.clientlibs/amidala/clientlibs/theme-base/resources/favicon/favicon.svg"),
+                   "https://www.shell.com/etc.clientlibs/amidala/clientlibs/theme-base/resources/favicon/favicon.svg",
+                   APPLY_WORKDAY),
     "GE Aerospace": _spec(r"https://geaerospace\.wd5\.myworkdayjobs\.com/GE_ExternalSite/job/(?:[A-Za-z0-9._~%-]+/)?"
                           r"[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?", {"workday_cxs"}, {"geaerospace.wd5.myworkdayjobs.com"},
-                          "https://www.geaerospace.com/themes/custom/aero_sub_theme/favicon.ico"),
+                          "https://www.geaerospace.com/themes/custom/aero_sub_theme/favicon.ico", APPLY_WORKDAY),
     # fractal.ai declares its icon on the Framer asset CDN that hosts its site; there is no copy on fractal.ai.
     "Fractal": _spec(r"https://fractal\.wd1\.myworkdayjobs\.com/Careers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
                      r"_(SR-\d{4,7})(?:-\d{1,3})?", {"workday_cxs"}, {"fractal.wd1.myworkdayjobs.com"},
-                     "https://framerusercontent.com/images/2NEvcDMv0ErqoXzQe3A9Z2TJgiE.png"),
+                     "https://framerusercontent.com/images/2NEvcDMv0ErqoXzQe3A9Z2TJgiE.png", APPLY_WORKDAY),
     "D. E. Shaw India": _spec(r"https://www\.deshawindia\.com/careers/[A-Za-z0-9-]+-(\d{3,7})",
-                              {"deshaw_nextdata_html"}, {"www.deshawindia.com"}, "https://www.deshawindia.com/favicon.ico"),
+                              {"deshaw_nextdata_html"}, {"www.deshawindia.com"}, "https://www.deshawindia.com/favicon.ico",
+                              "https://www.apply.deshawindia.com/ApplicationPage1.html?entity=DESIS"),
     "Honeywell": _spec(r"https://careers\.honeywell\.com/en/sites/Honeywell/job/(\d{5,8})", {"oracle_ce"},
                        {"careers.honeywell.com", "ibqbjb.fa.ocs.oraclecloud.com"},
                        "https://www.honeywell.com/content/dam/honcorp/us-en/common-assets/logos/"
-                       "hon-honeywell-technologies-logo-mini.svg"),
+                       "hon-honeywell-technologies-logo-mini.svg", APPLY_ORACLE),
     # careers.amd.com names amd.com's header mark as its hiring-organisation logo. amd.com was unreachable from the
     # checking network on 2 Nov 2026, so this one is unverified; a card whose icon fails to load shows the initials.
     "AMD": _spec(r"https://careers\.amd\.com/jobs/(\d{4,7})", {"jibe_api"}, {"careers.amd.com"},
-                 "https://www.amd.com/content/dam/code/images/header/amd-header-logo.svg"),
+                 "https://www.amd.com/content/dam/code/images/header/amd-header-logo.svg",
+                 "https://global-external-amd.icims.com/jobs/{id}/login"),
     # The careers site's own icon is a 1044 px PNG served under the favicon.ico name; qualcomm.com has 32 px bitmaps.
     "Qualcomm": _spec(r"https://careers\.qualcomm\.com/careers/job/(\d{9,15})", {"eightfold_pcsx_api"},
-                      {"careers.qualcomm.com"}, "https://careers.qualcomm.com/favicon.ico"),
+                      {"careers.qualcomm.com"}, "https://careers.qualcomm.com/favicon.ico",
+                      "https://careers.qualcomm.com/careers/apply?pid={id}"),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -707,7 +731,9 @@ def load_config(data: dict) -> Config:
             else:
                 lo, hi = rule
                 _check(isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi, f"config: {name}.{key}")
-        needed_link |= spec.hosts | {spec.logo_host}     # the logo host is link-only unless a source also fetches it
+        # The logo and apply hosts are link-only unless a source also fetches them; an apply template over {url}
+        # alone stays on the posting's own host, which the spec already lists.
+        needed_link |= spec.hosts | {spec.logo_host} | ({spec.apply_host} if "{url}" not in spec.apply else set())
         if mode != "static":
             needed_fetch |= spec.hosts
         companies.append(name)
@@ -1459,6 +1485,18 @@ def logo_urls(config: Config) -> dict[str, str]:
     return out
 
 
+APPLY_URL = re.compile(r"https://[a-z0-9.-]+/[A-Za-z0-9._~/%-]*(?:\?[A-Za-z0-9._~%&=-]*)?")
+
+
+def apply_url(row: Row, config: Config) -> str:
+    """The card's Apply link for one posting. Fails closed like logo_urls: a plain https URL, no fragment, on a
+    host the config allowlists for links, so the public page can never send a reader anywhere else."""
+    url = COMPANY_SPECS[row.company].apply.format(url=row.canonical_url, id=row.job_id)
+    if check_url(url, config.link_hosts) or not APPLY_URL.fullmatch(url):
+        raise ValueError("render: a company apply URL is not an allowlisted plain URL")
+    return url
+
+
 def jd_url(config: Config) -> str:
     """The Worker route that fetches one posting's description on demand: the push registry's sibling route
     (same Worker, same origin), so the config names the Worker once. Nothing about a posting is stored here."""
@@ -1484,8 +1522,10 @@ def render(state: State, template: str, config: Config) -> str:
     # Row 10: days since the ledger first saw the posting (0 = new today). This is what the feed's "New today"
     # toggle, the New tag on cards and the terminal's "+N new" all mean; the posting's own date is row 5.
     # Row 11: 1 when the source publishes no posting date, so row 5 counts from first sight (SEEN_BASIS_MODES).
+    # Row 12: where the employer's apply flow for this posting starts (apply_url).
     rows = [r.js_row(state.as_of) + [days_since(r.first_seen, state.as_of),
-                                     int(config.sources[r.company]["mode"] in SEEN_BASIS_MODES)] for r in state.jobs]
+                                     int(config.sources[r.company]["mode"] in SEEN_BASIS_MODES),
+                                     apply_url(r, config)] for r in state.jobs]
     visible = [r for r in rows if r[5] <= config.max_age_days]
     companies = len({r[0] for r in visible})
     day = long_date(state.as_of)
