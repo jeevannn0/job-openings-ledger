@@ -4457,7 +4457,7 @@ class SourceHealthTests(unittest.TestCase):
         svgs = re.findall(r"<svg\b.*?</svg>", doc, re.S | re.I)
         self.assertEqual(len(svgs), 3)
         symbol, mark, use = svgs
-        self.assertTrue(symbol.startswith('<svg class="dsym" aria-hidden="true" focusable="false"><symbol id="dt" viewBox="0 0 22 26">'))
+        self.assertTrue(symbol.startswith('<svg class="dsym" aria-hidden="true" focusable="false"><symbol id="dt" viewBox="0 0 26 30">'))
         self.assertEqual(set(re.findall(r"<(\w+)", symbol)), {"svg", "symbol", "g", "rect", "circle", "path"})
         self.assertEqual(set(re.findall(r"<(\w+)", mark)), {"svg", "g", "rect"})
         for svg in (symbol, mark):
@@ -5395,8 +5395,8 @@ class SourceHealthTests(unittest.TestCase):
             R.render(self.state, self.template, self.config)
 
     def test_dog_tag_marks_openings_the_reader_opened(self):
-        """A dog tag sits at each card's top-left corner: outlined until the reader opens the posting (title or
-        Apply) and stays away at least three seconds, then filled. A tap on the tag toggles it by hand. The
+        """A dog tag hangs off each card's top-right corner: outlined until the reader opens the posting (title or
+        Apply) and stays away at least three seconds, then filled red. A tap on the tag toggles it by hand. The
         marks live only in this browser's localStorage under one key; nothing leaves the device."""
         doc = R.render(self.state, self.template, self.config)
         script, style = main_script(doc), style_of(doc)
@@ -5408,19 +5408,24 @@ class SourceHealthTests(unittest.TestCase):
                       '</button><div class="c-h">', card)
         self.assertIn("tg=tags.has(`${c}|${id}`);return `", card)
         self.assertEqual(card.count('class="dtag'), 1)
-        # The symbol is the Call of Duty Mobile dog tag: two tags fanned on a bead chain (a dotted stroke), each a
-        # rounded plate with a hole and an "M" emblem; every colour is a custom property so the button's state
+        # The symbol is the Call of Duty Mobile dog tag: two plates fanned on a bead chain (a dotted stroke with a
+        # clasp bead at the apex), each a rounded plate with a rim highlight, a ringed hole, an "M" emblem over
+        # its own shadow and two stamped text lines; every colour is a custom property so the button's state
         # recolours the instance (selectors cannot reach into a <use>). It opens <main>, ahead of the header.
         symbol = re.search(r'<svg class="dsym".*?</svg>', doc, re.S).group(0)
         self.assertIn('<main id="main" class="container boot-in">\n' + symbol + '\n<header class="hdr">', doc)
-        self.assertIn('<path d="M7.8 8.7C7 2.6 15.4 1.4 15.2 10.2" style="fill:none;stroke:var(--ch);stroke-width:1.4;'
-                      'stroke-linecap:round;stroke-dasharray:0 1.8"/>', symbol)                                  # the chain
-        self.assertEqual(symbol.count("<rect"), 2)                                                            # two plates
-        self.assertEqual(symbol.count("<circle"), 2)                                                          # two holes
-        self.assertEqual(symbol.count('l1.5-4.2 1.3 2.4 1.3-2.4 1.5 4.2"'), 2)                                 # two M emblems
-        self.assertEqual(re.findall(r'transform="([^"]+)"', symbol), ["rotate(12 8 7.5)", "rotate(-8 15 9)"])  # the fan
-        self.assertEqual(sorted(set(re.findall(r"var\(--(\w+)\)", symbol))), ["ch", "em", "hl", "tb", "tf", "tl"])
+        self.assertIn('<path d="M9.3 10.6C8 2.8 18.4 1.4 17.3 12.1" style="fill:none;stroke:var(--ch);stroke-width:1.5;'
+                      'stroke-linecap:round;stroke-dasharray:0 2"/><circle cx="13" cy="3.4" r="1.1" style="fill:var(--ch)"/>',
+                      symbol)                                                                                 # chain + clasp
+        self.assertEqual(symbol.count("<rect"), 4)                                                            # plates + rims
+        self.assertEqual(symbol.count("<circle"), 3)                                                          # holes + clasp
+        self.assertEqual(symbol.count('l1.6-4.6 1.45 2.6 1.45-2.6 1.6 4.6"'), 4)                               # M + shadow, x2
+        self.assertEqual(symbol.count("stroke-opacity:.55"), 2)                                               # stamped lines
+        self.assertEqual(re.findall(r'transform="([^"]+)"', symbol), ["rotate(12 9.25 10.6)", "rotate(-8 17.25 12.1)"])
+        self.assertEqual(sorted(set(re.findall(r"var\(--(\w+)\)", symbol))), ["ch", "em", "hi", "hl", "sh", "tb", "tf", "tl"])
         self.assertNotIn("transform", style[style.index(".dtag{"):style.index(".dtag.on:hover")])          # CSS moves nothing
+        # The title keeps clear of the tag's corner.
+        self.assertIn(".c-l{margin:0;padding-right:16px;font:400 14px/1.375 var(--font-sans);", style)
         # State: one localStorage key, read once at boot, written on every change, tolerant of a blocked store.
         for snippet in ('let tags=new Set();try{tags=new Set(JSON.parse(localStorage.getItem("k9tags")||"[]"))}catch(e){}',
                         'const TAG_MS=3000,tag=(k,on)=>{on?tags.add(k):tags.delete(k);try{localStorage.setItem("k9tags",'
@@ -5438,21 +5443,24 @@ class SourceHealthTests(unittest.TestCase):
             self.assertIn(snippet, script, snippet)
         self.assertEqual(script.count("k9tags"), 2)                       # read and write, nowhere else
         self.assertEqual(script.count("setTimeout("), 3)                  # the tag adds no timer
-        # Look: a 22x26 button hanging off the card's top-left corner, above the phone's whole-card title hit area,
-        # with a hit area 8 px past its box. Off = plates in the card's own background with muted-steel lines
-        # (hover/focus turns the lines purple); on = back plate in the soft purple, front plate in the signal
-        # purple, dark seams, a steel emblem and chain, holes punched through to the background.
+        # Look: a 26x30 button hanging off the card's top-right corner, above the phone's whole-card title hit area,
+        # with a hit area 8 px past its box. Off = plates in the card's own background with muted-steel lines and
+        # no emblem shadow (hover/focus turns the lines red); on = a dark red back plate behind a red front plate,
+        # dark seams, a white emblem over a dark shadow, a steel chain, holes punched through to the background.
+        # The red is its own hue (2), not the closing-soon warning token, in both themes.
         self.assertIn(".dsym{position:absolute;width:0;height:0;overflow:hidden}"
-                      ".dtag{position:absolute;top:-5px;left:-4px;z-index:1;width:22px;height:26px;padding:0;border:0;background:none;"
+                      ".dtag{position:absolute;top:-6px;right:-5px;z-index:1;width:26px;height:30px;padding:0;border:0;background:none;"
                       "cursor:pointer;--tb:hsl(var(--void));--tf:hsl(var(--void));--tl:hsl(var(--steel-muted)/.8);"
-                      "--em:hsl(var(--steel-muted)/.8);--ch:hsl(var(--steel-muted)/.8);--hl:hsl(var(--steel-muted)/.8)}"
+                      "--em:hsl(var(--steel-muted)/.8);--ch:hsl(var(--steel-muted)/.8);--hl:hsl(var(--steel-muted)/.8);"
+                      "--hi:hsl(var(--steel-muted)/.25);--sh:transparent}"
                       ".dts{display:block;width:100%;height:100%;overflow:visible}"
                       '.dtag:after{content:"";position:absolute;inset:-8px}'
-                      ".dtag:hover,.dtag:focus-visible{--tl:hsl(var(--signal));--em:hsl(var(--signal));--ch:hsl(var(--signal));"
-                      "--hl:hsl(var(--signal))}"
-                      ".dtag.on{--tb:hsl(var(--signal-soft));--tf:hsl(var(--signal));--tl:hsl(var(--void-deep)/.7);"
-                      "--em:hsl(var(--steel));--ch:hsl(var(--steel-2));--hl:hsl(var(--void))}"
-                      ".dtag.on:hover,.dtag.on:focus-visible{--tf:hsl(var(--signal-glow))}", style)
+                      ".dtag:hover,.dtag:focus-visible{--tl:hsl(2 88% 57%);--em:hsl(2 88% 57%);--ch:hsl(2 88% 57%);"
+                      "--hl:hsl(2 88% 57%);--hi:hsl(2 88% 57%/.3)}"
+                      ".dtag.on{--tb:hsl(2 70% 42%);--tf:hsl(2 88% 57%);--tl:hsl(var(--void-deep)/.7);"
+                      "--em:hsl(0 0% 100%/.92);--ch:hsl(var(--steel-2));--hl:hsl(var(--void));--hi:hsl(0 0% 100%/.35);"
+                      "--sh:hsl(var(--void-deep)/.5)}"
+                      ".dtag.on:hover,.dtag.on:focus-visible{--tf:hsl(2 95% 64%)}", style)
         self.assertNotIn("border-radius", style[style.index(".dsym{"):style.index(".c-h{")])              # rounding is the SVG's
 
     def test_feed_cards_sorting_and_company_chips(self):
