@@ -4457,7 +4457,7 @@ class SourceHealthTests(unittest.TestCase):
         svgs = re.findall(r"<svg\b.*?</svg>", doc, re.S | re.I)
         self.assertEqual(len(svgs), 3)
         symbol, mark, use = svgs
-        self.assertTrue(symbol.startswith('<svg class="dsym" aria-hidden="true" focusable="false"><symbol id="dt" viewBox="0 0 26 30">'))
+        self.assertTrue(symbol.startswith('<svg class="dsym" aria-hidden="true" focusable="false"><symbol id="dt" viewBox="0 0 30 34">'))
         self.assertEqual(set(re.findall(r"<(\w+)", symbol)), {"svg", "symbol", "g", "rect", "circle", "path"})
         self.assertEqual(set(re.findall(r"<(\w+)", mark)), {"svg", "g", "rect"})
         for svg in (symbol, mark):
@@ -5414,18 +5414,21 @@ class SourceHealthTests(unittest.TestCase):
         # recolours the instance (selectors cannot reach into a <use>). It opens <main>, ahead of the header.
         symbol = re.search(r'<svg class="dsym".*?</svg>', doc, re.S).group(0)
         self.assertIn('<main id="main" class="container boot-in">\n' + symbol + '\n<header class="hdr">', doc)
-        self.assertIn('<path d="M9.3 10.6C8 2.8 18.4 1.4 17.3 12.1" style="fill:none;stroke:var(--ch);stroke-width:1.5;'
-                      'stroke-linecap:round;stroke-dasharray:0 2"/><circle cx="13" cy="3.4" r="1.1" style="fill:var(--ch)"/>',
-                      symbol)                                                                                 # chain + clasp
-        self.assertEqual(symbol.count("<rect"), 4)                                                            # plates + rims
-        self.assertEqual(symbol.count("<circle"), 3)                                                          # holes + clasp
-        self.assertEqual(symbol.count('l1.6-4.6 1.45 2.6 1.45-2.6 1.6 4.6"'), 4)                               # M + shadow, x2
-        self.assertEqual(symbol.count("stroke-opacity:.55"), 2)                                               # stamped lines
-        self.assertEqual(re.findall(r'transform="([^"]+)"', symbol), ["rotate(12 9.25 10.6)", "rotate(-8 17.25 12.1)"])
-        self.assertEqual(sorted(set(re.findall(r"var\(--(\w+)\)", symbol))), ["ch", "em", "hi", "hl", "sh", "tb", "tf", "tl"])
+        # Sticker style like the game's icon: every line is drawn twice, a thick dark outline under a lighter
+        # fill — the bead chain (two dotted strokes on one path), the plates (outline + a two-tone face) and the
+        # chunky "M" emblems.
+        self.assertIn('<path d="M11 12.4C10 4.6 20.4 3.6 19 14.4" style="fill:none;stroke:var(--ol);stroke-width:3.2;'
+                      'stroke-linecap:round;stroke-dasharray:0 2.6"/><path d="M11 12.4C10 4.6 20.4 3.6 19 14.4" style="fill:none;'
+                      'stroke:var(--ch);stroke-width:2;stroke-linecap:round;stroke-dasharray:0 2.6"/>', symbol)   # the chain
+        self.assertEqual(symbol.count("<rect"), 4)                                                            # plates + faces
+        self.assertEqual(symbol.count("<circle"), 2)                                                          # two holes
+        self.assertEqual(symbol.count('l1.5-5.8 2.1 3.4 2.1-3.4 1.5 5.8"'), 4)                                 # M outline + fill, x2
+        self.assertEqual(symbol.count("stroke-width:3.6"), 2)                                                 # the M outlines
+        self.assertEqual(re.findall(r'transform="([^"]+)"', symbol), ["rotate(-7 11 12.6)", "rotate(6 19 14.6)"])
+        self.assertEqual(sorted(set(re.findall(r"var\(--(\w+)\)", symbol))), ["ch", "em", "eo", "hl", "ol", "tb", "tb2", "tf", "tf2"])
         self.assertNotIn("transform", style[style.index(".dtag{"):style.index(".dtag.on:hover")])          # CSS moves nothing
         # The title keeps clear of the tag's corner.
-        self.assertIn(".c-l{margin:0;padding-right:16px;font:400 14px/1.375 var(--font-sans);", style)
+        self.assertIn(".c-l{margin:0;padding-right:20px;font:400 14px/1.375 var(--font-sans);", style)
         # State: one localStorage key, read once at boot, written on every change, tolerant of a blocked store.
         for snippet in ('let tags=new Set();try{tags=new Set(JSON.parse(localStorage.getItem("k9tags")||"[]"))}catch(e){}',
                         'const TAG_MS=3000,tag=(k,on)=>{on?tags.add(k):tags.delete(k);try{localStorage.setItem("k9tags",'
@@ -5443,24 +5446,23 @@ class SourceHealthTests(unittest.TestCase):
             self.assertIn(snippet, script, snippet)
         self.assertEqual(script.count("k9tags"), 2)                       # read and write, nowhere else
         self.assertEqual(script.count("setTimeout("), 3)                  # the tag adds no timer
-        # Look: a 26x30 button hanging off the card's top-right corner, above the phone's whole-card title hit area,
-        # with a hit area 8 px past its box. Off = plates in the card's own background with muted-steel lines and
-        # no emblem shadow (hover/focus turns the lines red); on = a dark red back plate behind a red front plate,
-        # dark seams, a white emblem over a dark shadow, a steel chain, holes punched through to the background.
-        # The red is its own hue (2), not the closing-soon warning token, in both themes.
+        # Look: a 30x34 button hanging off the card's top-right corner, above the phone's whole-card title hit area,
+        # with a hit area 8 px past its box. Off = muted-steel outlines, plates in the card's own background with a
+        # faint plate face, a steel M with no outline (hover/focus turns the lines red). On = near-black outlines,
+        # a dark red back plate behind a red front plate, each with a lighter face, a pale pink M outlined dark,
+        # steel beads, holes punched through to the background. The red is its own hue (2), not the closing-soon
+        # warning token, in both themes.
         self.assertIn(".dsym{position:absolute;width:0;height:0;overflow:hidden}"
-                      ".dtag{position:absolute;top:-6px;right:-5px;z-index:1;width:26px;height:30px;padding:0;border:0;background:none;"
-                      "cursor:pointer;--tb:hsl(var(--void));--tf:hsl(var(--void));--tl:hsl(var(--steel-muted)/.8);"
-                      "--em:hsl(var(--steel-muted)/.8);--ch:hsl(var(--steel-muted)/.8);--hl:hsl(var(--steel-muted)/.8);"
-                      "--hi:hsl(var(--steel-muted)/.25);--sh:transparent}"
+                      ".dtag{position:absolute;top:-7px;right:-6px;z-index:1;width:30px;height:34px;padding:0;border:0;background:none;"
+                      "cursor:pointer;--ol:hsl(var(--steel-muted)/.85);--tb:hsl(var(--void));--tb2:hsl(var(--plate));"
+                      "--tf:hsl(var(--void));--tf2:hsl(var(--plate));--em:hsl(var(--steel-muted));--eo:transparent;"
+                      "--hl:hsl(var(--void));--ch:hsl(var(--steel-muted)/.85)}"
                       ".dts{display:block;width:100%;height:100%;overflow:visible}"
                       '.dtag:after{content:"";position:absolute;inset:-8px}'
-                      ".dtag:hover,.dtag:focus-visible{--tl:hsl(2 88% 57%);--em:hsl(2 88% 57%);--ch:hsl(2 88% 57%);"
-                      "--hl:hsl(2 88% 57%);--hi:hsl(2 88% 57%/.3)}"
-                      ".dtag.on{--tb:hsl(2 70% 42%);--tf:hsl(2 88% 57%);--tl:hsl(var(--void-deep)/.7);"
-                      "--em:hsl(0 0% 100%/.92);--ch:hsl(var(--steel-2));--hl:hsl(var(--void));--hi:hsl(0 0% 100%/.35);"
-                      "--sh:hsl(var(--void-deep)/.5)}"
-                      ".dtag.on:hover,.dtag.on:focus-visible{--tf:hsl(2 95% 64%)}", style)
+                      ".dtag:hover,.dtag:focus-visible{--ol:hsl(2 88% 57%);--em:hsl(2 88% 57%);--ch:hsl(2 88% 57%)}"
+                      ".dtag.on{--ol:hsl(2 60% 12%);--tb:hsl(2 70% 38%);--tb2:hsl(2 76% 48%);--tf:hsl(2 78% 44%);--tf2:hsl(2 90% 58%);"
+                      "--em:hsl(4 100% 86%);--eo:hsl(2 60% 12%);--hl:hsl(var(--void));--ch:hsl(var(--steel-2))}"
+                      ".dtag.on:hover,.dtag.on:focus-visible{--tf2:hsl(2 95% 64%)}", style)
         self.assertNotIn("border-radius", style[style.index(".dsym{"):style.index(".c-h{")])              # rounding is the SVG's
 
     def test_feed_cards_sorting_and_company_chips(self):
