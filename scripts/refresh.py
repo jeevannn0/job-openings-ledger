@@ -211,6 +211,13 @@ COMPANY_SPECS = {
     "Qualcomm": _spec(r"https://careers\.qualcomm\.com/careers/job/(\d{9,15})", {"eightfold_pcsx_api"},
                       {"careers.qualcomm.com"}, "https://careers.qualcomm.com/favicon.ico",
                       "https://careers.qualcomm.com/careers/apply?pid={id}"),
+    # Deloitte India, Sri Lanka and Mauritius hire through one SAP SuccessFactors career site. Its icon is the
+    # SuccessFactors-hosted PNG the site declares; deloitte.com's own favicons are 32 px bitmaps. The apply flow is
+    # the site's own /talentcommunity/apply/{id}/ page (robots-disallowed for crawlers, fine for a reader's tap).
+    "Deloitte": _spec(r"https://southasiacareers\.deloitte\.com/job/[A-Za-z]+/(\d{6,10})/", {"sf_csb_html"},
+                      {"southasiacareers.deloitte.com"},
+                      "https://rmkcdn.successfactors.com/2cbbbe22/7149328e-85fa-4cd9-adeb-7.png",
+                      "https://southasiacareers.deloitte.com/talentcommunity/apply/{id}/?locale=en_US"),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -221,6 +228,7 @@ JOB_ID_RE = {
     "GE Aerospace": re.compile(r"R\d{6,9}"), "Fractal": re.compile(r"SR-\d{4,7}"),
     "D. E. Shaw India": re.compile(r"\d{3,7}"), "Honeywell": re.compile(r"\d{5,8}"), "AMD": re.compile(r"\d{4,7}"),
     "Qualcomm": re.compile(r"\d{9,15}"),
+    "Deloitte": re.compile(r"\d{6,10}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -373,10 +381,26 @@ DESHAW_FRONT = "https://www.deshawindia.com/careers/{slug}"
 DESHAW_NEXT = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
 SEEN_BASIS_MODES = frozenset({"deshaw_nextdata_html"})
 
-# Wall-clock cap for one whole refresh run, so the sixteen sources together stay well inside the
-# workflow's 40-minute job timeout. load_config rejects source budgets that sum to more than this.
+# Deloitte: SAP SuccessFactors Career Site Builder, server-rendered. One search per target place (its location
+# search matches the city as written), newest first, 25 rows a page with "Results 1 – 25 of N" in the pagination
+# label; each job page carries schema.org itemprops (datePosted, validThrough, streetAddress) and the description.
+SF_BASE = "https://southasiacareers.deloitte.com"
+SF_SEARCH = SF_BASE + "/search/?q=&locationsearch={place}&sortColumn=referencedate&sortDirection=desc&startrow={start}"
+SF_PAGE = 25
+SF_TOTAL = re.compile(r"Results\s*<b>\s*\d+\s*[–-]\s*\d+\s*</b>\s*of\s*<b>\s*(\d+)", re.S)
+SF_ROW = re.compile(r'<tr class="data-row">(.*?)</tr>', re.S)
+SF_LINK = re.compile(r'<a\b(?=[^>]*class="jobTitle-link")[^>]*href="(/job/[^"/]+/(\d{6,10})/)"[^>]*>([^<]*)<')   # either attribute order
+SF_EMPTY = re.compile(r"There are currently no open positions matching")   # a zero-result search has no pagination label
+SF_FRONT = SF_BASE + "/job/Bengaluru/{id}/"      # the site serves a posting under any slug; this one is URL-safe
+SF_META = re.compile(r'<meta itemprop="([A-Za-z]+)" content="([^"]*)"')
+SF_DESC = re.compile(r'<span class="jobdescription">(.*?)</span>\s*(?:</div>|<div)', re.S)
+SF_DATE = re.compile(r"[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) \d{2}:\d{2}:\d{2} [A-Z]{3,4} (\d{4})")   # Wed Nov 04 02:00:00 UTC 2026
+
+# Wall-clock cap for one whole refresh run, so the seventeen sources together stay inside the 40 minutes
+# the workflow's 60-minute job timeout leaves after its 20-minute schedule lead (render, commit and push
+# need the last four). load_config rejects source budgets that sum to more than this.
 # A source that would start with less than the floor is held.
-RUN_BUDGET_S = 2100.0
+RUN_BUDGET_S = 2160.0
 MIN_SOURCE_BUDGET_S = 30.0  # default floor; source_floor() uses each mode's own schema minimum
 
 # --------------------------------------------------------------------------- public boundary
@@ -645,6 +669,7 @@ _TUNABLES = {
     "oracle_ce": {"budget_s": (30, 600), "max_total": (25, 1000), "max_new_details": (0, 40)},
     "jibe_api": {"budget_s": (60, 600), "max_total": (10, 500), "max_new_checks": (0, 20)},
     "eightfold_pcsx_api": {"budget_s": (30, 600), "location": "term", "max_total": (10, 2000), "max_new_details": (0, 60)},
+    "sf_csb_html": {"budget_s": (30, 600), "search_terms": "terms", "max_total": (25, 2000), "max_new_details": (0, 60)},
     "static": {},
 }
 SIEMENS_MIN_DELAY_S = 2.0
@@ -1121,6 +1146,7 @@ CONNECTOR_LABELS = {
     "oracle_ce": "Oracle Careers API",
     "jibe_api": "Jibe Jobs API",
     "eightfold_pcsx_api": "Eightfold search API",
+    "sf_csb_html": "SuccessFactors HTML",
     "static": "Static snapshot",
 }
 # Plain-language meaning of each freshness state; {limit} is the freshness threshold.
@@ -3395,6 +3421,134 @@ def refresh_eightfold(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.date
     return res
 
 
+# -- Deloitte: SAP SuccessFactors Career Site Builder search pages plus itemprops on each job page
+
+def _sf_date(value: object) -> dt.date | None:
+    """'Wed Nov 04 02:00:00 UTC 2026' (SuccessFactors' itemprop content) or any parse_any_date form."""
+    m = SF_DATE.fullmatch(str(value or "").strip())
+    if m and m.group(1).lower() in _MONTHS:
+        try:
+            return dt.date(int(m.group(3)), _MONTHS[m.group(1).lower()], int(m.group(2)))
+        except ValueError:
+            return None
+    return parse_any_date(value)
+
+
+def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
+    """{job id: (path, title)} across every configured place search, or why the listing cannot be trusted."""
+    links: dict[str, tuple[str, str]] = {}
+    grand = 0
+    for place in cfg["search_terms"]:
+        total: int | None = None
+        start = 0
+        while True:
+            resp = fetcher.request(SF_SEARCH.format(place=urllib.parse.quote(place), start=start))
+            if not html_ok(resp):
+                return "search page unavailable"
+            text = resp.text()
+            m = SF_TOTAL.search(text)
+            if not m:
+                if start == 0 and SF_EMPTY.search(text) and not SF_ROW.search(text):
+                    break                                           # nothing in this place; the others still count
+                return "search total not found"
+            n = int(m.group(1))
+            if grand + n > cfg["max_total"]:                           # max_total caps the sum over all places
+                return "listing total invalid"
+            if total is None:
+                total = n
+            elif n != total:
+                return "listing changed during pagination"
+            found = 0
+            for row in SF_ROW.findall(text):
+                lm = SF_LINK.search(row)
+                if not lm:
+                    continue
+                found += 1
+                links.setdefault(lm.group(2), (html.unescape(lm.group(1)), clean_text(lm.group(3), 160)))
+            if found == 0 and start < total:
+                return "partial pagination"
+            start += SF_PAGE
+            if start >= total:
+                break
+        grand += total or 0
+    return links, grand
+
+
+def _sf_detail(fetcher: Fetcher, path: str, jid: str) -> tuple[str, dict | None]:
+    """'live' with {meta itemprops, description} of a page that names the ID; 'gone' on an exact 404/410;
+    'blocked' for throttling, outages and challenges; otherwise 'unknown'."""
+    resp = fetcher.request(SF_BASE + path)
+    if _is_blocked(resp) or is_challenge(resp) or is_maintenance(resp):
+        return "blocked", None
+    if resp.status in (404, 410) and not resp.error:
+        return "gone", None
+    if not html_ok(resp) or jid not in resp.text():
+        return "unknown", None
+    text = resp.text()
+    meta = dict(SF_META.findall(text))
+    if "datePosted" not in meta:
+        return "unknown", None
+    dm = SF_DESC.search(text)
+    meta["description"] = dm.group(1) if dm else ""
+    return "live", meta
+
+
+def refresh_successfactors(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                           excluded: frozenset, config: Config) -> SourceResult:
+    """Deloitte's SuccessFactors career site (the only SF_* site so far)."""
+    company = "Deloitte"
+    today = now.astimezone(IST).date()
+    got = _sf_listing(cfg, fetcher)
+    if isinstance(got, str):
+        return held(company, got)
+    listing, total = got
+    res = SourceResult(company, True, f"listing {total} across {len(cfg['search_terms'])} searches",
+                       listing_complete=True, listing_total=total, listed=set(listing), absence_scope=set())
+    streak = 0
+    for r in rows:
+        if r.job_id in listing:
+            res.live.add(r.job_id)
+            continue
+        if streak >= BLOCK_TRIP:
+            continue
+        st, _data = _sf_detail(fetcher, urllib.parse.urlsplit(r.canonical_url).path, r.job_id)
+        streak = streak + 1 if st == "blocked" else 0
+        if st == "gone":
+            res.absence_scope.add(r.job_id)   # exact 404 and unlisted: counts toward removal
+    existing = {r.job_id for r in rows}
+    fresh = [(jid, path, title) for jid, (path, title) in sorted(listing.items(), reverse=True)
+             if jid not in existing and jid not in excluded and _unscreened(jid, _fingerprint(path, title), cs)]
+    checked = invalid = 0
+    for jid, path, title in fresh[:cfg["max_new_details"]]:
+        checked += 1
+        mark = screened_entry(today, _fingerprint(path, title))
+        st, data = _sf_detail(fetcher, path, jid)
+        if st == "blocked":
+            break
+        if st == "gone":
+            res.screened[jid] = mark
+            continue
+        if st != "live" or data is None:
+            continue
+        posted = _sf_date(data.get("datePosted"))
+        places = [p.strip() for p in str(data.get("streetAddress") or "").split(";") if p.strip()]
+        ok, band, exp = qualifies(title, strip_html(data.get("description") or ""), posted, places, today, config)
+        if not ok:
+            res.screened[jid] = mark
+            continue
+        closing = _sf_date(data.get("validThrough"))
+        row = make_row(company, jid, title, exp, join_places(target_places(places, config)), SF_FRONT.format(id=jid),
+                       band, closing.isoformat() if closing else None, posted, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            invalid += 1
+    res.counts = {"listed": len(listing), "live": len(res.live), "new_checked": checked, "unscreened": len(fresh),
+                  "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
 RUNNERS = {
     "siemens_avature_html": refresh_siemens,
     "iqvia_workday_cxs": refresh_iqvia,
@@ -3409,6 +3563,7 @@ RUNNERS = {
     "oracle_ce": refresh_jpm,
     "jibe_api": refresh_zs,
     "eightfold_pcsx_api": refresh_eightfold,
+    "sf_csb_html": refresh_successfactors,
 }
 
 

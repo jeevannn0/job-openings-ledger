@@ -46,13 +46,15 @@
     "incareers-zs.icims.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "global-external-amd.icims.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "mycareer.accenture.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
-    "www.apply.deshawindia.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
+    "www.apply.deshawindia.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "southasiacareers.deloitte.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "rmkcdn.successfactors.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
     {
       "company": "Siemens",
       "mode": "siemens_avature_html",
-      "budget_s": 240,
+      "budget_s": 230,
       "search_text": "Bangalore",
       "discovery_interval_h": 24,
       "max_list_pages": 20,
@@ -62,14 +64,14 @@
     {
       "company": "JPMorganChase",
       "mode": "jpm_oracle_ce",
-      "budget_s": 210,
+      "budget_s": 180,
       "max_total": 600,
       "max_new_details": 30
     },
     {
       "company": "GE HealthCare",
       "mode": "gehc_workday_cxs",
-      "budget_s": 220,
+      "budget_s": 205,
       "max_total": 1500,
       "max_new_details": 30
     },
@@ -84,7 +86,7 @@
     {
       "company": "IQVIA",
       "mode": "iqvia_workday_cxs",
-      "budget_s": 160,
+      "budget_s": 155,
       "search_terms": ["Bengaluru", "Bangalore", "Kochi"],
       "max_total": 200,
       "max_new_details": 25
@@ -92,14 +94,14 @@
     {
       "company": "ZS",
       "mode": "zs_jibe_api",
-      "budget_s": 180,
+      "budget_s": 170,
       "max_total": 180,
       "max_new_checks": 5
     },
     {
       "company": "Accenture",
       "mode": "accenture_findjobs_api",
-      "budget_s": 120,
+      "budget_s": 90,
       "max_total": 4000,
       "max_new_rows": 400
     },
@@ -121,7 +123,7 @@
     {
       "company": "Shell",
       "mode": "workday_cxs",
-      "budget_s": 90,
+      "budget_s": 70,
       "search_terms": ["*"],
       "max_total": 300,
       "max_new_details": 20
@@ -158,17 +160,25 @@
     {
       "company": "AMD",
       "mode": "jibe_api",
-      "budget_s": 160,
+      "budget_s": 150,
       "max_total": 160,
       "max_new_checks": 5
     },
     {
       "company": "Qualcomm",
       "mode": "eightfold_pcsx_api",
-      "budget_s": 130,
+      "budget_s": 120,
       "location": "Bangalore",
       "max_total": 450,
       "max_new_details": 20
+    },
+    {
+      "company": "Deloitte",
+      "mode": "sf_csb_html",
+      "budget_s": 205,
+      "search_terms": ["Bengaluru", "Kochi", "Thiruvananthapuram"],
+      "max_total": 1200,
+      "max_new_details": 30
     }
   ]
 }

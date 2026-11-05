@@ -1396,14 +1396,14 @@ class ConfigTests(unittest.TestCase):
                                               "shell.wd3.myworkdayjobs.com", "geaerospace.wd5.myworkdayjobs.com",
                                               "fractal.wd1.myworkdayjobs.com", "www.deshawindia.com",
                                               "ibqbjb.fa.ocs.oraclecloud.com", "careers.honeywell.com",
-                                              "careers.amd.com", "careers.qualcomm.com"})
+                                              "careers.amd.com", "careers.qualcomm.com", "southasiacareers.deloitte.com"})
         self.assertEqual({c: config.sources[c]["mode"] for c in config.companies}, {
             "Siemens": "siemens_avature_html", "JPMorganChase": "jpm_oracle_ce", "GE HealthCare": "gehc_workday_cxs",
             "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api",
             "Accenture": "accenture_findjobs_api", "Lilly": "workday_cxs", "AstraZeneca": "astrazeneca_talentbrew_html",
             "Shell": "workday_cxs", "GE Aerospace": "workday_cxs", "Fractal": "workday_cxs",
             "D. E. Shaw India": "deshaw_nextdata_html", "Honeywell": "oracle_ce", "AMD": "jibe_api",
-            "Qualcomm": "eightfold_pcsx_api"})
+            "Qualcomm": "eightfold_pcsx_api", "Deloitte": "sf_csb_html"})
         # Two regions; the place terms behind them are what employers actually write.
         self.assertEqual(config.regions, ("bengaluru", "kerala"))
         self.assertEqual(config.cities[:3], ("bengaluru", "bangalore", "kerala"))
@@ -1434,11 +1434,14 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("ibqbjb.fa.ocs.oraclecloud.com", R._oracle_urls("Honeywell")[1])
         self.assertEqual(R.JIBE_SITES["ZS"], (R.ZS_LIST, R.ZS_FRONT, R.ZS_DETAIL, ("qualifications", "description")))
         self.assertEqual(R.JIBE_SITES["AMD"][3], ("description",))      # AMD's "qualifications" is benefits boilerplate
-        for company in ("Honeywell", "AMD", "Qualcomm"):
+        for company in ("Honeywell", "AMD", "Qualcomm", "Deloitte"):
             self.assertIn(company, R.COMPANY_SPECS)
             self.assertIn(company, R.JOB_ID_RE)
-        for mode, runner in (("oracle_ce", R.refresh_jpm), ("jibe_api", R.refresh_zs), ("eightfold_pcsx_api", R.refresh_eightfold)):
+        for mode, runner in (("oracle_ce", R.refresh_jpm), ("jibe_api", R.refresh_zs), ("eightfold_pcsx_api", R.refresh_eightfold),
+                             ("sf_csb_html", R.refresh_successfactors)):
             self.assertIs(R.RUNNERS[mode], runner)
+        for url in (R.SF_BASE, R.SF_SEARCH, R.SF_FRONT):
+            self.assertIsNone(R.check_url(url.replace("{", "").replace("}", ""), R.COMPANY_SPECS["Deloitte"].hosts), url)
 
     def test_config_rejects_unsafe_changes(self):
         def static(name):
@@ -1552,6 +1555,7 @@ class LogoTests(unittest.TestCase):
             "D. E. Shaw India": "https://www.apply.deshawindia.com/ApplicationPage1.html?entity=DESIS",
             "Honeywell": "{url}/apply/email", "AMD": "https://global-external-amd.icims.com/jobs/{id}/login",
             "Qualcomm": "https://careers.qualcomm.com/careers/apply?pid={id}",
+            "Deloitte": "https://southasiacareers.deloitte.com/talentcommunity/apply/{id}/?locale=en_US",
         }
         self.assertEqual({c: R.COMPANY_SPECS[c].apply for c in self.config.companies}, expected)
         self.assertEqual(R.APPLY_WORKDAY, "{url}/apply")
@@ -1908,7 +1912,7 @@ class WorkflowTests(unittest.TestCase):
                                         r"      cancel-in-progress: false$", self.text)), 3)
         self.assertNotIn("concurrency", self.block("gate"))
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(timeouts, [5, 60, 10, 10, 5])    # gate, refresh (lead wait + sixteen sources), publish, deploy, notify
+        self.assertEqual(timeouts, [5, 60, 10, 10, 5])    # gate, refresh (lead wait + seventeen sources), publish, deploy, notify
         self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 5)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
@@ -2334,6 +2338,12 @@ class DryRunTests(unittest.TestCase):
                          "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01699001_en")
         self.assertEqual((new["9001"].posted_date, new["9001"].first_seen), ("2026-10-31", "2026-10-31"))
         self.assertNotIn("2781", ids)                             # exploratory "All positions in ..." entry
+        # Deloitte: the ID-only canonical URL, the itemprop dates, and the zero-result Kerala searches tolerated.
+        self.assertEqual((new["60999944"].location, new["60999944"].posted_date, new["60999944"].closing_date),
+                         ("Bengaluru", "2026-10-30", "2026-11-14"))
+        self.assertEqual(new["60999944"].canonical_url, "https://southasiacareers.deloitte.com/job/Bengaluru/60999944/")
+        self.assertEqual(new["60999944"].title, "Credit Operations Analyst | Regulatory & Financial Risk")
+        self.assertEqual(after.companies["Deloitte"].detail, "listing 1 across 3 searches")
         self.assertEqual(R.read_text(os.path.join(tmp, "index.html")), R.render(after, template, config))
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
@@ -2586,11 +2596,11 @@ class PullHistoryTests(unittest.TestCase):
 # --------------------------------------------------------------------------- phone alerts (dist/alerts.json)
 
 LEDGER = "https://example-owner.github.io/job-openings-ledger/"   # synthetic owner; CI derives the real one
-FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999",
+FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999", "60999944",
                  "AIOC-S01699001", "R-199001", "999000001", "R299001", "R5099001", "SR-49001", "9001",
                  "161001", "95001", "446700000001"}
 NEW_SOURCES = ("Accenture", "Lilly", "AstraZeneca", "Shell", "GE Aerospace", "Fractal", "D. E. Shaw India",
-               "Honeywell", "AMD", "Qualcomm")
+               "Honeywell", "AMD", "Qualcomm", "Deloitte")
 
 
 def outcome_for(state, added=(), removed=0, run_at="2026-10-31T18:00+05:30", mode="fixtures"):
@@ -3672,7 +3682,131 @@ def source_minimum(company, config, state):
         return n * _per_request(config, "careers.astrazeneca.com")
     if company == "D. E. Shaw India":    # robots and the one careers page
         return 2 * _per_request(config, "www.deshawindia.com")
+    if company == "Deloitte":            # robots, a first page per place, the pages the grand total allows (max_total
+        n = (1 + len(cfg["search_terms"]) + pages(cfg["max_total"], R.SF_PAGE)   # caps the sum over all places),
+             + rows + cfg["max_new_details"])                                    # one page per unlisted row, new details
+        return n * _per_request(config, "southasiacareers.deloitte.com")
     raise AssertionError(company)
+
+
+def sf_page(place, rows, total=None, start=0):
+    total = len(rows) if total is None else total
+    label = f"Results <b>{start + 1} – {start + len(rows)}</b> of <b>{total}</b>" if rows or total else ""
+    body = "".join(f'<tr class="data-row"><td><a href="{path}" class="jobTitle-link">{title}</a>'
+                   f'<span class="jobLocation">{place}, IN</span></td></tr>' for path, title in rows)
+    empty = "" if rows or total else f'<p>There are currently no open positions matching "{place}".</p>'
+    return resp(200, f'<html><body><span class="paginationLabel">{label}</span>{empty}<table>{body}</table></body></html>')
+
+
+def sf_detail(jid, posted="Fri Oct 30 02:00:00 UTC 2026", desc="1-2 years of experience in credit operations.",
+              place="Bengaluru, IN", valid="Sat Nov 14 18:30:00 UTC 2026"):
+    return resp(200, f'<html><head><meta itemprop="streetAddress" content="{place}"><meta itemprop="datePosted" content="{posted}">'
+                     f'<meta itemprop="validThrough" content="{valid}"></head><body>Job {jid}<span class="jobdescription"><p>{desc}</p></span>'
+                     f'<div class="jobDisplayShareIcons"></div></body></html>')
+
+
+class SuccessFactorsTests(unittest.TestCase):
+    """Deloitte's SAP SuccessFactors career site: server-rendered place searches and itemprop job pages."""
+
+    SEARCH = "https://southasiacareers.deloitte.com/search/?q=&locationsearch={place}&sortColumn=referencedate&sortDirection=desc&startrow={start}"
+
+    def setUp(self):
+        self.config, self.excluded, self.state, _t = env()
+        self.cfg = dict(self.config.sources["Deloitte"], search_terms=["Bengaluru", "Kochi"])
+
+    def run_sf(self, routes, rows=()):
+        t = FakeTransport(routes, robots=resp(200, "User-agent: *\nDisallow: /services/\n", "text/plain"))
+        fetcher = R.Fetcher(self.config, 600, transport=t, sleep=lambda _s: None)
+        res = R.refresh_successfactors(self.cfg, list(rows), fetcher, NOW, self.state.companies["Deloitte"] if "Deloitte" in self.state.companies
+                                       else R.CompanyState("seed", "x"), self.excluded.get("Deloitte", frozenset()), self.config)
+        return res, t
+
+    def search(self, place, start=0):
+        return self.SEARCH.format(place=place, start=start)
+
+    def test_dates_and_pagination_shapes(self):
+        self.assertEqual(R._sf_date("Wed Nov 04 02:00:00 UTC 2026"), dt.date(2026, 11, 4))
+        self.assertEqual(R._sf_date("Oct 30, 2026"), dt.date(2026, 10, 30))
+        self.assertIsNone(R._sf_date("Wed Nov 44 02:00:00 UTC 2026"))
+        self.assertIsNone(R._sf_date(None))
+        self.assertEqual(R.SF_PAGE, 25)
+        self.assertEqual(R.SF_FRONT, "https://southasiacareers.deloitte.com/job/Bengaluru/{id}/")
+        self.assertTrue(R.SF_TOTAL.search("Results <b>1 – 25</b> of <b>767</b>"))
+        self.assertTrue(R.SF_TOTAL.search("Results <b>751 \u2013 767</b> of <b>767</b>"))
+
+    def test_rows_come_from_every_place_search_and_empty_places_count_zero(self):
+        rows = [("/job/Bengaluru-Analyst-Regulatory-&amp;-Risk/60999944/", "Credit Analyst | Regulatory &amp; Risk"),
+                ("/job/Bengaluru-Senior-Consultant/60999900/", "Senior Consultant | SAP")]
+        res, t = self.run_sf([
+            ("GET", self.search("Bengaluru"), sf_page("Bengaluru", rows)),
+            ("GET", self.search("Kochi"), sf_page("Kochi", [])),
+            ("GET", "https://southasiacareers.deloitte.com/job/*", lambda url, body: sf_detail(url.rstrip("/").rsplit("/", 1)[1])
+                                                                   if "60999944" in url else sf_detail("60999900", desc="8+ years of experience.")),
+        ])
+        self.assertTrue(res.ok)
+        self.assertEqual((res.detail, res.listing_total, res.listed), ("listing 2 across 2 searches", 2, {"60999944", "60999900"}))
+        self.assertEqual([r.job_id for r in res.added], ["60999944"])
+        row = res.added[0]
+        self.assertEqual((row.title, row.location, row.posted_date, row.closing_date, row.experience_band),
+                         ("Credit Analyst | Regulatory & Risk", "Bengaluru", "2026-10-30", "2026-11-14", "2"))
+        self.assertEqual(row.canonical_url, "https://southasiacareers.deloitte.com/job/Bengaluru/60999944/")   # ID-only, URL-safe
+        self.assertIn("60999900", res.screened)                                                                # senior: screened out
+        self.assertEqual(res.counts["new_checked"], 2)
+        self.assertEqual(t.count("/talentcommunity/"), 0)                                                     # never the apply flow
+
+    def test_listing_paginates_to_the_total_and_holds_on_inconsistency(self):
+        rows = [(f"/job/Bengaluru-Role-{i}/6099{i:04d}/", f"Role {i}") for i in range(30)]
+        res, t = self.run_sf([
+            ("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=30)),
+            ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", rows[25:], total=30, start=25)),
+            ("GET", self.search("Kochi"), sf_page("Kochi", [])),
+            ("GET", "https://southasiacareers.deloitte.com/job/*", resp(404, "gone")),
+        ])
+        self.assertTrue(res.ok)
+        self.assertEqual((res.listing_total, len(res.listed)), (30, 30))
+        self.assertEqual(t.count("startrow=25"), 1)
+        for name, routes in {
+            "total changes mid-walk": [("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=30)),
+                                       ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", rows[25:], total=31, start=25))],
+            "page without rows": [("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=30)),
+                                  ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", [], total=30, start=25))],
+            "no label and no empty text": [("GET", self.search("Bengaluru", 0), resp(200, "<html><body>maintenance</body></html>"))],
+            "search down": [("GET", self.search("Bengaluru", 0), resp(503, "down"))],
+            "total over cap": [("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=5000))],
+        }.items():
+            with self.subTest(name):
+                res, _t = self.run_sf(routes + [("GET", self.search("Kochi"), sf_page("Kochi", []))])
+                self.assertFalse(res.ok, name)
+                self.assertIn(res.detail, ("listing changed during pagination", "partial pagination", "search total not found",
+                                           "search page unavailable", "listing total invalid"))
+        # max_total caps the sum over all places, so the run's page count is bounded regardless of how it splits.
+        self.cfg["max_total"] = 30
+        res, t = self.run_sf([("GET", self.search("Bengaluru"), sf_page("Bengaluru", rows[:20])),
+                              ("GET", self.search("Kochi"), sf_page("Kochi", rows[20:])),        # 20 + 10 = 30: allowed
+                              ("GET", "https://southasiacareers.deloitte.com/job/*", resp(404, "gone"))])
+        self.assertTrue(res.ok)
+        self.assertEqual(res.listing_total, 30)
+        res, t = self.run_sf([("GET", self.search("Bengaluru"), sf_page("Bengaluru", rows[:20])),
+                              ("GET", self.search("Kochi"), sf_page("Kochi", rows[9:20])), ])    # 20 + 11 = 31: over
+        self.assertEqual((res.ok, res.detail), (False, "listing total invalid"))
+        self.assertEqual(t.count("/job/Bengaluru"), 0)
+
+    def test_existing_rows_are_kept_live_or_confirmed_gone(self):
+        base = next(r for r in self.state.jobs)
+        mine = [dataclasses.replace(base, company="Deloitte", job_id=f"6099{i:04d}", title=f"Role {i}", experience_text="1-2 years",
+                                    canonical_url=f"https://southasiacareers.deloitte.com/job/Bengaluru/6099{i:04d}/", closing_date=None)
+                for i in range(3)]
+        res, t = self.run_sf([
+            ("GET", self.search("Bengaluru"), sf_page("Bengaluru", [("/job/Bengaluru-Role-0/60990000/", "Role 0")])),
+            ("GET", self.search("Kochi"), sf_page("Kochi", [])),
+            ("GET", "https://southasiacareers.deloitte.com/job/Bengaluru/60990001/", resp(404, "gone")),
+            ("GET", "https://southasiacareers.deloitte.com/job/Bengaluru/60990002/", sf_detail("60990002")),
+        ], rows=mine)
+        self.assertTrue(res.ok)
+        self.assertEqual(res.live, {"60990000"})                      # listed: live without a page fetch
+        self.assertEqual(res.absence_scope, {"60990001"})              # exact 404 and unlisted: counts toward removal
+        self.assertNotIn("60990002", res.absence_scope)                # readable page for an unlisted ID: ambiguous, kept
+        self.assertEqual(t.count("/job/Bengaluru/60990000/"), 0)
 
 
 class AdapterIsolationTests(unittest.TestCase):
@@ -4616,7 +4750,7 @@ class SourceHealthTests(unittest.TestCase):
                         and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
-                         "Result2/16 ✓accepted · 2 held · 1 failed · 11 pending"
+                         "Result2/17 ✓accepted · 2 held · 1 failed · 12 pending"
                          f"Openings{records} published · {new_today} new today"
                          "Freshness× FAILED"
                          "Next run1 Nov 00:00 IST · approx.")
@@ -4659,7 +4793,7 @@ class SourceHealthTests(unittest.TestCase):
             with self.subTest(name), self.assertRaises(ValueError):
                 R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
         self.assertNotIn("Companies checked", doc)
-        self.assertIn('<h2 class="vh" id="src-h">Source health: 16 automated sources</h2>', doc)
+        self.assertIn('<h2 class="vh" id="src-h">Source health: 17 automated sources</h2>', doc)
         self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {len(self.state.empty_companies)} '
                       'companies</span>', doc)
         self.assertIn('<dl class="info-dl" id="empty-list"></dl>', doc)
@@ -4745,6 +4879,7 @@ class SourceHealthTests(unittest.TestCase):
             "workday_cxs": "Workday CXS API", "astrazeneca_talentbrew_html": "TalentBrew HTML",
             "accenture_findjobs_api": "Careers search API", "deshaw_nextdata_html": "Careers page data",
             "oracle_ce": "Oracle Careers API", "jibe_api": "Jibe Jobs API", "eightfold_pcsx_api": "Eightfold search API",
+            "sf_csb_html": "SuccessFactors HTML",
             "static": "Static snapshot"})
         section = health_section(R.render(self.state, self.template, self.config))
         expected = {"Siemens": "Avature HTML", "JPMorganChase": "Oracle Careers API", "GE HealthCare": "Workday CXS API",
@@ -4752,7 +4887,8 @@ class SourceHealthTests(unittest.TestCase):
                     "AstraZeneca": "TalentBrew HTML", "Lilly": "Workday CXS API", "Shell": "Workday CXS API",
                     "GE Aerospace": "Workday CXS API", "Fractal": "Workday CXS API",
                     "Accenture": "Careers search API", "D. E. Shaw India": "Careers page data",
-                    "Honeywell": "Oracle Careers API", "AMD": "Jibe Jobs API", "Qualcomm": "Eightfold search API"}
+                    "Honeywell": "Oracle Careers API", "AMD": "Jibe Jobs API", "Qualcomm": "Eightfold search API",
+                    "Deloitte": "SuccessFactors HTML"}
         for company, (_s, rest) in channels(section).items():
             self.assertTrue(rest.startswith(f'<span class="ch-c"><span class="vh">, source connector </span>'
                                             f'{expected[company]}</span></span>'), company)
@@ -4767,18 +4903,18 @@ class SourceHealthTests(unittest.TestCase):
     def test_latest_refresh_rollup_counts(self):
         self.all_states_state()
         sources = R.source_health(self.state, self.config, R.health_reference(self.state))
-        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 11})
+        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 12})
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
         # "N/M ✓" (the word stays for screen readers), then only the non-zero holds/failures/pendings.
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/16 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/17 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span> · <span data-o="held"><b>2</b> held</span> · <span data-o="failed">'
-                      '<b>1</b> failed</span> · <span data-o="pending"><b>11</b> pending</span></dd></div>', block)
+                      '<b>1</b> failed</span> · <span data-o="pending"><b>12</b> pending</span></dd></div>', block)
         self.assertNotIn("sources accepted", doc)
         for c in self.config.companies:
             self.set_company(c, status="ok", last_success=iso(REF), last_attempt=iso(REF))
         clean = status_block(R.render(self.state, self.template, self.config))
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">16</b>/16 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">17</b>/17 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span></dd></div>', clean)                      # no "0 held · 0 failed"
         self.assertNotIn("<b>0</b>", clean)
         for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/16"):
