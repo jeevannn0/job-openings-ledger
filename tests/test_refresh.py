@@ -1128,7 +1128,7 @@ class NewSourceHelperTests(unittest.TestCase):
         self.assertIn('<button class="jd" type="button" data-u="${esc(u)}" data-t="${esc(t)}" data-c="${esc(c)}" data-l="${esc(l)}">JD'
                       '<span class="vh"> — read the job description here</span></button><a class="ap" ', card)
         self.assertEqual(card.count("<a "), 2)                       # the title and the Apply link
-        self.assertEqual(card.count("<button"), 2)                   # JD and "+N more"
+        self.assertEqual(card.count("<button"), 3)                   # the dog tag, JD and "+N more"
         for snippet in ('const jdl=$("#jd"),jdw=$("#jd .term-win"),jdB=$("#jd-b"),jdT=$("#jd-t"),jdM=$("#jd-m"),jdL=$("#jd-l");',
                         'if(x.startsWith("\\u2022 ")){ul.push(x.slice(2));continue}',
                         'out.push(x.startsWith("## ")?`<h3>${esc(x.slice(3))}</h3>`:`<p>${esc(x)}</p>`)',
@@ -4471,9 +4471,9 @@ class SourceHealthTests(unittest.TestCase):
         self.assertTrue(fonts["sans"].endswith("sans-serif"))
         self.assertTrue(fonts["mono"].startswith('"JetBrains Mono",ui-monospace') and fonts["mono"].endswith("monospace"))
         self.assertIn('font-feature-settings:"liga" 0,"calt" 0,"zero","ss01"', style)
-        # Square corners everywhere except the round status LED.
+        # Square corners everywhere except the round status LED, the terminal's lights and the dog tag's hole.
         self.assertIn("*,:before,:after{box-sizing:border-box;border-radius:0}", style)
-        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style), ["0", "50%", "50%"])
+        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style), ["0", "50%", "50%", "50%"])
         self.assertIn(".led{display:inline-block;flex:none;width:6px;height:6px;border-radius:50%;", style)
         self.assertIn(".dot{position:relative;display:block;flex:none;width:12px;height:12px;padding:0;border:0;"
                       "border-radius:50%;", style)                       # the terminal's traffic lights
@@ -5386,6 +5386,49 @@ class SourceHealthTests(unittest.TestCase):
         with mock.patch.dict(self.config.sources["ZS"], {"mode": "zs_future_api"}), self.assertRaises(ValueError):
             R.render(self.state, self.template, self.config)
 
+    def test_dog_tag_marks_openings_the_reader_opened(self):
+        """A dog tag sits at each card's top-left corner: outlined until the reader opens the posting (title or
+        Apply) and stays away at least three seconds, then filled. A tap on the tag toggles it by hand. The
+        marks live only in this browser's localStorage under one key; nothing leaves the device."""
+        doc = R.render(self.state, self.template, self.config)
+        script, style = main_script(doc), style_of(doc)
+        card = script[script.index("const card="):script.index("function render()")]
+        # The tag is the card's first child, a real toggle button keyed by company and job ID, never a link.
+        self.assertIn('${anim?`;--i:${i}`:""}"><button class="dtag${tg?" on":""}" type="button" data-k="${esc(c)}|${esc(id)}" '
+                      'aria-pressed="${tg}"><span class="vh">Opened</span></button><div class="c-h">', card)
+        self.assertIn("tg=tags.has(`${c}|${id}`);return `", card)
+        self.assertEqual(card.count('class="dtag'), 1)
+        # State: one localStorage key, read once at boot, written on every change, tolerant of a blocked store.
+        for snippet in ('let tags=new Set();try{tags=new Set(JSON.parse(localStorage.getItem("k9tags")||"[]"))}catch(e){}',
+                        'const TAG_MS=3000,tag=(k,on)=>{on?tags.add(k):tags.delete(k);try{localStorage.setItem("k9tags",'
+                        'JSON.stringify([...tags]))}catch(e){}for(const b of out.querySelectorAll(".dtag"))if(b.dataset.k===k)'
+                        '{b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on))}};',
+                        # Opening a posting arms the pending key; leaving the page starts the clock; coming back at or
+                        # past three seconds fills the tag. No timers: the clock is the time away, read on return.
+                        'let pend=null,away=0;const gone=()=>{if(pend&&!away)away=Date.now()},back=()=>{if(pend&&away){'
+                        'if(Date.now()-away>=TAG_MS)tag(pend,true);pend=null;away=0}};',
+                        'out.addEventListener("click",e=>{const b=e.target.closest(".dtag");if(b){pend=null;tag(b.dataset.k,'
+                        '!b.classList.contains("on"));return}const a=e.target.closest(".job,.ap");pend=a?a.closest(".card")'
+                        '.querySelector(".dtag").dataset.k:null;away=0});',
+                        'document.addEventListener("visibilitychange",()=>document.hidden?gone():back());'
+                        'addEventListener("blur",gone);addEventListener("focus",back);'):
+            self.assertIn(snippet, script, snippet)
+        self.assertEqual(script.count("k9tags"), 2)                       # read and write, nowhere else
+        self.assertEqual(script.count("setTimeout("), 3)                  # the tag adds no timer
+        # Look: a square-cornered 13x18 tag with a round hole, drawn in CSS (no second SVG), outlined in muted steel,
+        # filled with the signal purple when on, with a hit area well past its 13 px and above the phone's
+        # whole-card title hit area.
+        self.assertIn(".dtag{position:absolute;top:-1px;left:-1px;z-index:1;width:13px;height:18px;padding:0;"
+                      "border:1.5px solid hsl(var(--steel-muted)/.75);background:hsl(var(--void));"
+                      "cursor:pointer;transition:background-color var(--dur-fast) var(--ease-out-quart),border-color var(--dur-fast) "
+                      'var(--ease-out-quart)}.dtag:before{content:"";position:absolute;top:2px;left:50%;'
+                      "width:4px;height:4px;margin-left:-2px;border:1px solid hsl(var(--steel-muted)/.75);border-radius:50%}"
+                      '.dtag:after{content:"";position:absolute;inset:-10px -12px -12px -10px}'
+                      ".dtag:hover,.dtag:focus-visible{border-color:hsl(var(--signal))}"
+                      ".dtag.on{border-color:hsl(var(--signal));background:hsl(var(--signal))}"
+                      ".dtag.on:before{border-color:hsl(var(--void));background:hsl(var(--void))}", style)
+        self.assertEqual(len(re.findall(r"<svg\b", doc)), 1)              # still only the brand mark
+
     def test_feed_cards_sorting_and_company_chips(self):
         doc = R.render(self.state, self.template, self.config)
         script = main_script(doc)
@@ -5422,7 +5465,7 @@ class SourceHealthTests(unittest.TestCase):
                         '${anim?`;--i:${i}`:""}">',
                         # Posting age tints the card: hue 152 (green) today, sliding to 28 (orange) at 30 days and
                         # beyond; the hue rides on the card as --ah and one CSS rule paints every card.
-                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30);return `',
+                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30),tg=tags.has(`${c}|${id}`);return `',
                         # The posting date the portal shows (first-seen date for sources without one, row 11 = 1) sits
                         # beside the relative age in the meta line: "Oct 31 · 1 day ago", or "Nov 2 · seen today".
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
