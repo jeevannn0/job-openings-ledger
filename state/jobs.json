@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "as_of": "2026-11-06",
-  "checked_at": "2026-11-06T18:00+05:30",
+  "checked_at": "2026-11-06T21:00+05:30",
   "companies": {
     "Siemens": {
       "status": "ok",
-      "detail": "liveness 17/22; discovery window complete (20 pages)",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "liveness 17/18",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": null,
       "last_discovery_attempt": "2026-11-06T18:00+05:30",
@@ -67,14 +67,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 22,
-          "added": 0,
-          "removed": 0,
-          "took": 112
-        },
-        {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
           "published": 22,
@@ -113,16 +105,24 @@
           "added": 0,
           "removed": 4,
           "took": 233
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 18,
+          "added": 0,
+          "removed": 0,
+          "took": 89
         }
       ]
     },
     "JPMorganChase": {
       "status": "ok",
-      "detail": "listing 154",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 156",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 154,
+      "listing_total": 156,
       "last_discovery_attempt": null,
       "screened": {
         "210715495": "2026-11-03#e76288b93a35",
@@ -246,7 +246,7 @@
         "210804197": "2026-11-03#9e93120dff79",
         "210804223": "2026-10-31#54291b3d78a7",
         "210804231": "2026-10-31#acd9fe9ec791",
-        "210804295": "2026-11-04#0151c76597a9",
+        "210804295": "2026-11-06#c674e5c4f99d",
         "210804303": "2026-11-04#d012d52d37cc",
         "210804319": "2026-11-04#04afb416062e",
         "210804395": "2026-11-05#7ae7ce62abc2",
@@ -276,14 +276,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 34,
-          "added": 0,
-          "removed": 0,
-          "took": 62
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -323,16 +315,24 @@
           "added": 0,
           "removed": 0,
           "took": 55
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 31,
+          "added": 1,
+          "removed": 0,
+          "took": 59
         }
       ]
     },
     "GE HealthCare": {
       "status": "ok",
-      "detail": "listing 1056",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 1062",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 1056,
+      "listing_total": 1062,
       "last_discovery_attempt": null,
       "screened": {
         "R4042035": "2026-11-01#9c3def9446fb",
@@ -554,6 +554,7 @@
         "R4048618": "2026-11-03#38da0e226687",
         "R4048627": "2026-11-03#c065709ae620",
         "R4048629": "2026-11-03#400d54e7ddc7",
+        "R4048670": "2026-11-06#38e3bdc4792a",
         "R4048686": "2026-10-31#b9d7797cda34",
         "R4048713": "2026-11-05#5c14bd0a2b53",
         "R4048779": "2026-11-05#770d30b54176",
@@ -568,20 +569,16 @@
         "R4048843": "2026-11-03#563c12aaeb10",
         "R4048853": "2026-11-04#c57191bd7ac7",
         "R4048867": "2026-11-04#5efe19c69270",
+        "R4048890": "2026-11-06#98f505bbab55",
+        "R4048999": "2026-11-06#d89d04128a4a",
         "R4049014": "2026-11-05#4bcf1a986e99",
         "R4049022": "2026-11-05#965f8732d7cd",
+        "R4049085": "2026-11-06#c7a6e23b2e0f",
+        "R4049087": "2026-11-06#93c5ca7dd2ca",
         "R4049103": "2026-11-06#0fb6223de80d"
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 11,
-          "added": 0,
-          "removed": 0,
-          "took": 96
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -621,28 +618,28 @@
           "added": 0,
           "removed": 0,
           "took": 122
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 21,
+          "added": 3,
+          "removed": 1,
+          "took": 119
         }
       ]
     },
     "GE Vernova": {
       "status": "ok",
-      "detail": "listing 116",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 117",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 116,
+      "listing_total": 117,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 12,
-          "added": 0,
-          "removed": 0,
-          "took": 13
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -682,14 +679,22 @@
           "added": 0,
           "removed": 0,
           "took": 13
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 13,
+          "added": 0,
+          "removed": 0,
+          "took": 13
         }
       ]
     },
     "IQVIA": {
       "status": "ok",
       "detail": "listing 46 across 3 searches",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 46,
       "last_discovery_attempt": null,
@@ -729,14 +734,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 10,
-          "added": 1,
-          "removed": 0,
-          "took": 27
-        },
-        {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
           "published": 10,
@@ -775,28 +772,28 @@
           "added": 0,
           "removed": 1,
           "took": 38
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 11,
+          "added": 0,
+          "removed": 0,
+          "took": 29
         }
       ]
     },
     "ZS": {
       "status": "ok",
       "detail": "listing 58",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 58,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 2,
-          "added": 0,
-          "removed": 0,
-          "took": 38
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -836,16 +833,24 @@
           "added": 0,
           "removed": 0,
           "took": 36
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 2,
+          "added": 0,
+          "removed": 0,
+          "took": 38
         }
       ]
     },
     "Accenture": {
       "status": "ok",
-      "detail": "listing 1255",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 933",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 1255,
+      "listing_total": 933,
       "last_discovery_attempt": null,
       "screened": {
         "14066816": "2026-11-06#fc9de04dc02e",
@@ -1009,6 +1014,19 @@
         "AIOC-S01673930": "2026-11-06#631faac5696e",
         "AIOC-S01673931": "2026-11-06#cbc9e2741011",
         "AIOC-S01673934": "2026-11-06#cbc9e2741011",
+        "AIOC-S01673994": "2026-11-06#affe078ac9c5",
+        "AIOC-S01673995": "2026-11-06#affe078ac9c5",
+        "AIOC-S01673996": "2026-11-06#affe078ac9c5",
+        "AIOC-S01673997": "2026-11-06#affe078ac9c5",
+        "AIOC-S01673998": "2026-11-06#affe078ac9c5",
+        "AIOC-S01673999": "2026-11-06#affe078ac9c5",
+        "AIOC-S01674000": "2026-11-06#affe078ac9c5",
+        "AIOC-S01674001": "2026-11-06#affe078ac9c5",
+        "AIOC-S01674002": "2026-11-06#affe078ac9c5",
+        "AIOC-S01674003": "2026-11-06#affe078ac9c5",
+        "AIOC-S01674005": "2026-11-06#506224edf7dc",
+        "AIOC-S01674006": "2026-11-06#506224edf7dc",
+        "AIOC-S01674007": "2026-11-06#506224edf7dc",
         "ATCI-4562921-S1771945": "2026-11-02#479e5347f6c4",
         "ATCI-4562924-S1771962": "2026-11-02#479e5347f6c4",
         "ATCI-5540375-S2023001": "2026-11-02#0d26991c2672",
@@ -1022,14 +1040,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 1092,
-          "added": 5,
-          "removed": 0,
-          "took": 25
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1069,14 +1079,22 @@
           "added": 0,
           "removed": 4,
           "took": 24
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 1086,
+          "added": 0,
+          "removed": 0,
+          "took": 18
         }
       ]
     },
     "Lilly": {
       "status": "ok",
       "detail": "listing 28",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 28,
       "last_discovery_attempt": null,
@@ -1109,14 +1127,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 4,
-          "added": 0,
-          "removed": 0,
-          "took": 12
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1156,16 +1166,24 @@
           "added": 0,
           "removed": 0,
           "took": 13
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 4,
+          "added": 0,
+          "removed": 0,
+          "took": 12
         }
       ]
     },
     "AstraZeneca": {
       "status": "ok",
-      "detail": "listing 32",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 32,
+      "listing_total": 30,
       "last_discovery_attempt": null,
       "screened": {
         "100375885808": "2026-11-02#b672030c94ab",
@@ -1204,6 +1222,7 @@
         "102896066576": "2026-11-05#0118baa6af4c",
         "102927278768": "2026-11-06#f56e75e6966e",
         "102934083328": "2026-11-06#cc77334cb5f1",
+        "102940551296": "2026-11-06#d5e3f36fcbb0",
         "91120121984": "2026-11-02#accccde90905",
         "98559755744": "2026-11-04#bf2e8913ad24",
         "98588463248": "2026-11-03#df52f5275f56",
@@ -1211,14 +1230,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 0,
-          "added": 0,
-          "removed": 0,
-          "took": 6
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1258,16 +1269,24 @@
           "added": 1,
           "removed": 0,
           "took": 9
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 7
         }
       ]
     },
     "Shell": {
       "status": "ok",
-      "detail": "listing 137",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 138",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 137,
+      "listing_total": 138,
       "last_discovery_attempt": null,
       "screened": {
         "R200923": "2026-11-03#ae37a2a39bea",
@@ -1291,14 +1310,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 19
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1338,14 +1349,22 @@
           "added": 0,
           "removed": 0,
           "took": 21
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 19
         }
       ]
     },
     "GE Aerospace": {
       "status": "ok",
       "detail": "listing 7",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 7,
       "last_discovery_attempt": null,
@@ -1364,14 +1383,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 7
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1411,14 +1422,22 @@
           "added": 0,
           "removed": 0,
           "took": 6
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 6
         }
       ]
     },
     "Fractal": {
       "status": "ok",
       "detail": "listing 81",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 81,
       "last_discovery_attempt": null,
@@ -1445,14 +1464,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 4,
-          "added": 0,
-          "removed": 0,
-          "took": 17
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1492,14 +1503,22 @@
           "added": 0,
           "removed": 0,
           "took": 17
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 4,
+          "added": 0,
+          "removed": 0,
+          "took": 17
         }
       ]
     },
     "D. E. Shaw India": {
       "status": "ok",
       "detail": "catalogue 74",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 74,
       "last_discovery_attempt": null,
@@ -1578,14 +1597,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 2
-        },
-        {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
           "published": 1,
@@ -1624,14 +1635,22 @@
           "added": 0,
           "removed": 0,
           "took": 3
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 3
         }
       ]
     },
     "Honeywell": {
       "status": "ok",
       "detail": "listing 120",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 120,
       "last_discovery_attempt": null,
@@ -1713,14 +1732,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 32,
-          "added": 0,
-          "removed": 0,
-          "took": 59
-        },
-        {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
           "published": 32,
@@ -1759,28 +1770,28 @@
           "added": 0,
           "removed": 0,
           "took": 59
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 32,
+          "added": 0,
+          "removed": 0,
+          "took": 60
         }
       ]
     },
     "AMD": {
       "status": "ok",
       "detail": "listing 119",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
       "listing_total": 119,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 11,
-          "added": 0,
-          "removed": 0,
-          "took": 83
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -1820,16 +1831,24 @@
           "added": 0,
           "removed": 1,
           "took": 100
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 9,
+          "added": 0,
+          "removed": 1,
+          "took": 90
         }
       ]
     },
     "Qualcomm": {
-      "status": "stale",
-      "detail": "listing changed during pagination",
-      "last_success": "2026-11-06T15:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
-      "stale_since": "2026-11-06T18:00+05:30",
-      "listing_total": 361,
+      "status": "ok",
+      "detail": "listing 360",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
+      "stale_since": null,
+      "listing_total": 360,
       "last_discovery_attempt": null,
       "screened": {
         "446715068593": "2026-11-03#024aba1900de",
@@ -1970,14 +1989,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "held",
-          "published": 17,
-          "added": 0,
-          "removed": 0,
-          "took": 17
-        },
-        {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
           "published": 17,
@@ -2016,18 +2027,54 @@
           "added": 0,
           "removed": 0,
           "took": 30
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 17,
+          "added": 0,
+          "removed": 0,
+          "took": 53
         }
       ]
     },
     "Deloitte": {
       "status": "ok",
-      "detail": "listing 811 across 3 searches",
-      "last_success": "2026-11-06T18:00+05:30",
-      "last_attempt": "2026-11-06T18:00+05:30",
+      "detail": "listing 812 across 3 searches",
+      "last_success": "2026-11-06T21:00+05:30",
+      "last_attempt": "2026-11-06T21:00+05:30",
       "stale_since": null,
-      "listing_total": 811,
+      "listing_total": 812,
       "last_discovery_attempt": null,
       "screened": {
+        "60932344": "2026-11-06#bb9e8b383fb7",
+        "60947344": "2026-11-06#c75463ebbbfd",
+        "60947844": "2026-11-06#de8c04ecf2d7",
+        "60948044": "2026-11-06#79daea58000e",
+        "60948444": "2026-11-06#58dcf352f51b",
+        "60948544": "2026-11-06#86849fcf7a40",
+        "60949144": "2026-11-06#760c6b34eb9d",
+        "60951444": "2026-11-06#cefe69133bf8",
+        "60957544": "2026-11-06#6c8d5201076a",
+        "60957744": "2026-11-06#567feb5f3cc9",
+        "60962344": "2026-11-06#a3e30a9de7f9",
+        "60962444": "2026-11-06#a6f1563f300a",
+        "60962544": "2026-11-06#5113c6339ae2",
+        "60965544": "2026-11-06#5ea5ae2db994",
+        "60967044": "2026-11-06#94c8c1bbe627",
+        "60969244": "2026-11-06#dbdc5b81a052",
+        "60969644": "2026-11-06#038e9f4fdf07",
+        "60977144": "2026-11-06#8404ece8b88e",
+        "60978344": "2026-11-06#f321cff502b3",
+        "60978744": "2026-11-06#1fa15d68143c",
+        "60978944": "2026-11-06#f13b2f6998d4",
+        "60979344": "2026-11-06#f56364d7f144",
+        "60979744": "2026-11-06#fa5d78f15f50",
+        "60979944": "2026-11-06#791cce7eb0cf",
+        "60980744": "2026-11-06#d3e76aadd48d",
+        "60981644": "2026-11-06#cabbd5b2f498",
+        "60981944": "2026-11-06#4e74ea9b6eb4",
+        "60982044": "2026-11-06#83b9457f7011",
         "60982244": "2026-11-06#1b6e0d36b5f3",
         "60988544": "2026-11-06#98539c68d7c3",
         "60989344": "2026-11-06#470d2320d166",
@@ -2215,18 +2262,11 @@
         "61354044": "2026-11-06#ddf297c1b453",
         "61355044": "2026-11-06#dc875e6b1389",
         "61355544": "2026-11-06#ecdca40e6406",
-        "61357044": "2026-11-06#76951d187f00"
+        "61357044": "2026-11-06#76951d187f00",
+        "61359244": "2026-11-06#84804cee0d0c"
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-06T03:00+05:30",
-          "result": "accepted",
-          "published": 12,
-          "added": 3,
-          "removed": 0,
-          "took": 136
-        },
         {
           "at": "2026-11-06T06:00+05:30",
           "result": "accepted",
@@ -2266,6 +2306,14 @@
           "added": 3,
           "removed": 0,
           "took": 143
+        },
+        {
+          "at": "2026-11-06T21:00+05:30",
+          "result": "accepted",
+          "published": 21,
+          "added": 1,
+          "removed": 0,
+          "took": 137
         }
       ]
     }
@@ -2552,6 +2600,21 @@
       "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210713605",
       "posted_date": "2026-11-06",
       "closing_date": "2026-11-09",
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "JPMorganChase",
+      "job_id": "210798810",
+      "title": "Business Operation Specialist",
+      "experience_text": "1–3 years of experience in operations, finance, or a related role",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210798810",
+      "posted_date": "2026-11-06",
+      "closing_date": "2026-11-20",
       "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
       "liveness": "live",
@@ -3114,6 +3177,51 @@
     },
     {
       "company": "GE HealthCare",
+      "job_id": "R4049133",
+      "title": "Verification Engineer",
+      "experience_text": "2 to 6 years of experience in the industry Bachelor’s Degree in Computer Science or in “STEM” Majors (Science, Technology, Engineering and…",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite/job/IND19-01-Bengaluru-EPIP-122-Phase-II/Verification-Engineer_R4049133-1",
+      "posted_date": "2026-11-06",
+      "closing_date": "2026-11-13",
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE HealthCare",
+      "job_id": "R4048826",
+      "title": "Graduate Engineer Trainee",
+      "experience_text": "1 year of relevant internship or industrial experience",
+      "experience_band": "1",
+      "location": "Bengaluru",
+      "canonical_url": "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite/job/Bengaluru/Graduate-Engineer-Trainee_R4048826-1",
+      "posted_date": "2026-11-06",
+      "closing_date": "2026-11-19",
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE HealthCare",
+      "job_id": "R4040613",
+      "title": "Software Engineer Intern",
+      "experience_text": "No number of years stated — see posting for required experience",
+      "experience_band": "n",
+      "location": "Bengaluru and Krakow",
+      "canonical_url": "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite/job/Krakow/Software-Engineer-Intern_R4040613",
+      "posted_date": "2026-11-06",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "GE HealthCare",
       "job_id": "R4048609",
       "title": "Trainee Engineer",
       "experience_text": "1 year of relevant internship or industrial experience",
@@ -3216,21 +3324,6 @@
       "last_seen": "2026-11-06",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "GE HealthCare",
-      "job_id": "R4044790",
-      "title": "Graduate Engineer Trainee",
-      "experience_text": "1 year of relevant internship or industrial experience",
-      "experience_band": "1",
-      "location": "Bengaluru",
-      "canonical_url": "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite/job/Bengaluru/Trainee-Engineer_R4044790-1",
-      "posted_date": "2026-10-15",
-      "closing_date": null,
-      "first_seen": "2026-10-31",
-      "last_seen": "2026-11-06",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "GE HealthCare",
@@ -3694,8 +3787,8 @@
       "closing_date": null,
       "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -3709,8 +3802,8 @@
       "closing_date": null,
       "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -3724,8 +3817,8 @@
       "closing_date": null,
       "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -3739,8 +3832,8 @@
       "closing_date": null,
       "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -4354,8 +4447,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -4624,8 +4717,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -4639,8 +4732,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -4654,8 +4747,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -4729,8 +4822,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -4744,8 +4837,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -6799,8 +6892,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -6934,8 +7027,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -7084,8 +7177,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -7144,8 +7237,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -7669,8 +7762,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8074,8 +8167,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8224,8 +8317,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8254,8 +8347,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8269,8 +8362,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8284,8 +8377,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8299,8 +8392,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8314,8 +8407,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8329,8 +8422,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8344,8 +8437,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8359,8 +8452,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8374,8 +8467,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8389,8 +8482,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8404,8 +8497,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8419,8 +8512,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8434,8 +8527,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8464,8 +8557,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8494,8 +8587,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8524,8 +8617,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8539,8 +8632,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8569,8 +8662,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8689,8 +8782,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8764,8 +8857,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8779,8 +8872,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8794,8 +8887,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8809,8 +8902,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8869,8 +8962,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8929,8 +9022,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8944,8 +9037,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8974,8 +9067,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9004,8 +9097,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9049,8 +9142,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9079,8 +9172,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9124,8 +9217,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9169,8 +9262,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9184,8 +9277,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9199,8 +9292,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9214,8 +9307,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9259,8 +9352,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9274,8 +9367,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9289,8 +9382,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9304,8 +9397,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9319,8 +9412,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9334,8 +9427,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9349,8 +9442,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9364,8 +9457,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9379,8 +9472,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9394,8 +9487,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9409,8 +9502,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9424,8 +9517,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9439,8 +9532,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9454,8 +9547,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9469,8 +9562,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9484,8 +9577,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9499,8 +9592,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9514,8 +9607,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9529,8 +9622,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9544,8 +9637,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10279,8 +10372,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10294,8 +10387,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10309,8 +10402,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10324,8 +10417,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10339,8 +10432,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10354,8 +10447,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10369,8 +10462,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10384,8 +10477,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10399,8 +10492,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10414,8 +10507,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10429,8 +10522,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10444,8 +10537,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10459,8 +10552,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10474,8 +10567,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10489,8 +10582,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10504,8 +10597,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10519,8 +10612,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10534,8 +10627,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10549,8 +10642,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10564,8 +10657,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10579,8 +10672,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10594,8 +10687,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10609,8 +10702,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10624,8 +10717,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10639,8 +10732,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10654,8 +10747,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10669,8 +10762,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10684,8 +10777,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10699,8 +10792,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10714,8 +10807,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10729,8 +10822,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10744,8 +10837,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10759,8 +10852,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10774,8 +10867,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10789,8 +10882,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10804,8 +10897,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10819,8 +10912,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10834,8 +10927,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10849,8 +10942,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10864,8 +10957,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10879,8 +10972,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10894,8 +10987,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10909,8 +11002,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10924,8 +11017,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10939,8 +11032,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10954,8 +11047,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10969,8 +11062,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10984,8 +11077,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10999,8 +11092,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11014,8 +11107,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11029,8 +11122,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11044,8 +11137,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11059,8 +11152,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11074,8 +11167,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11089,8 +11182,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11104,8 +11197,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11119,8 +11212,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11134,8 +11227,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11149,8 +11242,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11164,8 +11257,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11179,8 +11272,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11194,8 +11287,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11209,8 +11302,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11224,8 +11317,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11239,8 +11332,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11254,8 +11347,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11269,8 +11362,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11284,8 +11377,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11299,8 +11392,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11314,8 +11407,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11329,8 +11422,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11344,8 +11437,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11359,8 +11452,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11374,8 +11467,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11389,8 +11482,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11404,8 +11497,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11419,8 +11512,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11434,8 +11527,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11464,8 +11557,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11479,8 +11572,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11494,8 +11587,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11509,8 +11602,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11524,8 +11617,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11539,8 +11632,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11554,8 +11647,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11569,8 +11662,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11584,8 +11677,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11599,8 +11692,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11614,8 +11707,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11809,8 +11902,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11824,8 +11917,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11884,8 +11977,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -12139,8 +12232,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -13219,8 +13312,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -13234,8 +13327,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -13564,8 +13657,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -13579,8 +13672,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -13909,8 +14002,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -14089,8 +14182,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -14764,8 +14857,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -14854,8 +14947,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15064,8 +15157,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15139,8 +15232,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15154,8 +15247,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15184,8 +15277,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15199,8 +15292,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15214,8 +15307,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15244,8 +15337,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15259,8 +15352,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15274,8 +15367,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15289,8 +15382,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15304,8 +15397,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15319,8 +15412,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15334,8 +15427,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15349,8 +15442,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15364,8 +15457,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15379,8 +15472,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15394,8 +15487,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15409,8 +15502,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15424,8 +15517,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15439,8 +15532,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15454,8 +15547,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -15739,8 +15832,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16219,8 +16312,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16369,8 +16462,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16384,8 +16477,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16399,8 +16492,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16414,8 +16507,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16429,8 +16522,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16444,8 +16537,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16459,8 +16552,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16474,8 +16567,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16504,8 +16597,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16519,8 +16612,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16534,8 +16627,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16549,8 +16642,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16564,8 +16657,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16579,8 +16672,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16594,8 +16687,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16609,8 +16702,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16624,8 +16717,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -17704,8 +17797,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -18949,8 +19042,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -18979,8 +19072,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -18994,8 +19087,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19039,8 +19132,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19114,8 +19207,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19129,8 +19222,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19144,8 +19237,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19159,8 +19252,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19174,8 +19267,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19189,8 +19282,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19204,8 +19297,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19219,8 +19312,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19249,8 +19342,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19279,8 +19372,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19294,8 +19387,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19309,8 +19402,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19354,8 +19447,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19414,8 +19507,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19429,8 +19522,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19444,8 +19537,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19459,8 +19552,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19474,8 +19567,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19489,8 +19582,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19504,8 +19597,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19519,8 +19612,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19534,8 +19627,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19549,8 +19642,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19564,8 +19657,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19579,8 +19672,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19594,8 +19687,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19609,8 +19702,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19624,8 +19717,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19639,8 +19732,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19654,8 +19747,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19669,8 +19762,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19684,8 +19777,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19699,8 +19792,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19744,8 +19837,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19759,8 +19852,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19789,8 +19882,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19804,8 +19897,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19849,8 +19942,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19864,8 +19957,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19879,8 +19972,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19894,8 +19987,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19909,8 +20002,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -19924,8 +20017,8 @@
       "closing_date": null,
       "first_seen": "2026-11-02",
       "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
+      "liveness": "absent",
+      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -20649,21 +20742,6 @@
     },
     {
       "company": "AMD",
-      "job_id": "94416",
-      "title": "Packaging Engineer",
-      "experience_text": "2+ years of experience in designing complex substrate design or Silicon Bridge or Interposers Proven ability to execute in multi-project, f…",
-      "experience_band": "2",
-      "location": "Bangalore",
-      "canonical_url": "https://careers.amd.com/jobs/94416",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-06",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "AMD",
       "job_id": "84934",
       "title": "AI Performance Modeling Engineer",
       "experience_text": "No number of years stated — see posting for required experience",
@@ -21317,6 +21395,21 @@
       "canonical_url": "https://southasiacareers.deloitte.com/job/Bengaluru/60994144/",
       "posted_date": "2026-10-27",
       "closing_date": "2027-03-05",
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Deloitte",
+      "job_id": "60978844",
+      "title": "Consultant | Power Platform Developer | Bengaluru | Emerging ERP Solutions",
+      "experience_text": "No number of years stated — see posting for required experience",
+      "experience_band": "n",
+      "location": "Bengaluru",
+      "canonical_url": "https://southasiacareers.deloitte.com/job/Bengaluru/60978844/",
+      "posted_date": "2026-10-26",
+      "closing_date": "2026-11-30",
       "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
       "liveness": "live",
