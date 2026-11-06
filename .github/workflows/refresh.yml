@@ -76,7 +76,7 @@ jobs:
       group: job-ledger-refresh
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-    timeout-minutes: 65    # up to the schedule lead waiting for the slot, the run budget, then ~9 min for tests/render/commit
+    timeout-minutes: 75    # up to the schedule lead waiting for the slot, the run budget, then ~9 min for tests/render/commit
     outputs:
       alert: ${{ steps.build.outputs.alert }}   # this run's alert payload on one line, for the notify job
     permissions:

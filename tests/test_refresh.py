@@ -1447,14 +1447,15 @@ class ConfigTests(unittest.TestCase):
                                               "shell.wd3.myworkdayjobs.com", "geaerospace.wd5.myworkdayjobs.com",
                                               "fractal.wd1.myworkdayjobs.com", "www.deshawindia.com",
                                               "ibqbjb.fa.ocs.oraclecloud.com", "careers.honeywell.com",
-                                              "careers.amd.com", "careers.qualcomm.com", "southasiacareers.deloitte.com"})
+                                              "careers.amd.com", "careers.qualcomm.com", "southasiacareers.deloitte.com",
+                                              "careers.ey.com", "eeho.fa.us2.oraclecloud.com"})
         self.assertEqual({c: config.sources[c]["mode"] for c in config.companies}, {
             "Siemens": "siemens_avature_html", "JPMorganChase": "jpm_oracle_ce", "GE HealthCare": "gehc_workday_cxs",
             "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api",
             "Accenture": "accenture_findjobs_api", "Lilly": "workday_cxs", "AstraZeneca": "astrazeneca_talentbrew_html",
             "Shell": "workday_cxs", "GE Aerospace": "workday_cxs", "Fractal": "workday_cxs",
             "D. E. Shaw India": "deshaw_nextdata_html", "Honeywell": "oracle_ce", "AMD": "jibe_api",
-            "Qualcomm": "eightfold_pcsx_api", "Deloitte": "sf_csb_html"})
+            "Qualcomm": "eightfold_pcsx_api", "Deloitte": "sf_csb_html", "EY": "sf_csb_html", "Oracle": "oracle_ce"})
         # Two regions; the place terms behind them are what employers actually write.
         self.assertEqual(config.regions, ("bengaluru", "kerala"))
         self.assertEqual(config.cities[:3], ("bengaluru", "bangalore", "kerala"))
@@ -1485,7 +1486,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("ibqbjb.fa.ocs.oraclecloud.com", R._oracle_urls("Honeywell")[1])
         self.assertEqual(R.JIBE_SITES["ZS"], (R.ZS_LIST, R.ZS_FRONT, R.ZS_DETAIL, ("qualifications", "description")))
         self.assertEqual(R.JIBE_SITES["AMD"][3], ("description",))      # AMD's "qualifications" is benefits boilerplate
-        for company in ("Honeywell", "AMD", "Qualcomm", "Deloitte"):
+        for company in ("Honeywell", "AMD", "Qualcomm", "Deloitte", "EY", "Oracle"):
             self.assertIn(company, R.COMPANY_SPECS)
             self.assertIn(company, R.JOB_ID_RE)
         for mode, runner in (("oracle_ce", R.refresh_jpm), ("jibe_api", R.refresh_zs), ("eightfold_pcsx_api", R.refresh_eightfold),
@@ -1493,6 +1494,16 @@ class ConfigTests(unittest.TestCase):
             self.assertIs(R.RUNNERS[mode], runner)
         for url in (R.SF_BASE, R.SF_SEARCH, R.SF_FRONT):
             self.assertIsNone(R.check_url(url.replace("{", "").replace("}", ""), R.COMPANY_SPECS["Deloitte"].hosts), url)
+        # The shared SuccessFactors templates reproduce Deloitte's own URLs exactly and carry EY's /ey prefix.
+        self.assertEqual(R._sf_urls("Deloitte"), (R.SF_BASE, R.SF_SEARCH, R.SF_FRONT))
+        self.assertEqual(R._sf_urls("EY"), ("https://careers.ey.com",
+                                            "https://careers.ey.com/ey/search/?q=&locationsearch={place}&sortColumn=referencedate"
+                                            "&sortDirection=desc&startrow={start}", "https://careers.ey.com/ey/job/India/{id}/"))
+        for company in ("EY", "Oracle"):
+            urls = R._sf_urls(company)[1:] if company == "EY" else R._oracle_urls(company)
+            for url in urls:
+                self.assertIsNone(R.check_url(url.replace("{", "").replace("}", ""), R.COMPANY_SPECS[company].hosts), url)
+        self.assertIn("siteNumber=CX_45001,", R._oracle_urls("Oracle")[0])
 
     def test_config_rejects_unsafe_changes(self):
         def static(name):
@@ -1607,6 +1618,7 @@ class LogoTests(unittest.TestCase):
             "Honeywell": "{url}/apply/email", "AMD": "https://global-external-amd.icims.com/jobs/{id}/login",
             "Qualcomm": "https://careers.qualcomm.com/careers/apply?pid={id}",
             "Deloitte": "https://southasiacareers.deloitte.com/talentcommunity/apply/{id}/?locale=en_US",
+            "EY": "https://careers.ey.com/ey/talentcommunity/apply/{id}/?locale=en_US", "Oracle": "{url}/apply/email",
         }
         self.assertEqual({c: R.COMPANY_SPECS[c].apply for c in self.config.companies}, expected)
         self.assertEqual(R.APPLY_WORKDAY, "{url}/apply")
@@ -1974,9 +1986,9 @@ class WorkflowTests(unittest.TestCase):
                                         r"      cancel-in-progress: false$", self.text)), 3)
         self.assertNotIn("concurrency", self.block("gate"))
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        # gate; refresh = lead wait + seventeen sources + ~9 min for tests, render and commit; publish; deploy = two
+        # gate; refresh = lead wait + nineteen sources + ~9 min for tests, render and commit; publish; deploy = two
         # 8-min attempts; notify.
-        self.assertEqual(timeouts, [5, 65, 10, 20, 5])
+        self.assertEqual(timeouts, [5, 75, 10, 20, 5])
         self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 5)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
@@ -2413,6 +2425,18 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(new["60999944"].canonical_url, "https://southasiacareers.deloitte.com/job/Bengaluru/60999944/")
         self.assertEqual(new["60999944"].title, "Credit Operations Analyst | Regulatory & Financial Risk")
         self.assertEqual(after.companies["Deloitte"].detail, "listing 1 across 3 searches")
+        # EY: the /ey path prefix, one addressLocality meta per city (Kochi and Bengaluru both kept), the ID-only
+        # /ey/job/India/ canonical URL, and the two empty searches tolerated.
+        self.assertEqual((new["1454290001"].location, new["1454290001"].posted_date, new["1454290001"].closing_date,
+                          new["1454290001"].experience_band), ("Kochi and Bengaluru", "2026-10-30", "2026-11-30", "2"))
+        self.assertEqual(new["1454290001"].canonical_url, "https://careers.ey.com/ey/job/India/1454290001/")
+        self.assertEqual(after.companies["EY"].detail, "listing 1 across 3 searches")
+        # Oracle: the shared Oracle CE adapter against its own tenant (the KARNATAKA facet is a state, not a city).
+        self.assertEqual((new["350001"].location, new["350001"].posted_date, new["350001"].experience_band),
+                         ("Bengaluru", "2026-10-30", "2"))
+        self.assertEqual(new["350001"].canonical_url,
+                         "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/jobsearch/job/350001")
+        self.assertEqual(after.companies["Oracle"].detail, "listing 1")
         self.assertEqual(R.read_text(os.path.join(tmp, "index.html")), R.render(after, template, config))
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
@@ -2667,9 +2691,9 @@ class PullHistoryTests(unittest.TestCase):
 LEDGER = "https://example-owner.github.io/job-openings-ledger/"   # synthetic owner; CI derives the real one
 FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999", "60999944",
                  "AIOC-S01699001", "R-199001", "999000001", "R299001", "R5099001", "SR-49001", "9001",
-                 "161001", "95001", "446700000001"}
+                 "161001", "95001", "446700000001", "1454290001", "350001"}
 NEW_SOURCES = ("Accenture", "Lilly", "AstraZeneca", "Shell", "GE Aerospace", "Fractal", "D. E. Shaw India",
-               "Honeywell", "AMD", "Qualcomm", "Deloitte")
+               "Honeywell", "AMD", "Qualcomm", "Deloitte", "EY", "Oracle")
 
 
 def outcome_for(state, added=(), removed=0, run_at="2026-10-31T18:00+05:30", mode="fixtures"):
@@ -2758,7 +2782,7 @@ class AlertTests(unittest.TestCase):
             self.assertEqual(j, {"company": r.company, "job_id": r.job_id, "title": r.title,
                                  "canonical_url": r.canonical_url})
         self.assertEqual(a["notification_title"], "New openings listed")
-        # Sixteen companies each adding one role overflow the per-company list, so the body falls back to the count.
+        # Nineteen companies each adding one role overflow the per-company list, so the body falls back to the count.
         self.assertTrue(a["notification_body"].startswith(f"New: {len(FIXTURE_ADDED)}. "))
         self.assertLessEqual(len(a["notification_body"]), R.ALERT_BODY_MAX)
         self.assertNotIn("mode", a)                                           # run mode stays internal
@@ -3252,12 +3276,44 @@ class JpmOracleTests(unittest.TestCase):
         # A previous unique total of 35 with the same overlap is not a shrink on the next run.
         _r, _rows, cs2, _rm, _t = run_source("JPMorganChase", routes, cs=cs, now=NOW + R.REFRESH_CADENCE)
         self.assertEqual(cs2.status, "ok")
+        # One role short of the count is tolerated (JPM_COUNT_SLACK: Oracle's own facet always counts one more than it
+        # lists); two short is drift, walked twice and then held.
         short = routes[:-2] + [("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
                                 jresp({"items": [{"TotalJobsCount": 4, "requisitionList": overlap}]})), jpm_details()]
         res, _rows, _cs, _rm, t = run_source("JPMorganChase", short)
+        self.assertTrue(res.ok)
+        self.assertEqual(res.listing_total, 35)
+        shorter = routes[:-2] + [("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
+                                  jresp({"items": [{"TotalJobsCount": 5, "requisitionList": overlap}]})), jpm_details()]
+        res, _rows, _cs, _rm, t = run_source("JPMorganChase", shorter)
         self.assertFalse(res.ok)                                        # an incomplete facet still holds
         self.assertEqual(res.detail, R.DRIFT_DETAIL)                   # fewer unique roles than the count: drift
         self.assertEqual(t.count(f"selectedLocationsFacet={bangalore}"), 2)   # walked twice, then held
+
+    def test_oracle_tenant_conventions(self):
+        """Oracle's own tenant differs from JPMorganChase's in three ways the shared adapter absorbs: its places are
+        shouted ("BENGALURU, KARNATAKA, India"), its requirements sit in the responsibilities field, and its titles
+        end in the career level (IC3 and up ask for five or more years, whatever the text says). Its Bengaluru
+        facet also counts one requisition more than it ever lists, which the count check tolerates."""
+        self.assertEqual(R._uncaps("BENGALURU, KARNATAKA, India"), "Bengaluru, Karnataka, India")
+        self.assertEqual(R._uncaps("Bengaluru, Karnataka, India"), "Bengaluru, Karnataka, India")
+        self.assertEqual(R._jpm_places({"PrimaryLocation": "BENGALURU, KARNATAKA, India",
+                                        "secondaryLocations": [{"Name": "HYDERABAD, TELANGANA, India"}]}),
+                         ["Bengaluru, Karnataka, India", "Hyderabad, Telangana, India"])
+        for title, level in {"Financial Analyst 3": 3, "Contracts Administrator 2-Fin": 2, "Business Analyst 3-Ops": 3,
+                             "Core Infrastructure Engineer 2": 2, "Software Developer 1": 1, "Software Engineer II": None,
+                             "Advanced Software Engr": None, "Analyst, write to hr 2026": None}.items():
+            self.assertEqual(R._oracle_level(title), level, title)
+        self.assertEqual((R.JPM_COUNT_SLACK, R.ORACLE_SENIOR_LEVEL), (1, 3))
+        text, _cue = R._jpm_requirements({"ExternalDescriptionStr": "<p>About the team.</p>",
+                                          "ExternalResponsibilitiesStr": "<p>10 years of experience in FP&A.</p>"})
+        self.assertIn("10 years of experience in FP&A.", text)
+        config = env()[0]
+        ok, _b, _e = R.qualifies("Financial Analyst 3", text, TODAY, ["Bengaluru, Karnataka, India"], TODAY, config)
+        self.assertFalse(ok)                                           # the years rule out the role on its own
+        # The level rule applies to Oracle only (a JPMorganChase title never ends in a career level).
+        self.assertIn('if ok and company == "Oracle" and (_oracle_level(title) or 0) >= ORACLE_SENIOR_LEVEL:',
+                      R.read_text(os.path.join(ROOT, "scripts", "refresh.py")))
 
     def test_invalid_qualifying_row_is_counted_not_screened(self):
         new = [jpm_req("210809061"), jpm_req("210809062")]
@@ -3779,10 +3835,10 @@ def source_minimum(company, config, state):
         return n * _per_request(config, "careers.astrazeneca.com")
     if company == "D. E. Shaw India":    # robots and the one careers page
         return 2 * _per_request(config, "www.deshawindia.com")
-    if company == "Deloitte":            # robots, a first page per place, the pages the grand total allows (max_total
+    if company in R.SF_SITES:            # robots, a first page per place, the pages the grand total allows (max_total
         n = (1 + len(cfg["search_terms"]) + pages(cfg["max_total"], R.SF_PAGE)   # caps the sum over all places),
              + rows + cfg["max_new_details"])                                    # one page per unlisted row, new details
-        return n * _per_request(config, "southasiacareers.deloitte.com")
+        return n * _per_request(config, R.SF_SITES[company][0].split("/")[2])
     raise AssertionError(company)
 
 
@@ -3961,7 +4017,7 @@ class AdapterIsolationTests(unittest.TestCase):
         # The refresh job may first wait up to the schedule lead for the slot, then needs the run budget plus slack.
         # Nine minutes of slack: the unit tests alone take up to 3.5 min in CI, then render, scan, commit and push.
         self.assertLessEqual(R.RUN_BUDGET_S, (timeout - 9) * 60 - R.SCHEDULE_LEAD.total_seconds())
-        self.assertEqual(timeout, 65)
+        self.assertEqual(timeout, 75)
         live = [c for c in config.companies if config.sources[c]["mode"] != "static"]
         self.assertLessEqual(sum(config.sources[c]["budget_s"] for c in live), R.RUN_BUDGET_S)
         for c in live:
@@ -3991,7 +4047,9 @@ class AdapterIsolationTests(unittest.TestCase):
 
     def test_config_rejects_oversubscribed_budgets(self):
         data = R.read_json(os.path.join(ROOT, R.CONFIG_PATH))
-        data["companies"][1]["budget_s"] += 30
+        headroom = int(R.RUN_BUDGET_S) - sum(c["budget_s"] for c in data["companies"] if c["mode"] != "static")
+        self.assertGreaterEqual(headroom, 0)
+        data["companies"][1]["budget_s"] += headroom + 1
         with self.assertRaises(R.ConfigError) as ctx:
             R.load_config(data)
         self.assertIn("sum", str(ctx.exception))
@@ -4859,7 +4917,7 @@ class SourceHealthTests(unittest.TestCase):
                         and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
-                         "Result2/17 ✓accepted · 2 held · 1 failed · 12 pending"
+                         "Result2/19 ✓accepted · 2 held · 1 failed · 14 pending"
                          f"Openings{records} published · {new_today} new today"
                          "Freshness× FAILED"
                          "Next run1 Nov 00:00 IST · approx.")
@@ -4902,7 +4960,7 @@ class SourceHealthTests(unittest.TestCase):
             with self.subTest(name), self.assertRaises(ValueError):
                 R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
         self.assertNotIn("Companies checked", doc)
-        self.assertIn('<h2 class="vh" id="src-h">Source health: 17 automated sources</h2>', doc)
+        self.assertIn('<h2 class="vh" id="src-h">Source health: 19 automated sources</h2>', doc)
         self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {len(self.state.empty_companies)} '
                       'companies</span>', doc)
         self.assertIn('<dl class="info-dl" id="empty-list"></dl>', doc)
@@ -4997,7 +5055,7 @@ class SourceHealthTests(unittest.TestCase):
                     "GE Aerospace": "Workday CXS API", "Fractal": "Workday CXS API",
                     "Accenture": "Careers search API", "D. E. Shaw India": "Careers page data",
                     "Honeywell": "Oracle Careers API", "AMD": "Jibe Jobs API", "Qualcomm": "Eightfold search API",
-                    "Deloitte": "SuccessFactors HTML"}
+                    "Deloitte": "SuccessFactors HTML", "EY": "SuccessFactors HTML", "Oracle": "Oracle Careers API"}
         for company, (_s, rest) in channels(section).items():
             self.assertTrue(rest.startswith(f'<span class="ch-c"><span class="vh">, source connector </span>'
                                             f'{expected[company]}</span></span>'), company)
@@ -5012,18 +5070,18 @@ class SourceHealthTests(unittest.TestCase):
     def test_latest_refresh_rollup_counts(self):
         self.all_states_state()
         sources = R.source_health(self.state, self.config, R.health_reference(self.state))
-        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 12})
+        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 14})
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
         # "N/M ✓" (the word stays for screen readers), then only the non-zero holds/failures/pendings.
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/17 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/19 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span> · <span data-o="held"><b>2</b> held</span> · <span data-o="failed">'
-                      '<b>1</b> failed</span> · <span data-o="pending"><b>12</b> pending</span></dd></div>', block)
+                      '<b>1</b> failed</span> · <span data-o="pending"><b>14</b> pending</span></dd></div>', block)
         self.assertNotIn("sources accepted", doc)
         for c in self.config.companies:
             self.set_company(c, status="ok", last_success=iso(REF), last_attempt=iso(REF))
         clean = status_block(R.render(self.state, self.template, self.config))
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">17</b>/17 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">19</b>/19 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span></dd></div>', clean)                      # no "0 held · 0 failed"
         self.assertNotIn("<b>0</b>", clean)
         for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/16"):

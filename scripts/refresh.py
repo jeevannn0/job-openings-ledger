@@ -219,6 +219,17 @@ COMPANY_SPECS = {
                       {"southasiacareers.deloitte.com"},
                       "https://rmkcdn.successfactors.com/2cbbbe22/7149328e-85fa-4cd9-adeb-7.png",
                       "https://southasiacareers.deloitte.com/talentcommunity/apply/{id}/?locale=en_US"),
+    # EY (incl. GDS India: Kochi, Thiruvananthapuram, Bengaluru) hires through one global SuccessFactors site whose
+    # paths carry an /ey prefix. Its icon is the SuccessFactors-hosted ICO the site declares (careers.ey.com's own
+    # favicon is a 16 px bitmap). Postings list several cities; the ID-only /ey/job/India/{id}/ slug is served.
+    "EY": _spec(r"https://careers\.ey\.com/ey/job/[A-Za-z]+/(\d{8,12})/", {"sf_csb_html"}, {"careers.ey.com"},
+                "https://rmkcdn.successfactors.com/bcfdbc8a/013850a8-6899-42b9-89b8-9.ico",
+                "https://careers.ey.com/ey/talentcommunity/apply/{id}/?locale=en_US"),
+    # Oracle's own Recruiting CE tenant; careers.oracle.com only hash-routes to it, so the Fusion host is the public
+    # job URL too. Oracle's 192 px favicon is on www.oracle.com.
+    "Oracle": _spec(r"https://eeho\.fa\.us2\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/jobsearch/job/(\d{4,9})",
+                    {"oracle_ce"}, {"eeho.fa.us2.oraclecloud.com"},
+                    "https://www.oracle.com/asset/web/favicons/favicon-192.png", APPLY_ORACLE),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -229,7 +240,7 @@ JOB_ID_RE = {
     "GE Aerospace": re.compile(r"R\d{6,9}"), "Fractal": re.compile(r"SR-\d{4,7}"),
     "D. E. Shaw India": re.compile(r"\d{3,7}"), "Honeywell": re.compile(r"\d{5,8}"), "AMD": re.compile(r"\d{4,7}"),
     "Qualcomm": re.compile(r"\d{9,15}"),
-    "Deloitte": re.compile(r"\d{6,10}"),
+    "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"), "Oracle": re.compile(r"\d{4,9}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -292,6 +303,7 @@ JPM_DETAIL = (JPM_REST + "recruitingCEJobRequisitionDetails?expand=all&onlyData=
               "&finder=ById;Id=%22{id}%22,siteNumber=CX_1001")
 JPM_FRONT = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/{id}"
 JPM_PAGE = 25
+JPM_COUNT_SLACK = 1     # a facet may list one requisition fewer than it counts (see _jpm_listing)
 # Section headings such as "Required qualifications, capabilities, and skills:" may be followed by the
 # requirements on the same line or on the next lines; the heading words themselves are not content.
 JPM_REQUIRED_HEAD = re.compile(r"required qualifications(?:\s*(?:,|&|\band\b|\bcapabilities\b|\bskills\b))*\s*[:\-–—]?",
@@ -303,6 +315,8 @@ ORACLE_SITES = {
     "JPMorganChase": (JPM_REST, "CX_1001", JPM_FRONT),
     "Honeywell": ("https://ibqbjb.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/", "CX_1",
                   "https://careers.honeywell.com/en/sites/Honeywell/job/{id}"),
+    "Oracle": ("https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/", "CX_45001",
+               "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/jobsearch/job/{id}"),
 }
 
 GEHC_FRONT = "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite"
@@ -386,23 +400,30 @@ SEEN_BASIS_MODES = frozenset({"deshaw_nextdata_html"})
 # search matches the city as written), newest first, 25 rows a page with "Results 1 – 25 of N" in the pagination
 # label; each job page carries schema.org itemprops (datePosted, validThrough, streetAddress) and the description.
 SF_BASE = "https://southasiacareers.deloitte.com"
+# Every SuccessFactors tenant reads the same way: (site base, path prefix such as "/ey" or "", the slug segment the
+# ID-only canonical URL uses). Search and job URLs are the templates below with those values swapped in (_sf_urls).
+SF_SITES = {
+    "Deloitte": (SF_BASE, "", "Bengaluru"),
+    "EY": ("https://careers.ey.com", "/ey", "India"),
+}
 SF_SEARCH = SF_BASE + "/search/?q=&locationsearch={place}&sortColumn=referencedate&sortDirection=desc&startrow={start}"
 SF_PAGE = 25
 SF_TOTAL = re.compile(r"Results\s*<b>\s*\d+\s*[–-]\s*\d+\s*</b>\s*of\s*<b>\s*(\d+)", re.S)
 SF_ROW = re.compile(r'<tr class="data-row">(.*?)</tr>', re.S)
-SF_LINK = re.compile(r'<a\b(?=[^>]*class="jobTitle-link")[^>]*href="(/job/[^"/]+/(\d{6,10})/)"[^>]*>([^<]*)<')   # either attribute order
+SF_LINK = re.compile(r'<a\b(?=[^>]*class="jobTitle-link")[^>]*href="((?:/[a-z]+)?/job/[^"/]+/(\d{6,12})/)"[^>]*>([^<]*)<')   # either attribute order
 SF_EMPTY = re.compile(r"There are currently no open positions matching")   # a zero-result search has no pagination label
 SF_FRONT = SF_BASE + "/job/Bengaluru/{id}/"      # the site serves a posting under any slug; this one is URL-safe
 SF_META = re.compile(r'<meta itemprop="([A-Za-z]+)" content="([^"]*)"')
+SF_PLACE_META = ("streetAddress", "addressLocality")   # Deloitte names cities in one streetAddress; EY one addressLocality each
 SF_DESC = re.compile(r'<span class="jobdescription">(.*?)</span>\s*(?:</div>|<div)', re.S)
 SF_DATE = re.compile(r"[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) \d{2}:\d{2}:\d{2} [A-Z]{3,4} (\d{4})")   # Wed Nov 04 02:00:00 UTC 2026
 
-# Wall-clock cap for one whole refresh run, so the seventeen sources together stay inside the 45 minutes
-# the workflow's 65-minute job timeout leaves after its 20-minute schedule lead; the unit tests, render,
+# Wall-clock cap for one whole refresh run, so the nineteen sources together stay inside the 46 minutes
+# the workflow's 75-minute job timeout leaves after its 20-minute schedule lead; the unit tests, render,
 # commit and push need the rest (tests alone take up to 3.5 min in CI). load_config rejects source budgets
 # that sum to more than this.
 # A source that would start with less than the floor is held.
-RUN_BUDGET_S = 2160.0
+RUN_BUDGET_S = 2760.0
 MIN_SOURCE_BUDGET_S = 30.0  # default floor; source_floor() uses each mode's own schema minimum
 
 # --------------------------------------------------------------------------- public boundary
@@ -2590,8 +2611,12 @@ def _jpm_listing(cfg: dict, fetcher: Fetcher, config: Config, company: str = "JP
             offset += JPM_PAGE
         found = {r["Id"]: r for r in reqs if isinstance(r, dict) and isinstance(r.get("Id"), str)
                  and JOB_ID_RE[company].fullmatch(r["Id"])}
-        if len(found) < total:          # unique IDs: a shifted page cannot hide a skipped role; a role that
-            return DRIFT_DETAIL         # left mid-walk (same count, one duplicate) is drift too: walk again
+        # Unique IDs: a shifted page cannot hide a skipped role, and a role that left mid-walk (same count, one
+        # duplicate) is drift, walked again. One row short of the count is tolerated: Oracle's own tenant counts
+        # 225 in its Bengaluru facet and returns 224 on every walk (a requisition the facet counts but never
+        # lists), and every unlisted row is still checked on its own detail record before it can be removed.
+        if len(found) < total - JPM_COUNT_SLACK:
+            return DRIFT_DETAIL
         for jid, r in found.items():
             listing.setdefault(jid, r)
     # Each facet was proven complete above; a role in several target-city facets counts once, so the
@@ -2616,9 +2641,24 @@ def _jpm_detail(fetcher: Fetcher, jid: str, company: str = "JPMorganChase") -> t
     return "live", info
 
 
+ORACLE_LEVEL = re.compile(r"\b([1-9])(?:-[A-Za-z&/ ]+)?$")     # "Financial Analyst 3", "Contracts Administrator 2-Fin"
+ORACLE_SENIOR_LEVEL = 3                                            # IC3 and up ask for five or more years
+
+
+def _oracle_level(title: str) -> int | None:
+    """The career level an Oracle Recruiting title ends in (its own tenant's convention), or None."""
+    m = ORACLE_LEVEL.search(title.strip())
+    return int(m.group(1)) if m else None
+
+
+def _uncaps(place: str) -> str:
+    """'BENGALURU, KARNATAKA, India' (Oracle's own tenant shouts its places) -> 'Bengaluru, Karnataka, India'."""
+    return ", ".join(s.title() if s.isupper() else s for s in place.split(", "))
+
+
 def _jpm_places(rec: dict) -> list[str]:
-    places = [str(rec.get("PrimaryLocation") or "")]
-    places += [str(s.get("Name") or "") for s in rec.get("secondaryLocations") or [] if isinstance(s, dict)]
+    places = [_uncaps(str(rec.get("PrimaryLocation") or ""))]
+    places += [_uncaps(str(s.get("Name") or "")) for s in rec.get("secondaryLocations") or [] if isinstance(s, dict)]
     return [p for p in places if p]
 
 
@@ -2645,7 +2685,8 @@ def _jpm_requirements(info: dict) -> tuple[str, bool]:
     reported as "no number of years". Preferred qualifications never raise the requirement.
     """
     text = strip_html(str(info.get("ExternalDescriptionStr") or ""))
-    extra = strip_html(str(info.get("ExternalQualificationsStr") or ""))
+    # Oracle's own tenant states its requirements ("10 years of experience in FP&A") in the responsibilities field.
+    extra = "\n".join(strip_html(str(info.get(k) or "")) for k in ("ExternalQualificationsStr", "ExternalResponsibilitiesStr"))
     head = JPM_REQUIRED_HEAD.search(text)
     if head:
         end = JPM_PREFERRED_HEAD.search(text, head.end())
@@ -2718,6 +2759,8 @@ def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, 
         title = clean_text(info.get("Title") or listing[jid].get("Title"), 160)
         text, cue = _jpm_requirements(info)
         ok, band, exp = qualifies(title, text, posted, places, today, config, require_cue=cue)
+        if ok and company == "Oracle" and (_oracle_level(title) or 0) >= ORACLE_SENIOR_LEVEL:
+            ok = False                               # Oracle titles end in the career level: 3+ is 5+ years' experience
         if not ok:
             res.screened[jid] = mark                 # definitive: does not qualify
             continue
@@ -3508,16 +3551,23 @@ def _sf_date(value: object) -> dt.date | None:
     return parse_any_date(value)
 
 
+def _sf_urls(company: str) -> tuple[str, str, str]:
+    """(site base, search URL with {place}/{start}, public job URL with {id}) of a SuccessFactors tenant."""
+    base, prefix, slug = SF_SITES[company]
+    return base, SF_SEARCH.replace(SF_BASE, base + prefix), SF_FRONT.replace(SF_BASE, base + prefix).replace("Bengaluru", slug)
+
+
 @rewalk_once
 def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
     """{job id: (path, title)} across every configured place search, or why the listing cannot be trusted."""
     links: dict[str, tuple[str, str]] = {}
     grand = 0
+    search = _sf_urls(cfg["company"])[1]
     for place in cfg["search_terms"]:
         total: int | None = None
         start = 0
         while True:
-            resp = fetcher.request(SF_SEARCH.format(place=urllib.parse.quote(place), start=start))
+            resp = fetcher.request(search.format(place=urllib.parse.quote(place), start=start))
             if not html_ok(resp):
                 return "search page unavailable"
             text = resp.text()
@@ -3549,10 +3599,10 @@ def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
     return links, grand
 
 
-def _sf_detail(fetcher: Fetcher, path: str, jid: str) -> tuple[str, dict | None]:
-    """'live' with {meta itemprops, description} of a page that names the ID; 'gone' on an exact 404/410;
+def _sf_detail(fetcher: Fetcher, base: str, path: str, jid: str) -> tuple[str, dict | None]:
+    """'live' with {meta itemprops, description, places} of a page that names the ID; 'gone' on an exact 404/410;
     'blocked' for throttling, outages and challenges; otherwise 'unknown'."""
-    resp = fetcher.request(SF_BASE + path)
+    resp = fetcher.request(base + path)
     if _is_blocked(resp) or is_challenge(resp) or is_maintenance(resp):
         return "blocked", None
     if resp.status in (404, 410) and not resp.error:
@@ -3560,18 +3610,23 @@ def _sf_detail(fetcher: Fetcher, path: str, jid: str) -> tuple[str, dict | None]
     if not html_ok(resp) or jid not in resp.text():
         return "unknown", None
     text = resp.text()
-    meta = dict(SF_META.findall(text))
+    pairs = SF_META.findall(text)
+    meta = dict(pairs)
     if "datePosted" not in meta:
         return "unknown", None
     dm = SF_DESC.search(text)
     meta["description"] = dm.group(1) if dm else ""
+    # Every place the page names, in order: Deloitte writes "Bengaluru, IN; Kochi, IN" into one streetAddress, EY
+    # one addressLocality meta per city.
+    meta["places"] = [p.strip() for k, v in pairs if k in SF_PLACE_META for p in v.split(";") if p.strip()]
     return "live", meta
 
 
 def refresh_successfactors(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
                            excluded: frozenset, config: Config) -> SourceResult:
-    """Deloitte's SuccessFactors career site (the only SF_* site so far)."""
-    company = "Deloitte"
+    """Any SuccessFactors Career Site Builder tenant in SF_SITES (Deloitte, EY)."""
+    company = cfg["company"]
+    base, _search, front = _sf_urls(company)
     today = now.astimezone(IST).date()
     got = _sf_listing(cfg, fetcher)
     if isinstance(got, str):
@@ -3586,7 +3641,7 @@ def refresh_successfactors(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt
             continue
         if streak >= BLOCK_TRIP:
             continue
-        st, _data = _sf_detail(fetcher, urllib.parse.urlsplit(r.canonical_url).path, r.job_id)
+        st, _data = _sf_detail(fetcher, base, urllib.parse.urlsplit(r.canonical_url).path, r.job_id)
         streak = streak + 1 if st == "blocked" else 0
         if st == "gone":
             res.absence_scope.add(r.job_id)   # exact 404 and unlisted: counts toward removal
@@ -3597,7 +3652,7 @@ def refresh_successfactors(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt
     for jid, path, title in fresh[:cfg["max_new_details"]]:
         checked += 1
         mark = screened_entry(today, _fingerprint(path, title))
-        st, data = _sf_detail(fetcher, path, jid)
+        st, data = _sf_detail(fetcher, base, path, jid)
         if st == "blocked":
             break
         if st == "gone":
@@ -3606,13 +3661,13 @@ def refresh_successfactors(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt
         if st != "live" or data is None:
             continue
         posted = _sf_date(data.get("datePosted"))
-        places = [p.strip() for p in str(data.get("streetAddress") or "").split(";") if p.strip()]
+        places = list(data.get("places") or [])
         ok, band, exp = qualifies(title, strip_html(data.get("description") or ""), posted, places, today, config)
         if not ok:
             res.screened[jid] = mark
             continue
         closing = _sf_date(data.get("validThrough"))
-        row = make_row(company, jid, title, exp, join_places(target_places(places, config)), SF_FRONT.format(id=jid),
+        row = make_row(company, jid, title, exp, join_places(target_places(places, config)), front.format(id=jid),
                        band, closing.isoformat() if closing else None, posted, today, config)
         if row:
             res.added.append(row)
