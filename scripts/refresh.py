@@ -104,6 +104,7 @@ REFRESH_CADENCE = dt.timedelta(hours=6)   # a held removal needs a re-check this
 MAX_HOLD_IDS = 2000
 SHRINK_MIN_PRIOR = 10          # listing-size shrink guard applies once a listing had this many
 SHRINK_DETAIL = "suspicious listing shrink"
+DRIFT_DETAIL = "listing changed during pagination"   # the total moved mid-walk: a posting arrived or left
 SCREENED_TTL_DAYS = 45
 # screened[id] = "YYYY-MM-DD" (day screened) or "YYYY-MM-DD#<fingerprint>" when the source record is
 # fingerprinted; a changed fingerprint means the record changed and the ID is screened again.
@@ -396,9 +397,10 @@ SF_META = re.compile(r'<meta itemprop="([A-Za-z]+)" content="([^"]*)"')
 SF_DESC = re.compile(r'<span class="jobdescription">(.*?)</span>\s*(?:</div>|<div)', re.S)
 SF_DATE = re.compile(r"[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) \d{2}:\d{2}:\d{2} [A-Z]{3,4} (\d{4})")   # Wed Nov 04 02:00:00 UTC 2026
 
-# Wall-clock cap for one whole refresh run, so the seventeen sources together stay inside the 40 minutes
-# the workflow's 60-minute job timeout leaves after its 20-minute schedule lead (render, commit and push
-# need the last four). load_config rejects source budgets that sum to more than this.
+# Wall-clock cap for one whole refresh run, so the seventeen sources together stay inside the 45 minutes
+# the workflow's 65-minute job timeout leaves after its 20-minute schedule lead; the unit tests, render,
+# commit and push need the rest (tests alone take up to 3.5 min in CI). load_config rejects source budgets
+# that sum to more than this.
 # A source that would start with less than the floor is held.
 RUN_BUDGET_S = 2160.0
 MIN_SOURCE_BUDGET_S = 30.0  # default floor; source_floor() uses each mode's own schema minimum
@@ -2053,6 +2055,10 @@ class SourceResult:
     listing_complete: bool = False
     listed: set = dataclasses.field(default_factory=set)
     absence_scope: set | None = None     # IDs the complete listing must contain; None = every row
+    # IDs whose own stable address answered an exact 404 this run (a source opts in when its URLs never
+    # move). Counted like an authoritative absence: two consecutive healthy runs remove, one live answer
+    # or one failed run resets, no listing needed.
+    gone: set = dataclasses.field(default_factory=set)
     # False when this run did not look at a listing at all (Siemens between daily discoveries): such a
     # run neither counts nor breaks an absence streak for rows it has no evidence about.
     listing_observed: bool = True
@@ -2067,6 +2073,17 @@ def held(company: str, detail: str, **kw) -> SourceResult:
     return SourceResult(company, False, detail, **kw)
 
 
+def rewalk_once(listing: Callable) -> Callable:
+    """A listing whose total moved while it was being paged (a posting published or withdrawn during the
+    walk, routine on date-sorted APIs several times a day) is walked once more from the first page before
+    the source is held. The source budget still bounds the second walk; any other verdict is final."""
+    def run(*args, **kwargs):
+        got = listing(*args, **kwargs)
+        return listing(*args, **kwargs) if got == DRIFT_DETAIL else got
+    run.__name__, run.__doc__, run.__wrapped__ = listing.__name__, listing.__doc__, listing
+    return run
+
+
 @dataclasses.dataclass
 class SiemensDetail:
     state: str
@@ -2079,7 +2096,9 @@ def siemens_detail(fetcher: Fetcher, jid: str, cache: dict) -> SiemensDetail:
     if jid in cache:
         return cache[jid]
     resp = fetcher.request(SIEMENS_DETAIL.format(id=jid))
-    state = classify_page(resp, jid)
+    # Avature answers an exact 404 for a folder that has been unpublished (JobDetail/{id} is the one stable
+    # address, never moved), so that is removal evidence here, unlike the generic classifier's view of 404.
+    state = "gone" if resp.status == 404 and not resp.error else classify_page(resp, jid)
     info = SiemensDetail(state)
     if state == "live":
         raw = resp.text()
@@ -2152,11 +2171,12 @@ def refresh_siemens(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.dateti
             states[r.job_id] = "skipped"
             continue
         st = siemens_detail(fetcher, r.job_id, cache).state
-        streak = streak + 1 if st == "blocked" else (0 if st in ("live", "closed") else streak)
+        streak = streak + 1 if st == "blocked" else (0 if st in ("live", "closed", "gone") else streak)
         states[r.job_id] = st
     res = SourceResult("Siemens", True, "", listing_observed=False)
     res.live = {k for k, v in states.items() if v == "live"}
     res.closed = {k for k, v in states.items() if v == "closed"}
+    res.gone = {k for k, v in states.items() if v == "gone"}      # 404 twice in a row removes (apply_result)
     notes = [f"liveness {len(res.live) + len(res.closed)}/{len(rows)}"]
 
     last = iso_time(cs.last_discovery_attempt)
@@ -2190,7 +2210,7 @@ def refresh_siemens(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.dateti
         res.counts["new_checked"] = min(len(fresh), cfg["max_new_details"])
     res.counts.update({k: sum(1 for v in states.values() if v == k) for k in set(states.values())})
     if rows and not (res.live or res.closed):
-        res.ok = False
+        res.ok = False                   # every page blocked or ambiguous (a site-wide 404 included): keep all
         notes[0] = "detail pages unavailable"
     res.detail = "; ".join(notes)
     return res
@@ -2495,6 +2515,7 @@ def _jpm_facets(page: dict, config: Config) -> list[int] | None:
     return sorted(ids)
 
 
+@rewalk_once
 def _jpm_listing(cfg: dict, fetcher: Fetcher, config: Config, company: str = "JPMorganChase") -> tuple[dict, int] | str:
     boot = _jpm_search(fetcher, None, 0, company)
     if boot is None:
@@ -2516,14 +2537,16 @@ def _jpm_listing(cfg: dict, fetcher: Fetcher, config: Config, company: str = "JP
         offset = JPM_PAGE
         while offset < total:
             page = _jpm_search(fetcher, fid, offset, company)
-            if page is None or not page["requisitionList"] or page["TotalJobsCount"] != total:
+            if page is None or not page["requisitionList"]:
                 return "partial pagination"
+            if page["TotalJobsCount"] != total:
+                return DRIFT_DETAIL
             reqs += page["requisitionList"]
             offset += JPM_PAGE
         found = {r["Id"]: r for r in reqs if isinstance(r, dict) and isinstance(r.get("Id"), str)
                  and JOB_ID_RE[company].fullmatch(r["Id"])}
-        if len(found) < total:          # unique IDs: a shifted page cannot hide a skipped role
-            return "partial pagination"
+        if len(found) < total:          # unique IDs: a shifted page cannot hide a skipped role; a role that
+            return DRIFT_DETAIL         # left mid-walk (same count, one duplicate) is drift too: walk again
         for jid, r in found.items():
             listing.setdefault(jid, r)
     # Each facet was proven complete above; a role in several target-city facets counts once, so the
@@ -2823,6 +2846,7 @@ def _refresh_workday(company: str, api: str, front: str, path_re: re.Pattern, te
 
 # -- AstraZeneca: TalentBrew search pages plus JobPosting JSON-LD on each job page
 
+@rewalk_once
 def _az_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
     """{job id: path} for every India posting, or why the listing cannot be trusted."""
     links: dict[str, str] = {}
@@ -2842,7 +2866,7 @@ def _az_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
         if total is None:
             total = n
         elif n != total:
-            return "listing changed during pagination"
+            return DRIFT_DETAIL
         found = AZ_LINK.findall(text)
         if not found and len(links) < total:
             return "partial pagination"
@@ -2987,6 +3011,7 @@ def _acn_posted(text: object, today: dt.date) -> dt.date | None:
     return today - dt.timedelta(days=int(m.group(3)))
 
 
+@rewalk_once
 def _acn_listing(cfg: dict, fetcher: Fetcher, config: Config) -> tuple[dict, int] | str:
     experience = [{"fieldName": "yearsOfExperience.keyword", "items": [ACN_EXPERIENCE], "multiSelect": False}]
     first = _acn_page(fetcher, experience, 0, 1)
@@ -3010,7 +3035,7 @@ def _acn_listing(cfg: dict, fetcher: Fetcher, config: Config) -> tuple[dict, int
         if total is None:
             total = n
         elif n != total:
-            return "listing changed during pagination"
+            return DRIFT_DETAIL
         if not page["data"] and start < total:
             return "partial pagination"
         for j in page["data"]:
@@ -3146,6 +3171,7 @@ def refresh_deshaw(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetim
 
 # -- ZS: Jibe public listing API
 
+@rewalk_once
 def _zs_listing(cfg: dict, fetcher: Fetcher, company: str = "ZS") -> tuple[dict, int] | str:
     jobs: dict[str, dict] = {}
     unique: set[str] = set()
@@ -3161,7 +3187,7 @@ def _zs_listing(cfg: dict, fetcher: Fetcher, company: str = "ZS") -> tuple[dict,
         if total is None:
             total = count
         elif count != total:
-            return "listing changed during pagination"
+            return DRIFT_DETAIL
         if not data["jobs"] and received < total:
             return "partial pagination"
         for j in data["jobs"]:
@@ -3301,6 +3327,7 @@ def _ef_page(fetcher: Fetcher, company: str, location: str, start: int) -> dict 
     return page
 
 
+@rewalk_once
 def _ef_listing(cfg: dict, fetcher: Fetcher, company: str) -> tuple[dict, int] | str:
     first = _ef_page(fetcher, company, cfg["location"], 0)
     if first is None:
@@ -3312,14 +3339,16 @@ def _ef_listing(cfg: dict, fetcher: Fetcher, company: str) -> tuple[dict, int] |
     start = EF_PAGE
     while start < total:
         page = _ef_page(fetcher, company, cfg["location"], start)
-        if page is None or not page["positions"] or page["count"] != total:
+        if page is None or not page["positions"]:
             return "partial pagination"
+        if page["count"] != total:
+            return DRIFT_DETAIL
         positions += page["positions"]
         start += EF_PAGE
     found = {str(x["id"]): x for x in positions if isinstance(x, dict) and _count(x.get("id"))
              and JOB_ID_RE[company].fullmatch(str(x["id"]))}
-    if len(found) < total:               # unique IDs: a shifted page cannot hide a skipped role
-        return "partial pagination"
+    if len(found) < total:               # unique IDs: a shifted page cannot hide a skipped role; a role that
+        return DRIFT_DETAIL              # left mid-walk (same count, one duplicate) is drift too: walk again
     return found, total
 
 
@@ -3434,6 +3463,7 @@ def _sf_date(value: object) -> dt.date | None:
     return parse_any_date(value)
 
 
+@rewalk_once
 def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
     """{job id: (path, title)} across every configured place search, or why the listing cannot be trusted."""
     links: dict[str, tuple[str, str]] = {}
@@ -3457,7 +3487,7 @@ def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
             if total is None:
                 total = n
             elif n != total:
-                return "listing changed during pagination"
+                return DRIFT_DETAIL
             found = 0
             for row in SF_ROW.findall(text):
                 lm = SF_LINK.search(row)
@@ -3590,7 +3620,7 @@ def removal_verdict(hold: dict | None, removed: list[str], rows: list[Row], res:
     least one cadence later that removes nothing outside the held set. Failed runs never reach here,
     and partial ones neither start nor advance a hold.
     """
-    complete = res.listing_complete or {r.job_id for r in rows} <= (res.live | res.closed)
+    complete = res.listing_complete or {r.job_id for r in rows} <= (res.live | res.closed | res.gone)
     if not complete:
         return "wait"
     held_at = iso_time(hold["at"]) if hold else None
@@ -3629,7 +3659,7 @@ def apply_result(rows: list[Row], cs: CompanyState, res: SourceResult, now: dt.d
             if r.job_id in res.live:
                 r = dataclasses.replace(r, liveness="live", absent_runs=0, last_seen=today,
                                         closing_date=res.closing.get(r.job_id, r.closing_date))
-            elif res.listing_complete and r.job_id in scope and r.job_id not in res.listed:
+            elif r.job_id in res.gone or (res.listing_complete and r.job_id in scope and r.job_id not in res.listed):
                 if r.absent_runs + 1 >= ABSENCES_TO_REMOVE:
                     removed.append(r.job_id)
                     continue

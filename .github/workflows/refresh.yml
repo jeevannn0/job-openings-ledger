@@ -76,7 +76,7 @@ jobs:
       group: job-ledger-refresh
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-    timeout-minutes: 60    # up to the schedule lead waiting for the slot, then the run budget
+    timeout-minutes: 65    # up to the schedule lead waiting for the slot, the run budget, then ~9 min for tests/render/commit
     outputs:
       alert: ${{ steps.build.outputs.alert }}   # this run's alert payload on one line, for the notify job
     permissions:
@@ -150,9 +150,13 @@ jobs:
               commit -m "Refresh job ledger ${AS_OF}"
           auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           echo "::add-mask::${auth}"
-          # Plain fast-forward push; if the remote advanced the push fails and nothing is forced.
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
-              push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          # Plain fast-forward push; if the remote advanced the push fails and nothing is forced. One retry
+          # after 30 s covers a GitHub-side hiccup (4 Nov 2026: "remote: Internal Server Error" lost a slot).
+          push() {
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+                push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          }
+          push || { echo "push failed; retrying once in 30 s" >&2; sleep 30; push; }
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0 (tag verified with git ls-remote)
@@ -216,20 +220,33 @@ jobs:
       group: job-ledger-refresh
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20    # two deployment attempts of up to 8 min each
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.again.outputs.page_url }}
     steps:
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0 (tag verified with git ls-remote)
 
+      # A Pages deployment occasionally hangs on GitHub's side (6 Nov 2026 00:00 IST: the refresh had committed,
+      # the deploy sat for 10 min, the job timed out, the site stayed on old data for 3 h). Give one attempt 8 min,
+      # then deploy the same artifact once more rather than losing the slot.
       - name: Deploy
         id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1 (tag verified with git ls-remote)
+        with:
+          timeout: 480000
+
+      - name: Deploy again
+        id: again
+        if: steps.deployment.outcome != 'success'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1 (tag verified with git ls-remote)
+        with:
+          timeout: 480000
 
   notify:
     # Once a refresh is live, tell the registered phones when it found new openings: scripts/push.mjs reads the
@@ -237,9 +254,11 @@ jobs:
     # device names, and drops devices the service reports gone (they register again when the ledger is next opened
     # on them). Separate from deploy so the Pages deployment keeps its own permissions.
     needs: [refresh, deploy]
-    # !cancelled(): on scheduled runs the publish job is skipped, and GitHub skips every job downstream of a
-    # skipped job unless its condition says otherwise (the deploy job carries the same clause).
-    if: ${{ !cancelled() && needs.refresh.result == 'success' && needs.deploy.result == 'success' }}
+    # always(): on scheduled runs the publish job is skipped, and GitHub skips every job downstream of a skipped
+    # job unless its condition says otherwise; a deploy that failed or timed out must not swallow the notification
+    # either (6 Nov 2026 00:00 IST), since the refresh itself is committed and the next deploy publishes it.
+    # The refresh must have succeeded: its alert output is the message.
+    if: ${{ always() && needs.refresh.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

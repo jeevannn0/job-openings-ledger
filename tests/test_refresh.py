@@ -538,13 +538,53 @@ class RemovalTests(unittest.TestCase):
         self.assertNotIn("527740", ids)
         self.assertEqual(len(ids), 22)
 
-    def test_404_alone_never_removes(self):
+    def test_siemens_404_twice_in_a_row_removes(self):
+        """Avature's JobDetail/{id} is the one stable address, so an exact 404 there is removal evidence: two
+        consecutive healthy runs (6 h apart, no daily discovery needed) remove the row, one live answer or
+        one failed run resets the count. Four dead Siemens rows sat on the page for 2-4 days before this."""
         config, excluded, state, _t = env()
-        t = FakeTransport([("GET", R.SIEMENS_DETAIL.format(id="527740"), resp(404, "not found")),
-                           *live_siemens_routes()])
-        after, _o = R.run_refresh(state, config, excluded, NOW, factory_for(config, t))
+        gone = ("GET", R.SIEMENS_DETAIL.format(id="527740"), resp(404, "not found"))
+        after, _o = R.run_refresh(state, config, excluded, NOW, factory_for(config, FakeTransport([gone, *live_siemens_routes()])))
         row = next(r for r in after.jobs if r.job_id == "527740")
-        self.assertEqual(row.liveness, "unconfirmed")
+        self.assertEqual((row.liveness, row.absent_runs), ("absent", 1))
+        self.assertEqual(after.companies["Siemens"].status, "ok")
+        later = NOW + R.REFRESH_CADENCE
+        after2, _o = R.run_refresh(after, config, excluded, later, factory_for(config, FakeTransport([gone, *live_siemens_routes()])))
+        self.assertNotIn("527740", {r.job_id for r in after2.jobs})
+        self.assertEqual(len(rows_of(after2, "Siemens")), 22)
+        # A live page in between resets the count; a failed run (every page 404 = site-wide outage) keeps all rows.
+        back, _o = R.run_refresh(after, config, excluded, later, factory_for(config, FakeTransport(live_siemens_routes())))
+        row = next(r for r in back.jobs if r.job_id == "527740")
+        self.assertEqual((row.liveness, row.absent_runs), ("live", 0))
+        outage, _o = R.run_refresh(after, config, excluded, later,
+                                   factory_for(config, FakeTransport([("GET", R.SIEMENS_DETAIL.format(id="*"), resp(404, "x"))])))
+        self.assertEqual(len(rows_of(outage, "Siemens")), 23)
+        self.assertEqual((outage.companies["Siemens"].status, outage.companies["Siemens"].detail), ("stale", "detail pages unavailable"))
+        # The generic classifier still treats 404 as ambiguous for every other source.
+        f = R.Fetcher(config, 60, transport=FakeTransport([gone]), sleep=lambda _s: None)
+        self.assertEqual(R.classify_page(f.request(R.SIEMENS_DETAIL.format(id="527740")), "527740"), "unknown")
+
+    def test_rewalk_once_retries_a_drifting_listing_exactly_once(self):
+        """A total that moves mid-walk (a posting arrived on a date-sorted API) is walked again before the
+        source is held; a second drift, or any other verdict, is final. ZS and AMD were held for this
+        several times a day."""
+        calls = []
+
+        @R.rewalk_once
+        def listing(answers):
+            calls.append(1)
+            return answers.pop(0)
+        self.assertEqual(listing([R.DRIFT_DETAIL, ({"1": {}}, 1)]), ({"1": {}}, 1))
+        self.assertEqual(len(calls), 2)
+        calls.clear()
+        self.assertEqual(listing([R.DRIFT_DETAIL, R.DRIFT_DETAIL, ({"1": {}}, 1)]), R.DRIFT_DETAIL)
+        self.assertEqual(len(calls), 2)
+        calls.clear()
+        self.assertEqual(listing(["partial pagination", R.DRIFT_DETAIL]), "partial pagination")
+        self.assertEqual(len(calls), 1)
+        for fn in (R._az_listing, R._acn_listing, R._zs_listing, R._ef_listing, R._sf_listing, R._jpm_listing):
+            self.assertTrue(hasattr(fn, "__wrapped__"), fn.__name__)
+        self.assertFalse(hasattr(R._ge_listing, "__wrapped__"))     # Paradox pages carry no total to re-check
 
     def _complete(self, ids, rows, **kw):
         return R.SourceResult("IQVIA", True, "ok", listing_complete=True, listed=set(ids),
@@ -1894,10 +1934,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(deploy, r"permissions:\n      pages: write\n      id-token: write\n    environment:")
         notify = self.block("notify")
         self.assertRegex(notify, r"permissions:\n      contents: read\n    steps:")
-        # The publish job is skipped on every scheduled run; without !cancelled() GitHub skipped notify too
-        # (2 Nov 2026 15:00 IST: six new openings, no notification).
-        self.assertIn("if: ${{ !cancelled() && needs.refresh.result == 'success' && needs.deploy.result == 'success' }}",
-                      notify)
+        # The publish job is skipped on every scheduled run; without an always()-style clause GitHub skipped notify
+        # too (2 Nov 2026 15:00 IST: six new openings, no notification). A failed or timed-out deploy must not
+        # swallow it either (6 Nov 2026 00:00 IST): the refresh is committed, the next deploy publishes it.
+        self.assertIn("if: ${{ always() && needs.refresh.result == 'success' }}", notify)
+        self.assertIn("needs: [refresh, deploy]", notify)                 # still after the deploy attempt
+        # The deploy itself gets two attempts of 8 min each (a hung Pages deployment cost a slot on 6 Nov 2026).
+        deploy_steps = re.findall(r"- name: (Deploy[^\n]*)\n        id: (\w+)\n(?:        continue-on-error: true\n)?"
+                                  r"(?:        if: ([^\n]+)\n)?        uses: actions/deploy-pages@\w+[^\n]*\n"
+                                  r"        with:\n          timeout: (\d+)", deploy)
+        self.assertEqual(deploy_steps, [("Deploy", "deployment", "", "480000"),
+                                        ("Deploy again", "again", "steps.deployment.outcome != 'success'", "480000")])
+        self.assertIn("continue-on-error: true", deploy)
+        self.assertEqual(deploy.count("continue-on-error"), 1)            # only the first attempt may fail quietly
+        self.assertIn("url: ${{ steps.deployment.outputs.page_url || steps.again.outputs.page_url }}", deploy)
+        self.assertNotIn("continue-on-error", self.text.replace(deploy, ""))
         self.assertEqual(len(re.findall(r"(?m)^ +permissions:", self.text)), 5)
         for job in (gate, refresh, publish, notify):
             self.assertIn("persist-credentials: false", job)
@@ -1912,7 +1963,9 @@ class WorkflowTests(unittest.TestCase):
                                         r"      cancel-in-progress: false$", self.text)), 3)
         self.assertNotIn("concurrency", self.block("gate"))
         timeouts = [int(x) for x in re.findall(r"timeout-minutes: (\d+)", self.text)]
-        self.assertEqual(timeouts, [5, 60, 10, 10, 5])    # gate, refresh (lead wait + seventeen sources), publish, deploy, notify
+        # gate; refresh = lead wait + seventeen sources + ~9 min for tests, render and commit; publish; deploy = two
+        # 8-min attempts; notify.
+        self.assertEqual(timeouts, [5, 65, 10, 20, 5])
         self.assertEqual(re.findall(r"runs-on: (\S+)", self.text), ["ubuntu-24.04"] * 5)
 
     def test_actions_are_pinned_to_reviewed_shas(self):
@@ -1926,6 +1979,7 @@ class WorkflowTests(unittest.TestCase):
             "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d",
             "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346",
+            "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346",             # first attempt + retry
         ]))
         # Each pin carries the release tag it was verified against (git ls-remote --tags).
         tags = dict(re.findall(r"uses: (\S+)\s+# (v\d+\.\d+\.\d+)\b", self.text))
@@ -1972,6 +2026,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertNotRegex(self.text, r"--force|-f\b|\+HEAD|reset --hard")
         self.assertIn('push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"', refresh)
+        # One retry after 30 s for a GitHub-side push error (4 Nov 2026: "remote: Internal Server Error" lost a slot);
+        # a remote that advanced still fails both times, nothing is forced or rebased in CI.
+        self.assertIn('push || { echo "push failed; retrying once in 30 s" >&2; sleep 30; push; }', refresh)
+        self.assertEqual(refresh.count("push origin"), 1)
         for line in refresh.splitlines():   # expressions only in if:/env:/outputs:, never inlined into run scripts
             if "${{" in line:
                 self.assertRegex(line, r"^\s+(if:|alert:|[A-Z_]+: \$\{\{)", line)
@@ -2924,7 +2982,14 @@ class AlertTests(unittest.TestCase):
         self.assertNotIn("alerts.json", re.search(r"git add[^\n]*", refresh).group(0))
         self.assertNotIn("alerts.json", re.search(r"(?m)^\s*git add[^\n]*", text).group(0))
         self.assertEqual(text.count("git add"), 1)                            # only the refresh job commits
-        self.assertNotRegex(text, r"continue-on-error|always\(\)|failure\(\)")
+        # No step of the two producers may fail quietly, and nothing runs after a failed refresh: the only
+        # continue-on-error is the deploy job's first Pages attempt (retried by the second), and the only
+        # always() is the notify gate, which still requires the refresh itself to have succeeded.
+        producers = re.search(r"^  refresh:\n.*?(?=^  deploy:\n)", text, re.S | re.M).group(0)
+        self.assertNotRegex(producers, r"continue-on-error|always\(\)|failure\(\)")
+        self.assertEqual(re.findall(r"\$\{\{[^}]*always\(\)[^}]*\}\}", text),
+                         ["${{ always() && needs.refresh.result == 'success' }}"])
+        self.assertNotIn("failure()", text)
         self.assertEqual(text.count("refresh-outcome.json"), 2)
         # The publish-only job never builds an alert from an outcome; it carries the live one forward,
         # verified against the committed state (alert-verify), and lists exactly the same two files.
@@ -3178,9 +3243,10 @@ class JpmOracleTests(unittest.TestCase):
         self.assertEqual(cs2.status, "ok")
         short = routes[:-2] + [("GET", R.JPM_SEARCH.format(offset=0, facet=R.JPM_FACET.format(id=bangalore)),
                                 jresp({"items": [{"TotalJobsCount": 4, "requisitionList": overlap}]})), jpm_details()]
-        res, _rows, _cs, _rm, _t = run_source("JPMorganChase", short)
+        res, _rows, _cs, _rm, t = run_source("JPMorganChase", short)
         self.assertFalse(res.ok)                                        # an incomplete facet still holds
-        self.assertEqual(res.detail, "partial pagination")
+        self.assertEqual(res.detail, R.DRIFT_DETAIL)                   # fewer unique roles than the count: drift
+        self.assertEqual(t.count(f"selectedLocationsFacet={bangalore}"), 2)   # walked twice, then held
 
     def test_invalid_qualifying_row_is_counted_not_screened(self):
         new = [jpm_req("210809061"), jpm_req("210809062")]
@@ -3484,6 +3550,26 @@ class ZsJibeTests(unittest.TestCase):
         self.assertEqual(res.live, {"24123"})
         self.assertEqual(rows[0].to_dict() | {"last_seen": "2026-10-31"}, self.rows[0].to_dict())
         self.assertEqual(t.count("/jobs/24123"), 0)
+
+    def test_total_that_moves_once_mid_walk_is_walked_again_and_accepted(self):
+        """ZS and AMD were held with "listing changed during pagination" several times a day: a posting
+        published while the walk was on page 2 bumps totalCount by one. The second walk sees a settled
+        listing and the run is accepted; only a listing that drifts twice is held."""
+        jobs = self.others[:12] + [zs_job("24123")] + self.others[12:]
+        walks = []
+
+        def drifting(url, _body):
+            page = int(re.search(r"page=(\d+)", url).group(1))
+            if page == 1:
+                walks.append(1)
+            total = 26 if (len(walks) == 1 and page == 2) else 25        # first walk: page 2 reports one more
+            chunk = jobs[(page - 1) * R.ZS_PAGE: page * R.ZS_PAGE]
+            return resp(200, json.dumps({"totalCount": total, "jobs": [{"data": d} for d in chunk]}), "application/json")
+        res, rows, cs, _rm, t = run_source("ZS", [("GET", "https://jobs.zs.com/api/jobs?page=*", drifting)])
+        self.assertTrue(res.ok)
+        self.assertEqual((cs.status, res.listing_total, len(walks)), ("ok", 25, 2))
+        self.assertEqual(t.count("/api/jobs?page="), 5)                  # 2 pages drifted + 3 pages clean
+        self.assertEqual(res.live, {"24123"})
 
     def test_partial_shifting_or_blocked_listing_holds(self):
         jobs = self.others[:12] + [zs_job("24123")] + self.others[12:]
@@ -3862,8 +3948,9 @@ class AdapterIsolationTests(unittest.TestCase):
         timeout = int(re.search(r"(?ms)^  refresh:\n.*?timeout-minutes: (\d+)", R.read_text(
             os.path.join(ROOT, ".github", "workflows", "refresh.yml"))).group(1))
         # The refresh job may first wait up to the schedule lead for the slot, then needs the run budget plus slack.
-        self.assertLessEqual(R.RUN_BUDGET_S, (timeout - 4) * 60 - R.SCHEDULE_LEAD.total_seconds())
-        self.assertEqual(timeout, 60)
+        # Nine minutes of slack: the unit tests alone take up to 3.5 min in CI, then render, scan, commit and push.
+        self.assertLessEqual(R.RUN_BUDGET_S, (timeout - 9) * 60 - R.SCHEDULE_LEAD.total_seconds())
+        self.assertEqual(timeout, 65)
         live = [c for c in config.companies if config.sources[c]["mode"] != "static"]
         self.assertLessEqual(sum(config.sources[c]["budget_s"] for c in live), R.RUN_BUDGET_S)
         for c in live:
