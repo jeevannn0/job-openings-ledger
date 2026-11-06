@@ -3918,9 +3918,21 @@ class SuccessFactorsTests(unittest.TestCase):
         self.assertTrue(res.ok)
         self.assertEqual((res.listing_total, len(res.listed)), (30, 30))
         self.assertEqual(t.count("startrow=25"), 1)
+        # Pages of one search may disagree on the total by up to SF_COUNT_SLACK (EY's first page says 976, its later
+        # pages 974, on every walk); the smaller figure wins, so the walk stops where the rows actually end.
+        self.assertEqual(R.SF_COUNT_SLACK, 5)
+        res, t = self.run_sf([
+            ("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=31)),
+            ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", rows[25:29], total=29, start=25)),
+            ("GET", self.search("Kochi"), sf_page("Kochi", [])),
+            ("GET", "https://southasiacareers.deloitte.com/job/*", resp(404, "gone")),
+        ])
+        self.assertTrue(res.ok)
+        self.assertEqual((res.listing_total, len(res.listed)), (29, 29))
+        self.assertEqual(t.count("startrow=50"), 0)
         for name, routes in {
             "total changes mid-walk": [("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=30)),
-                                       ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", rows[25:], total=31, start=25))],
+                                       ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", rows[25:], total=36, start=25))],
             "page without rows": [("GET", self.search("Bengaluru", 0), sf_page("Bengaluru", rows[:25], total=30)),
                                   ("GET", self.search("Bengaluru", 25), sf_page("Bengaluru", [], total=30, start=25))],
             "no label and no empty text": [("GET", self.search("Bengaluru", 0), resp(200, "<html><body>maintenance</body></html>"))],

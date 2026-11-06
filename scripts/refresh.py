@@ -408,6 +408,7 @@ SF_SITES = {
 }
 SF_SEARCH = SF_BASE + "/search/?q=&locationsearch={place}&sortColumn=referencedate&sortDirection=desc&startrow={start}"
 SF_PAGE = 25
+SF_COUNT_SLACK = 5      # pages of one search may disagree on the total by this much (see _sf_listing)
 SF_TOTAL = re.compile(r"Results\s*<b>\s*\d+\s*[–-]\s*\d+\s*</b>\s*of\s*<b>\s*(\d+)", re.S)
 SF_ROW = re.compile(r'<tr class="data-row">(.*?)</tr>', re.S)
 SF_LINK = re.compile(r'<a\b(?=[^>]*class="jobTitle-link")[^>]*href="((?:/[a-z]+)?/job/[^"/]+/(\d{6,12})/)"[^>]*>([^<]*)<')   # either attribute order
@@ -3581,8 +3582,11 @@ def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
                 return "listing total invalid"
             if total is None:
                 total = n
-            elif n != total:
+            elif abs(n - total) > SF_COUNT_SLACK:
                 return DRIFT_DETAIL
+            else:
+                total = min(total, n)       # EY's first page counts a few more than its later pages (976 vs 974,
+                                            # every walk); the smaller figure is the one the pages actually hold
             found = 0
             for row in SF_ROW.findall(text):
                 lm = SF_LINK.search(row)
