@@ -277,7 +277,7 @@ class SeedAndRenderTests(unittest.TestCase):
         now_match = re.search(r"function match\(r,roles\)\{.*?\}return true\}", doc).group(0)
         self.assertEqual(now_match.replace("function match(r,roles){", "function match(r){", 1)
                          .replace("if(roles!==true&&hide.has(ROLE.get(r)))return false;"
-                                  "if(roles!==true&&mine&&!marks.has(key(r)))return false;", "", 1)
+                                  "if(roles!==true&&mine&&!live(key(r)))return false;", "", 1)
                          .replace("if(onlyNew&&r[10]!==0)return false;", "", 1)
                          .replace("if(lf.value&&!inCity(r,lf.value))return false;", "", 1), legacy_match)
         self.assertNotEqual(now_match, legacy_match)
