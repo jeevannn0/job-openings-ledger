@@ -1517,7 +1517,7 @@ def health_js() -> str:
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
                                "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS",
-                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS", "JD_URL_JS", "ROLES_JS"})
+                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS", "JD_URL_JS", "ROLES_JS", "SYNC_URL_JS"})
 LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
 
 
@@ -1545,6 +1545,11 @@ def apply_url(row: Row, config: Config) -> str:
     if check_url(url, config.link_hosts) or not APPLY_URL.fullmatch(url):
         raise ValueError("render: a company apply URL is not an allowlisted plain URL")
     return url
+
+
+def sync_url(config: Config) -> str:
+    """The Worker's /sync route: the register URL's sibling, where a reader's marks meet their other devices."""
+    return config.register_url.rsplit("/", 1)[0] + "/sync"
 
 
 def jd_url(config: Config) -> str:
@@ -1641,6 +1646,7 @@ def render(state: State, template: str, config: Config) -> str:
         "VAPID_JS": js_json(config.vapid_public_key),      # the key the page subscribes with (push.mjs signs with its pair)
         "PUSH_URL_JS": js_json(config.register_url),       # where a Home Screen web app registers this device
         "JD_URL_JS": js_json(jd_url(config)),              # where the JD sheet fetches a posting's text from
+        "SYNC_URL_JS": js_json(sync_url(config)),          # where paired devices meet (the Worker's /sync route)
         "STALE_JS": js_json(stale_labels(state, config)),
         "AS_OF_JS": js_json(state.as_of.isoformat()),
         "SOURCE_COUNT": str(sum(1 for c in config.companies if config.sources[c]["mode"] != "static")),

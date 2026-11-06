@@ -1774,8 +1774,9 @@ class PushTests(unittest.TestCase):
                         'await register(await subscribe())',
                         'if(s){try{await send("DELETE",s)}catch(e){}await s.unsubscribe()}'):
             self.assertIn(snippet, script, snippet)
-        # Two network calls on the whole page: this registration and the JD sheet's on-demand description fetch.
-        self.assertEqual(script.count("fetch("), 2)
+        # Three network calls on the whole page: this registration, the marks sync and the JD sheet's on-demand
+        # description fetch, all to the same Worker.
+        self.assertEqual(script.count("fetch("), 3)
         self.assertIn('fetch(JD_URL+"?u="+encodeURIComponent(u),{mode:"cors"})', script)
         self.assertNotIn("serviceWorker", self.doc)                          # declarative push: no worker
         style = style_of(self.doc)
@@ -4612,9 +4613,10 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
         self.assertNotRegex(doc, r"(?i)<iframe\b|<script\s+src|XMLHttpRequest|setInterval|requestAnimationFrame|<table")
         # The page's only network calls go to the ledger's own Worker (config push.register_url, an allowlisted host):
-        # a Home Screen web app registering (or removing) this device's push subscription, and the JD sheet asking
-        # for one posting's description. Nothing else is fetched.
-        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
+        # a Home Screen web app registering (or removing) this device's push subscription, the sync route carrying
+        # the reader's marks between their paired devices, and the JD sheet asking for one posting's description.
+        # Nothing else is fetched.
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", "SYNC_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
         # The only <link>s name this site's own web app manifest and Home Screen icon by relative path (the page
         # still names no host); nothing else is linked, preloaded or prefetched.
         self.assertEqual(re.findall(r"<link\b[^>]*>", doc), ['<link rel="manifest" href="manifest.webmanifest">',
@@ -4696,7 +4698,8 @@ class SourceHealthTests(unittest.TestCase):
                       'aria-label="Close"></button><span class="dot dot-m" aria-hidden="true"></span><span class="dot '
                       'dot-z" aria-hidden="true"></span></span><span id="api-h">ops@job-signal — requests — zsh</span>'
                       '<span class="term-esc" aria-hidden="true">esc</span></div>', dialog)
-        self.assertEqual(dialog.count("<button"), 5)          # close, notify's Turn on / Turn off, me's Save / Export
+        self.assertEqual(dialog.count("<button"), 9)          # close, notify's Turn on / Turn off, me's Save / Export and
+                                                              # the sync row's Use code / Start / Copy / Stop
         # Six commands and a final prompt, in order; each block is one staggered output group. The status
         # block comes first, so the reader sees when the latest refresh ran and what it found.
         prompt = '<p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
@@ -5578,7 +5581,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn('${anim?`;--i:${i}`:""}"><button class="dtag${tg==="o"?" on":tg==="a"?" on ap":""}" type="button" '
                       'data-k="${esc(c)}|${esc(id)}" aria-pressed="${!!tg}"><svg class="dts" aria-hidden="true"><use href="#dt"/></svg>'
                       '<span class="vh">${tg==="a"?"Applied":tg==="o"?"Opened":"Not marked"}</span></button><div class="c-h">', card)
-        self.assertIn("mk=marks.get(`${c}|${id}`),tg=mk?mk.s:\"\",since=mk?-daysToClose(mk.t):0,", card)
+        self.assertIn("mk=live(`${c}|${id}`),tg=mk?mk.s:\"\",since=mk?-daysToClose(mk.t):0,", card)
         # The mark's own line in the meta row: when it was opened, or when it was applied and when to follow up
         # (FOLLOW_D days later; "follow up now" once that has passed).
         self.assertIn('ml=!mk?"":tg==="o"?`<span class="mk" data-s="o"><b>Opened</b> ${since<=0?"today":since===1?"yesterday":`${since} d ago`}</span>`'
@@ -5612,25 +5615,35 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotIn("transform", style[style.index(".dtag{"):style.index(".dtag.on:hover")])          # CSS moves nothing
         # The title keeps clear of the tag's corner.
         self.assertIn(".c-l{margin:0;padding-right:20px;font:400 14px/1.375 var(--font-sans);", style)
-        # State: one localStorage key (k9marks: {key: {s: "o"|"a", t: date}}), read once at boot (the older k9tags
-        # list of opened keys is migrated in memory), written on every change, tolerant of a blocked store.
-        for snippet in ('const marks=new Map();try{const m=JSON.parse(localStorage.getItem("k9marks")||"null");if(m)for(const k in m)'
-                        'marks.set(k,m[k]);else for(const k of JSON.parse(localStorage.getItem("k9tags")||"[]"))marks.set(k,{s:"o",t:AS_OF})}catch(e){}',
+        # State: one localStorage key (k9marks: {key: {s: ""|"o"|"a", t: date, u: epoch ms}}), read once at boot
+        # (the older k9tags list of opened keys and u-less v2 marks are migrated in memory; malformed entries are
+        # dropped), written on every change, tolerant of a blocked store. Removing a mark leaves a tombstone
+        # (s: "") stamped with the time, so a paired device learns of the removal; tombstones older than 60 days
+        # are swept at boot. live(k) is the only way the page reads a mark, so tombstones never show.
+        for snippet in ('const marks=new Map(),TOMB_MS=60*864e5,okMark=m=>m&&typeof m==="object"&&["","o","a"].includes(m.s)&&'
+                        '/^\\d{4}-\\d{2}-\\d{2}$/.test(m.t),live=k=>{const m=marks.get(k);return m&&m.s?m:null};'
+                        'try{const m=JSON.parse(localStorage.getItem("k9marks")||"null");if(m)for(const k in m){const e=m[k];'
+                        'if(okMark(e))marks.set(k,{s:e.s,t:e.t,u:Number.isInteger(e.u)?e.u:Date.parse(e.t)||0})}'
+                        'else for(const k of JSON.parse(localStorage.getItem("k9tags")||"[]"))marks.set(k,{s:"o",t:AS_OF,u:Date.parse(AS_OF)})}catch(e){}'
+                        'for(const[k,m]of marks)if(!m.s&&Date.now()-m.u>TOMB_MS)marks.delete(k);',
                         'const TAG_MS=3000,FOLLOW_D=7,NEXT={"":"o",o:"a",a:""},',
-                        'mark=(k,s)=>{s?marks.set(k,{s,t:todayIso()}):marks.delete(k);try{localStorage.setItem("k9marks",'
-                        'JSON.stringify(Object.fromEntries(marks)))}catch(e){}render();',
+                        'saveMarks=()=>{try{localStorage.setItem("k9marks",JSON.stringify(Object.fromEntries(marks)))}catch(e){}},'
+                        'mark=(k,s)=>{marks.set(k,{s,t:todayIso(),u:Date.now()});saveMarks();render();syncPush();',
                         # Opening a posting arms the pending key; leaving the page starts the clock; coming back at or
                         # past three seconds marks it opened unless it already carries a mark. No timers: the clock is
                         # the time away, read on return. A tap cycles the mark: none → opened → applied → none.
                         'let pend=null,away=0;const gone=()=>{if(pend&&!away)away=Date.now()},back=()=>{if(pend&&away){'
-                        'if(Date.now()-away>=TAG_MS&&!marks.has(pend))mark(pend,"o");pend=null;away=0}};',
+                        'if(Date.now()-away>=TAG_MS&&!live(pend))mark(pend,"o");pend=null;away=0}};',
                         'out.addEventListener("click",e=>{const b=e.target.closest(".dtag");if(b){pend=null;mark(b.dataset.k,'
-                        'NEXT[(marks.get(b.dataset.k)||{s:""}).s]);return}const a=e.target.closest(".job,.ap");pend=a?a.closest(".card")'
+                        'NEXT[(live(b.dataset.k)||{s:""}).s]);return}const a=e.target.closest(".job,.ap");pend=a?a.closest(".card")'
                         '.querySelector(".dtag").dataset.k:null;away=0});',
-                        'document.addEventListener("visibilitychange",()=>document.hidden?gone():back());'
+                        # Coming back to the page also asks the sync route whether the other device changed anything.
+                        'document.addEventListener("visibilitychange",()=>{if(document.hidden)gone();else{back();syncPull()}});'
                         'addEventListener("blur",gone);addEventListener("focus",back);'):
             self.assertIn(snippet, script, snippet)
         self.assertEqual(script.count("k9marks"), 2)                      # read and write, nowhere else
+        self.assertEqual(script.count("marks.get("), 2)                   # live() and the sync merge; all else reads through live()
+        self.assertEqual(script.count("marks.has("), 0)
         self.assertEqual(script.count("k9tags"), 1)                       # the migration read only
         self.assertEqual(script.count("setTimeout("), 3)                  # the tag adds no timer
         # Applied = the same tag in green.
@@ -5699,12 +5712,17 @@ class SourceHealthTests(unittest.TestCase):
                       '</span><div class="rchips" id="roles" role="group" aria-labelledby="roles-h"></div></div></div>\n', doc)
         for snippet in ('const RX=ROLES.match.map(([k,,p])=>[k,new RegExp(p,"i")]),roleOf=t=>{for(const[k,x]of RX)if(x.test(t))return k;return"other"},'
                         'ROLE=new Map(jobs.map(r=>[r,roleOf(r[2])])),',
-                        'let hide=new Set(),mine=false;try{hide=new Set(JSON.parse(localStorage.getItem("k9hide")||"[]").filter(k=>k in LABEL))}catch(e){}',
-                        'const saveHide=()=>{try{localStorage.setItem("k9hide",JSON.stringify([...hide]))}catch(e){}};',
+                        # The hide list is stored as {v: [...], u: epoch ms} (the older bare array still reads) so a
+                        # paired device can tell which copy is newer; saving stamps it and pushes, unless the save is
+                        # the sync itself writing what it just received (saveHide(false)).
+                        'let hide=new Set(),hideU=0,mine=false;try{const h=JSON.parse(localStorage.getItem("k9hide")||"[]"),v=Array.isArray(h)?h:h.v,'
+                        'u=Array.isArray(h)?0:h.u;hide=new Set((v||[]).filter(k=>k in LABEL));hideU=Number.isInteger(u)?u:0}catch(e){}',
+                        'const saveHide=(stamp=true)=>{if(stamp)hideU=Date.now();try{localStorage.setItem("k9hide",JSON.stringify({v:[...hide],u:hideU}))}'
+                        'catch(e){}if(stamp)syncPush()};',
                         # match() takes a flag so the chip counts come from a pool that ignores the hide list and Mine.
-                        'function match(r,roles){', 'if(roles!==true&&hide.has(ROLE.get(r)))return false;if(roles!==true&&mine&&!marks.has(key(r)))return false;',
+                        'function match(r,roles){', 'if(roles!==true&&hide.has(ROLE.get(r)))return false;if(roles!==true&&mine&&!live(key(r)))return false;',
                         'const rp=jobs.filter(r=>match(r,true)),rn=Object.fromEntries(ROLES.view.map(k=>[k,0]));for(const r of rp)rn[ROLE.get(r)]++;',
-                        '$("#roles").innerHTML=`<button class="ob rc rm" type="button" data-r="mine" aria-pressed="${mine}">Mine <b>${rp.filter(r=>marks.has(key(r))).length}</b></button>`'
+                        '$("#roles").innerHTML=`<button class="ob rc rm" type="button" data-r="mine" aria-pressed="${mine}">Mine <b>${rp.filter(r=>live(key(r))).length}</b></button>`'
                         '+ROLES.view.map(k=>`<button class="ob rc" type="button" data-r="${k}" aria-pressed="${!hide.has(k)}"${rn[k]?"":" data-z"}>${LABEL[k]} <b>${rn[k]}</b>'
                         '<span class="vh"> openings, ${hide.has(k)?"hidden, show them":"shown, hide them"}</span></button>`).join("");',
                         # Readout, active-filter chips, empty state and the × handlers know both; Reset clears Mine only.
@@ -5735,24 +5753,86 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn('<div class="tb" id="me" style="--d:5"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
                       'signal me</p>\n<p class="kv">Marks on this phone: <b id="me-marks">none</b></p>\n'
                       '<p class="kv">Skills for the JD match: <b id="me-sk">none</b></p>\n', dialog)
+        self.assertIn('<p class="kv">Sync: <b id="me-sync" data-s="off">off</b></p>\n'
+                      '<p class="kv">Marks and skills live in this browser. Sync shares them between your devices through the ledger’s '
+                      'own Worker under a pairing code: start it here, then type the code into the other device. Export copies the '
+                      'marks as JSON for the laptop pipeline.</p>\n', dialog)
         self.assertIn('<p class="pn-act"><input class="ob me-in" id="me-skills" type="text" autocomplete="off" spellcheck="false" '
                       'placeholder="python, sql, react" aria-label="Your skills, comma separated"><button class="ob" id="me-save" '
-                      'type="button">Save skills</button><button class="ob" id="me-export" type="button">Export marks</button></p></div>\n'
+                      'type="button">Save skills</button><button class="ob" id="me-export" type="button">Export marks</button></p>\n'
+                      # The sync row: a code box with Use code / Start sync while off; Copy code / Stop sync once on.
+                      '<p class="pn-act"><input class="ob me-in" id="me-code" type="text" autocomplete="off" autocapitalize="off" '
+                      'spellcheck="false" placeholder="pairing code from your other device" aria-label="Pairing code">'
+                      '<button class="ob" id="me-pair" type="button">Use code</button><button class="ob" id="me-start" type="button">Start sync'
+                      '</button><button class="ob" id="me-copy" type="button" hidden>Copy code</button><button class="ob" id="me-stop" '
+                      'type="button" hidden>Stop sync</button></p></div>\n'
                       '<div class="tb" style="--d:6">', dialog)
         self.assertNotIn(' hidden><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal me', dialog)
-        self.assertEqual(doc.count("<input"), 2)                                     # the search box and the skill list
-        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
-        for snippet in ('let skills=[];try{skills=JSON.parse(localStorage.getItem("k9skills")||"[]").filter(s=>typeof s==="string")}catch(e){}',
+        self.assertEqual(doc.count("<input"), 3)                                     # the search box, the skill list, the code
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", "SYNC_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
+        for snippet in (# Skills are stored as {v: [...], u: epoch ms} (a bare array still reads) so paired devices can tell
+                        # which copy is newer; saving stamps it unless the sync is writing what it just received.
+                        'let skills=[],skillsU=0;try{const s=JSON.parse(localStorage.getItem("k9skills")||"[]"),v=Array.isArray(s)?s:s.v,'
+                        'u=Array.isArray(s)?0:s.u;skills=(v||[]).filter(x=>typeof x==="string");skillsU=Number.isInteger(u)?u:0}catch(e){}'
+                        'const saveSkills=(stamp=true)=>{if(stamp)skillsU=Date.now();try{localStorage.setItem("k9skills",JSON.stringify({v:skills,u:skillsU}))}catch(e){}};',
                         '$("#me-save").addEventListener("click",()=>{skills=[...new Set(skIn.value.split(/[,\\n;]+/).map(s=>s.trim().toLowerCase())'
-                        '.filter(s=>s.length>1&&s.length<40))].slice(0,60);try{localStorage.setItem("k9skills",JSON.stringify(skills))}catch(e){}showSk()});',
-                        'marks:[...marks].map(([k,m])=>({company:k.split("|")[0],id:k.split("|").slice(1).join("|"),state:m.s==="a"?"applied":"opened",date:m.t}))',
-                        'try{await navigator.clipboard.writeText(j);o.textContent=`${marks.size} copied as JSON`}catch(e){o.textContent="copy blocked · allow clipboard for this site"}',
+                        '.filter(s=>s.length>1&&s.length<40))].slice(0,60);saveSkills();showSk();syncPush()});',
+                        # Export and the summary skip tombstones.
+                        'marks:[...marks].filter(([,m])=>m.s).map(([k,m])=>({company:k.split("|")[0],id:k.split("|").slice(1).join("|"),state:m.s==="a"?"applied":"opened",date:m.t}))',
+                        'try{await navigator.clipboard.writeText(j);o.textContent=`${[...marks.values()].filter(m=>m.s).length} copied as JSON`}'
+                        'catch(e){o.textContent="copy blocked · allow clipboard for this site"}',
                         # Skill words are matched whole (not inside longer tokens such as c++ or .net) and escaped for RegExp.
                         'const skRx=()=>skills.length?new RegExp(`(^|[^a-z0-9+#.])(${skills.map(s=>s.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&")).join("|")})(?![a-z0-9+#])`,"gi"):null,',
-                        '$("#me-marks").textContent=marks.size?'):
+                        'const lv2=[...marks.values()].filter(m=>m.s);$("#me-marks").textContent=lv2.length?'):
             self.assertIn(snippet, script, snippet)
         self.assertEqual(script.count("k9skills"), 2)
         self.assertEqual(script.count("setTimeout("), 3)                              # the copied/saved notes use no timer
+        # Sync. One pairing code (20 letters/digits from an alphabet without 0/o/1/l/i, shown in groups of five) is the
+        # whole identity: it goes to the Worker's /sync route as a bearer token, the Worker keeps one document per code
+        # (marks with tombstones, hide list, skills) and merges newest-stamp-wins. The code lives in localStorage
+        # under k9sync; Start sync mints one here, Use code joins another device's, Stop sync forgets it. The page
+        # pushes after every change and pulls on load and whenever it becomes visible again; no timers, no polling.
+        self.assertEqual(R.sync_url(self.config), self.config.register_url.rsplit("/", 1)[0] + "/sync")
+        self.assertEqual(json.loads(re.search(r"\nconst SYNC_URL=(\"[^\"]+\");\n", doc).group(1)), R.sync_url(self.config))
+        self.assertIn("SYNC_URL_JS", R.ONCE_PLACEHOLDERS)
+        self.assertNotIn("/sync", self.template)                          # the route reaches the page only as a placeholder
+        for snippet in ('const CODE_AB="abcdefghjkmnpqrstuvwxyz23456789",codeOk=s=>{const c=String(s||"").toLowerCase().replace(/[\\s-]/g,"");'
+                        'return new RegExp(`^[${CODE_AB}]{20}$`).test(c)?c:null},',
+                        # Unbiased draw: 31 symbols, bytes ≥ 248 (the 8 that would skew the modulus) are thrown away.
+                        'mintCode=()=>{let c="";while(c.length<20){const b=crypto.getRandomValues(new Uint8Array(32));for(const x of b)if(x<248&&c.length<20)c+=CODE_AB[x%31]}return c},',
+                        'showCode=c=>c.replace(/(.{5})(?=.)/g,"$1-");let syncCode=null;try{syncCode=codeOk(localStorage.getItem("k9sync"))}catch(e){}',
+                        'syState=(txt,s)=>{syEl.textContent=txt;syEl.dataset.s=s;$("#me-start").hidden=$("#me-pair").hidden=syIn.hidden=!!syncCode;'
+                        '$("#me-copy").hidden=$("#me-stop").hidden=!syncCode},',
+                        'syDoc=()=>({v:1,marks:Object.fromEntries(marks),hide:{v:[...hide],u:hideU},skills:{v:skills,u:skillsU}}),',
+                        # Merge: a mark wins by newer stamp (a tie keeps the mark over its tombstone); the hide list and
+                        # skills move whole when the other copy is newer, and are saved without a new stamp or push.
+                        'syApply=d=>{if(!d||d.v!==1)return;for(const k in d.marks||{}){const e=d.marks[k],m=marks.get(k);'
+                        'if(okMark(e)&&Number.isInteger(e.u)&&(!m||e.u>m.u||(e.u===m.u&&e.s&&!m.s)))marks.set(k,{s:e.s,t:e.t,u:e.u})}'
+                        'if(d.hide&&Number.isInteger(d.hide.u)&&d.hide.u>hideU){hide=new Set((d.hide.v||[]).filter(k=>k in LABEL));hideU=d.hide.u;saveHide(false)}'
+                        'if(d.skills&&Number.isInteger(d.skills.u)&&d.skills.u>skillsU){skills=(d.skills.v||[]).filter(x=>typeof x==="string");skillsU=d.skills.u;'
+                        'saveSkills(false);showSk()}saveMarks();render()},',
+                        'syFetch=(method,body)=>fetch(SYNC_URL,{method,mode:"cors",headers:{Authorization:"Bearer "+syncCode,'
+                        '...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined}),',
+                        # Push sends the whole document and applies the merged copy the Worker returns. Pull applies the
+                        # Worker's copy and, when this device knew something the Worker did not, pushes once; a 404
+                        # (nobody has written under this code yet) is answered with a push. One request at a time.
+                        'const syncPush=async()=>{if(!syncCode||syBusy)return;syBusy=true;try{const r=await syFetch("PUT",syDoc());if(!r.ok)throw 0;'
+                        'const d=await r.json();syApply(d.doc);syncOn("synced "+stamp())}catch(e){syncOn("offline, will retry")}finally{syBusy=false}},',
+                        'syncPull=async()=>{if(!syncCode||syBusy)return;syBusy=true;try{const r=await syFetch("GET");if(r.status===404){syBusy=false;return syncPush()}'
+                        'if(!r.ok)throw 0;const d=await r.json();syApply(d.doc);syBusy=false;if(JSON.stringify(syDoc())!==JSON.stringify(d.doc))return syncPush();'
+                        'syncOn("synced "+stamp())}catch(e){syncOn("offline, will retry")}finally{syBusy=false}};',
+                        '$("#me-start").addEventListener("click",()=>{syncCode=mintCode();try{localStorage.setItem("k9sync",syncCode)}catch(e){}'
+                        'syncOn("type this code on your other device");syncPush()});',
+                        '$("#me-pair").addEventListener("click",()=>{const c=codeOk(syIn.value);if(!c){syState("that is not a pairing code","off");return}'
+                        'syncCode=c;syIn.value="";try{localStorage.setItem("k9sync",c)}catch(e){}syncOn("joining");syncPull()});',
+                        '$("#me-stop").addEventListener("click",()=>{syncCode=null;try{localStorage.removeItem("k9sync")}catch(e){}syState("off","off")});'
+                        'if(syncCode)syncOn("checking");else syState("off","off");',
+                        '$("#reset").addEventListener("click",reset);render();syncPull();'):
+            self.assertIn(snippet, script, snippet)
+        self.assertEqual(script.count("k9sync"), 4)                                   # read, two writes, one removal
+        self.assertEqual(script.count("Authorization"), 1)                            # the code travels only as this header
+        self.assertNotIn("k9sync", doc.replace(script, ""))                           # the page itself carries no code
+        self.assertIn("#me-sync[data-s=on]{color:hsl(var(--ok))}#me-sync{overflow-wrap:anywhere}", style_of(doc))
         self.assertIn(".me-in{flex:1 1 180px;min-width:0;cursor:text;letter-spacing:0;text-transform:none}.me-in::placeholder{color:hsl(var(--steel-muted))}"
                       "mark.sk{background:hsl(var(--signal)/.18);color:hsl(var(--signal));padding:0 2px;font-weight:600}.sk-n{color:hsl(var(--ok))}"
                       ".sk-m{color:hsl(2 88% 57%)}", style_of(doc))
@@ -5793,7 +5873,7 @@ class SourceHealthTests(unittest.TestCase):
                         '${anim?`;--i:${i}`:""}">',
                         # Posting age tints the card: hue 152 (green) today, sliding to 28 (orange) at 30 days and
                         # beyond; the hue rides on the card as --ah and one CSS rule paints every card.
-                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30),mk=marks.get(`${c}|${id}`),tg=mk?mk.s:"",',
+                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30),mk=live(`${c}|${id}`),tg=mk?mk.s:"",',
                         # The posting date the portal shows (first-seen date for sources without one, row 11 = 1) sits
                         # beside the relative age in the meta line: "Oct 31 · 1 day ago", or "Nov 2 · seen today".
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
