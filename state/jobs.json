@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "as_of": "2026-11-06",
-  "checked_at": "2026-11-06T06:00+05:30",
+  "checked_at": "2026-11-06T09:00+05:30",
   "companies": {
     "Siemens": {
       "status": "ok",
       "detail": "liveness 18/22",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": null,
       "last_discovery_attempt": "2026-11-05T18:00+05:30",
@@ -67,14 +67,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 20,
-          "added": 0,
-          "removed": 0,
-          "took": 108
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 22,
@@ -113,16 +105,24 @@
           "added": 0,
           "removed": 0,
           "took": 99
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 22,
+          "added": 0,
+          "removed": 0,
+          "took": 104
         }
       ]
     },
     "JPMorganChase": {
       "status": "ok",
-      "detail": "listing 173",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "detail": "listing 171",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
-      "listing_total": 173,
+      "listing_total": 171,
       "last_discovery_attempt": null,
       "screened": {
         "210715495": "2026-11-03#e76288b93a35",
@@ -268,14 +268,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 33,
-          "added": 2,
-          "removed": 0,
-          "took": 61
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 34,
@@ -314,14 +306,22 @@
           "added": 0,
           "removed": 0,
           "took": 63
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 33,
+          "added": 0,
+          "removed": 1,
+          "took": 62
         }
       ]
     },
     "GE HealthCare": {
       "status": "ok",
       "detail": "listing 1043",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 1043,
       "last_discovery_attempt": null,
@@ -565,14 +565,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 14,
-          "added": 0,
-          "removed": 0,
-          "took": 103
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 14,
@@ -611,28 +603,28 @@
           "added": 0,
           "removed": 0,
           "took": 103
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 11,
+          "added": 0,
+          "removed": 0,
+          "took": 97
         }
       ]
     },
     "GE Vernova": {
       "status": "ok",
       "detail": "listing 117",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 117,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 11,
-          "added": 0,
-          "removed": 0,
-          "took": 12
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -672,14 +664,22 @@
           "added": 0,
           "removed": 0,
           "took": 9
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 12,
+          "added": 0,
+          "removed": 0,
+          "took": 11
         }
       ]
     },
     "IQVIA": {
       "status": "ok",
       "detail": "listing 41 across 3 searches",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 41,
       "last_discovery_attempt": null,
@@ -714,14 +714,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 13,
-          "added": 0,
-          "removed": 2,
-          "took": 36
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -761,28 +753,28 @@
           "added": 0,
           "removed": 0,
           "took": 29
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 10,
+          "added": 0,
+          "removed": 0,
+          "took": 25
         }
       ]
     },
     "ZS": {
       "status": "ok",
       "detail": "listing 57",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 57,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 3,
-          "added": 0,
-          "removed": 0,
-          "took": 42
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -822,16 +814,24 @@
           "added": 0,
           "removed": 0,
           "took": 36
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 2,
+          "added": 0,
+          "removed": 0,
+          "took": 35
         }
       ]
     },
     "Accenture": {
       "status": "ok",
-      "detail": "listing 1254",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "detail": "listing 1259",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
-      "listing_total": 1254,
+      "listing_total": 1259,
       "last_discovery_attempt": null,
       "screened": {
         "14066816": "2026-11-06#fc9de04dc02e",
@@ -1009,14 +1009,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 1103,
-          "added": 3,
-          "removed": 0,
-          "took": 22
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 1099,
@@ -1055,14 +1047,22 @@
           "added": 0,
           "removed": 7,
           "took": 22
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 1090,
+          "added": 5,
+          "removed": 0,
+          "took": 22
         }
       ]
     },
     "Lilly": {
       "status": "ok",
       "detail": "listing 26",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 26,
       "last_discovery_attempt": null,
@@ -1093,14 +1093,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 4,
-          "added": 0,
-          "removed": 0,
-          "took": 12
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -1140,16 +1132,24 @@
           "added": 0,
           "removed": 0,
           "took": 12
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 4,
+          "added": 0,
+          "removed": 0,
+          "took": 12
         }
       ]
     },
     "AstraZeneca": {
       "status": "ok",
-      "detail": "listing 34",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "detail": "listing 30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
-      "listing_total": 34,
+      "listing_total": 30,
       "last_discovery_attempt": null,
       "screened": {
         "100375885808": "2026-11-02#b672030c94ab",
@@ -1193,14 +1193,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 0,
-          "added": 0,
-          "removed": 0,
-          "took": 5
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 0,
@@ -1239,14 +1231,22 @@
           "added": 0,
           "removed": 0,
           "took": 5
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 0,
+          "added": 0,
+          "removed": 0,
+          "took": 4
         }
       ]
     },
     "Shell": {
       "status": "ok",
       "detail": "listing 139",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 139,
       "last_discovery_attempt": null,
@@ -1271,14 +1271,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 20
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -1318,16 +1310,24 @@
           "added": 0,
           "removed": 0,
           "took": 16
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 17
         }
       ]
     },
     "GE Aerospace": {
       "status": "ok",
-      "detail": "listing 5",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "detail": "listing 6",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
-      "listing_total": 5,
+      "listing_total": 6,
       "last_discovery_attempt": null,
       "screened": {
         "R5041172": "2026-11-02#4198938b996c",
@@ -1343,14 +1343,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 3,
-          "added": 0,
-          "removed": 0,
-          "took": 9
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -1390,14 +1382,22 @@
           "added": 0,
           "removed": 0,
           "took": 6
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 6
         }
       ]
     },
     "Fractal": {
       "status": "ok",
       "detail": "listing 79",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 79,
       "last_discovery_attempt": null,
@@ -1423,14 +1423,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 4,
-          "added": 0,
-          "removed": 0,
-          "took": 20
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -1470,14 +1462,22 @@
           "added": 0,
           "removed": 0,
           "took": 16
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 4,
+          "added": 0,
+          "removed": 0,
+          "took": 17
         }
       ]
     },
     "D. E. Shaw India": {
       "status": "ok",
       "detail": "catalogue 74",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 74,
       "last_discovery_attempt": null,
@@ -1556,14 +1556,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 3
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 1,
@@ -1602,16 +1594,24 @@
           "added": 0,
           "removed": 0,
           "took": 3
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 3
         }
       ]
     },
     "Honeywell": {
       "status": "ok",
-      "detail": "listing 120",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "detail": "listing 121",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
-      "listing_total": 120,
+      "listing_total": 121,
       "last_discovery_attempt": null,
       "screened": {
         "156101": "2026-11-02#8fec61ee9342",
@@ -1689,14 +1689,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 33,
-          "added": 0,
-          "removed": 0,
-          "took": 61
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 33,
@@ -1735,28 +1727,28 @@
           "added": 0,
           "removed": 0,
           "took": 59
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 33,
+          "added": 1,
+          "removed": 0,
+          "took": 59
         }
       ]
     },
     "AMD": {
       "status": "ok",
       "detail": "listing 121",
-      "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
+      "last_success": "2026-11-06T09:00+05:30",
+      "last_attempt": "2026-11-06T09:00+05:30",
       "stale_since": null,
       "listing_total": 121,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 11,
-          "added": 0,
-          "removed": 0,
-          "took": 81
-        },
         {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
@@ -1796,15 +1788,23 @@
           "added": 0,
           "removed": 0,
           "took": 77
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "accepted",
+          "published": 11,
+          "added": 0,
+          "removed": 0,
+          "took": 78
         }
       ]
     },
     "Qualcomm": {
-      "status": "ok",
-      "detail": "listing 362",
+      "status": "stale",
+      "detail": "partial pagination",
       "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
-      "stale_since": null,
+      "last_attempt": "2026-11-06T09:00+05:30",
+      "stale_since": "2026-11-06T09:00+05:30",
       "listing_total": 362,
       "last_discovery_attempt": null,
       "screened": {
@@ -1942,14 +1942,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "accepted",
-          "published": 17,
-          "added": 2,
-          "removed": 0,
-          "took": 89
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "accepted",
           "published": 18,
@@ -1988,15 +1980,23 @@
           "added": 0,
           "removed": 0,
           "took": 53
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "held",
+          "published": 17,
+          "added": 0,
+          "removed": 0,
+          "took": 71
         }
       ]
     },
     "Deloitte": {
-      "status": "ok",
-      "detail": "listing 794 across 3 searches",
+      "status": "stale",
+      "detail": "listing changed during pagination",
       "last_success": "2026-11-06T06:00+05:30",
-      "last_attempt": "2026-11-06T06:00+05:30",
-      "stale_since": null,
+      "last_attempt": "2026-11-06T09:00+05:30",
+      "stale_since": "2026-11-06T09:00+05:30",
       "listing_total": 794,
       "last_discovery_attempt": null,
       "screened": {
@@ -2139,14 +2139,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-05T15:00+05:30",
-          "result": "held",
-          "published": 2,
-          "added": 0,
-          "removed": 0,
-          "took": 14
-        },
-        {
           "at": "2026-11-05T18:00+05:30",
           "result": "held",
           "published": 2,
@@ -2185,6 +2177,14 @@
           "added": 1,
           "removed": 0,
           "took": 157
+        },
+        {
+          "at": "2026-11-06T09:00+05:30",
+          "result": "held",
+          "published": 13,
+          "added": 0,
+          "removed": 0,
+          "took": 23
         }
       ]
     }
@@ -2546,21 +2546,6 @@
       "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210805470",
       "posted_date": "2026-11-05",
       "closing_date": "2026-11-08",
-      "first_seen": "2026-11-05",
-      "last_seen": "2026-11-06",
-      "liveness": "live",
-      "absent_runs": 0
-    },
-    {
-      "company": "JPMorganChase",
-      "job_id": "210795910",
-      "title": "Software Engineer II - Java Full Stack Developer + React + AWS",
-      "experience_text": "2+ years applied experience Hands-on practical experience in Java Full Stack Developer + React + AWS Experience in developing, debugging, a…",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210795910",
-      "posted_date": "2026-11-05",
-      "closing_date": "2026-11-06",
       "first_seen": "2026-11-05",
       "last_seen": "2026-11-06",
       "liveness": "live",
@@ -14268,6 +14253,81 @@
     },
     {
       "company": "Accenture",
+      "job_id": "AIOC-S01664695",
+      "title": "Procure to Pay Operations New Associate",
+      "experience_text": "0-2 years",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664695_en",
+      "posted_date": "2026-10-28",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Accenture",
+      "job_id": "AIOC-S01664688",
+      "title": "Procure to Pay Operations New Associate",
+      "experience_text": "0-2 years",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664688_en",
+      "posted_date": "2026-10-28",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Accenture",
+      "job_id": "AIOC-S01664686",
+      "title": "Procure to Pay Operations New Associate",
+      "experience_text": "0-2 years",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664686_en",
+      "posted_date": "2026-10-28",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Accenture",
+      "job_id": "AIOC-S01664685",
+      "title": "Procure to Pay Operations New Associate",
+      "experience_text": "0-2 years",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664685_en",
+      "posted_date": "2026-10-28",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Accenture",
+      "job_id": "AIOC-S01664683",
+      "title": "Procure to Pay Operations New Associate",
+      "experience_text": "0-2 years",
+      "experience_band": "2",
+      "location": "Bengaluru",
+      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664683_en",
+      "posted_date": "2026-10-28",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Accenture",
       "job_id": "AIOC-S01672007",
       "title": "Record to Report Ops Associate",
       "experience_text": "0-2 years",
@@ -19992,6 +20052,21 @@
       "posted_date": "2026-11-02",
       "closing_date": null,
       "first_seen": "2026-11-02",
+      "last_seen": "2026-11-06",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "Honeywell",
+      "job_id": "161459",
+      "title": "Software Engr I",
+      "experience_text": "Not stated",
+      "experience_band": "n",
+      "location": "Bengaluru",
+      "canonical_url": "https://careers.honeywell.com/en/sites/Honeywell/job/161459",
+      "posted_date": "2026-11-06",
+      "closing_date": null,
+      "first_seen": "2026-11-06",
       "last_seen": "2026-11-06",
       "liveness": "live",
       "absent_runs": 0
