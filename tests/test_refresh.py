@@ -271,10 +271,14 @@ class SeedAndRenderTests(unittest.TestCase):
             self.assertIn(s, doc)
         self.assertIn("fmtClose=s=>`${MON[+s.slice(5,7)-1]} ${+s.slice(8,10)}`;", doc)
         self.assertNotIn("${s.slice(8,10)}", doc)
-        # match() is the legacy function plus the "New today" and location clauses added since.
+        # match() is the legacy function plus the "New today", location, hidden-role and Mine clauses added since
+        # (the `roles` flag lets the role chips count a pool that ignores the last two).
         legacy_match = re.search(r"function match\(r\)\{.*?\}return true\}", legacy).group(0)
-        now_match = re.search(r"function match\(r\)\{.*?\}return true\}", doc).group(0)
-        self.assertEqual(now_match.replace("if(onlyNew&&r[10]!==0)return false;", "", 1)
+        now_match = re.search(r"function match\(r,roles\)\{.*?\}return true\}", doc).group(0)
+        self.assertEqual(now_match.replace("function match(r,roles){", "function match(r){", 1)
+                         .replace("if(roles!==true&&hide.has(ROLE.get(r)))return false;"
+                                  "if(roles!==true&&mine&&!marks.has(key(r)))return false;", "", 1)
+                         .replace("if(onlyNew&&r[10]!==0)return false;", "", 1)
                          .replace("if(lf.value&&!inCity(r,lf.value))return false;", "", 1), legacy_match)
         self.assertNotEqual(now_match, legacy_match)
         # Content grid: one column by default and below 1024px (feed first, then the Informational aside);
@@ -1175,7 +1179,14 @@ class NewSourceHelperTests(unittest.TestCase):
                         'jdL.href=u;', 'jdl.showModal();jdw.focus();',
                         'const d=r.ok?await r.json():null;if(seq!==jdSeq)return;',
                         'if(!d||d.ok!==true||typeof d.text!=="string"||!d.text)throw 0;',
-                        'jdB.innerHTML=jdText(d.text)',
+                        # The description is escaped by jdText first; skMark then wraps the reader's own skill words
+                        # in <mark> between tags only (never inside one), so the on-device skill list cannot inject.
+                        'const[h,hit]=skMark(jdText(d.text));jdB.innerHTML=h;',
+                        'skMark=h=>{const rx=skRx();if(!rx)return[h,new Set()];const hit=new Set();return[h.split(/(<[^>]+>)/)'
+                        '.map(s=>s.startsWith("<")?s:s.replace(rx,(m,a,w)=>{hit.add(w.toLowerCase());return`${a}<mark class="sk">${w}</mark>`}))'
+                        '.join(""),hit]};',
+                        'if(skills.length){const miss=skills.filter(s=>!hit.has(s));jdM.innerHTML=`${esc(b.dataset.c)} \\u00b7 ${esc(b.dataset.l)}'
+                        ' \\u00b7 <b class="sk-n">${hit.size} of ${skills.length} skills</b>',
                         'out.addEventListener("click",e=>{const b=e.target.closest(".jd");if(b)jdOpen(b)});',
                         'jdl.addEventListener("click",e=>{if(e.target===jdl)jdl.close()});',
                         '$("#jd-x").addEventListener("click",()=>jdl.close());',
@@ -4615,8 +4626,8 @@ class SourceHealthTests(unittest.TestCase):
                       'aria-label="Close"></button><span class="dot dot-m" aria-hidden="true"></span><span class="dot '
                       'dot-z" aria-hidden="true"></span></span><span id="api-h">ops@job-signal — requests — zsh</span>'
                       '<span class="term-esc" aria-hidden="true">esc</span></div>', dialog)
-        self.assertEqual(dialog.count("<button"), 3)          # close, then the notify block's Turn on / Turn off
-        # Four commands and a final prompt, in order; each block is one staggered output group. The status
+        self.assertEqual(dialog.count("<button"), 5)          # close, notify's Turn on / Turn off, me's Save / Export
+        # Six commands and a final prompt, in order; each block is one staggered output group. The status
         # block comes first, so the reader sees when the latest refresh ran and what it found.
         prompt = '<p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
         order = [prompt + "signal status</p>", '<dl class="kvs">', "<dt>Last refresh</dt>", "<dt>Result</dt>",
@@ -4628,9 +4639,10 @@ class SourceHealthTests(unittest.TestCase):
                  '<p class="kv">every 3 h on the hour IST · armed 15 min ahead by an external clock · cron '
                  '20,35 0,3,6,9,12,15,18,21 * * * UTC as fallback · last 6 pulls kept per source</p>',
                  prompt + "signal notify</p>", 'id="pn-state"', 'id="pn-on"', 'id="pn-off"',
+                 prompt + "signal me</p>", 'id="me-marks"', 'id="me-sk"', 'id="me-skills"', 'id="me-save"', 'id="me-export"',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
-        self.assertEqual(re.findall(r'<div class="tb"(?: id="push")? style="--d:(\d)"', dialog), list("012345"))
+        self.assertEqual(re.findall(r'<div class="tb"(?: id="\w+")? style="--d:(\d)"', dialog), list("0123456"))
         self.assertIn('<div class="tb" style="--d:0">' + prompt + 'signal status</p>\n<dl class="kvs">', dialog)
         self.assertLess(doc.index('<dialog id="api"'), doc.index('<dl class="kvs">'))
         self.assertLess(doc.index("</dl></div>", doc.index('<dl class="kvs">')),
@@ -4755,7 +4767,9 @@ class SourceHealthTests(unittest.TestCase):
                       script)
         self.assertIn('ftog.addEventListener("click",()=>{const open=cmd.toggleAttribute("data-fc");'
                       'ftog.setAttribute("aria-expanded",String(!open));if(!open)$("#age").focus()})', script)
-        self.assertIn('$("#fn").textContent=on.filter(([k])=>k!=="query"&&k!=="company"&&k!=="new").length;', script)
+        # Filters (n) counts what the panel can clear: not the search, the company chip, New today, or the
+        # hidden-role preference (which Reset leaves alone).
+        self.assertIn('$("#fn").textContent=on.filter(([k])=>k!=="query"&&k!=="company"&&k!=="new"&&k!=="hide").length;', script)
         self.assertFalse({s for s in hidden_selectors(style)
                           if any(k in s for k in ("api", "term", "field", "query", "reset"))})
         self.assertIn("[hidden]{display:none!important}", base)
@@ -5328,9 +5342,9 @@ class SourceHealthTests(unittest.TestCase):
             self.assertIn(f"@keyframes {name}{{", style)
         self.assertEqual(style.count("@keyframes"), 17)
         # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
-        # terminal's four output blocks stagger by 90ms and all finish within .7s.
+        # terminal's six output blocks and prompt stagger by 70ms and all finish within .7s.
         self.assertEqual(re.findall(r"animation-delay:([^;}]+)", effects), ["calc(var(--i)*40ms)",
-                                                                            "calc(var(--d)*90ms)"])
+                                                                            "calc(var(--d)*70ms)"])
         # Splash: a violet night-vision scope that powers on, types its HUD readouts, locks and powers off (no
         # big mark in the middle: the reticle is the centre). It is an
         # overlay (the page is complete underneath), finite (every run ends by 1.8s, a 2.2s script ceiling
@@ -5385,9 +5399,9 @@ class SourceHealthTests(unittest.TestCase):
                         'setTimeout(bye,2200,1)}}'):
             self.assertIn(snippet, main_script(doc), snippet)
         self.assertNotIn("bye()}", main_script(doc))      # every path that saw the splash passes the flag
-        steps = [int(d) for d in re.findall(r'<div class="tb"(?: id="push")? style="--d:(\d+)"', doc)]
-        self.assertEqual(steps, [0, 1, 2, 3, 4, 5])
-        self.assertLess(max(steps) * 0.09 + 0.24, 0.7)
+        steps = [int(d) for d in re.findall(r'<div class="tb"(?: id="\w+")? style="--d:(\d+)"', doc)]
+        self.assertEqual(steps, [0, 1, 2, 3, 4, 5, 6])
+        self.assertLess(max(steps) * 0.07 + 0.24, 0.7)
         self.assertIn("anim=!booted&&i<12", doc)
         self.assertIn('<main id="main" class="container boot-in">', doc)
         for decl in re.findall(r"transition:([^;}]+)", effects):
@@ -5483,18 +5497,30 @@ class SourceHealthTests(unittest.TestCase):
 
     def test_dog_tag_marks_openings_the_reader_opened(self):
         """A dog tag hangs off each card's top-right corner: outlined until the reader opens the posting (title or
-        Apply) and stays away at least three seconds, then filled red. A tap on the tag toggles it by hand. The
-        marks live only in this browser's localStorage under one key; nothing leaves the device."""
+        Apply) and stays away at least three seconds, then filled red ("opened"); a tap cycles opened → applied
+        (green, with the date and a follow-up countdown) → unmarked. The marks live only in this browser's
+        localStorage under one key; nothing leaves the device."""
         doc = R.render(self.state, self.template, self.config)
         script, style = main_script(doc), style_of(doc)
         card = script[script.index("const card="):script.index("function render()")]
         # The tag is the card's first child, a real toggle button keyed by company and job ID, never a link. Its
         # picture is a <use> of one symbol drawn in the markup (two nodes per card, not a copy of the drawing).
-        self.assertIn('${anim?`;--i:${i}`:""}"><button class="dtag${tg?" on":""}" type="button" data-k="${esc(c)}|${esc(id)}" '
-                      'aria-pressed="${tg}"><svg class="dts" aria-hidden="true"><use href="#dt"/></svg><span class="vh">Opened</span>'
-                      '</button><div class="c-h">', card)
-        self.assertIn("tg=tags.has(`${c}|${id}`);return `", card)
+        self.assertIn('${anim?`;--i:${i}`:""}"><button class="dtag${tg==="o"?" on":tg==="a"?" on ap":""}" type="button" '
+                      'data-k="${esc(c)}|${esc(id)}" aria-pressed="${!!tg}"><svg class="dts" aria-hidden="true"><use href="#dt"/></svg>'
+                      '<span class="vh">${tg==="a"?"Applied":tg==="o"?"Opened":"Not marked"}</span></button><div class="c-h">', card)
+        self.assertIn("mk=marks.get(`${c}|${id}`),tg=mk?mk.s:\"\",since=mk?-daysToClose(mk.t):0,", card)
+        # The mark's own line in the meta row: when it was opened, or when it was applied and when to follow up
+        # (FOLLOW_D days later; "follow up now" once that has passed).
+        self.assertIn('ml=!mk?"":tg==="o"?`<span class="mk" data-s="o"><b>Opened</b> ${since<=0?"today":since===1?"yesterday":`${since} d ago`}</span>`'
+                      ':`<span class="mk" data-s="a"><b>Applied</b> ${esc(fmtClose(mk.t))} · ${FOLLOW_D-since>0?`follow up in ${FOLLOW_D-since} d`'
+                      ':"<b>follow up now</b>"}</span>`;return `', card)
         self.assertEqual(card.count('class="dtag'), 1)
+        # Postings up to a day old carry an "early" badge: hires skew to the first 48 hours of a posting, so the
+        # reader sees where applying now pays most. Seen-basis rows (no posting date) never claim it.
+        self.assertIn('<span class="pdt">(${esc(d)})</span></span>${a<=1&&!sb?\'<span class="ew">early<span class="vh"> window: posted '
+                      'within two days</span></span>\':""}${ml}</span>', card)
+        self.assertIn(".ew{font-weight:700;color:hsl(var(--ok))}.mk{color:hsl(var(--steel-muted))}.mk b{font-weight:700}"
+                      ".mk[data-s=o] b{color:hsl(2 88% 57%)}.mk[data-s=a] b{color:hsl(var(--ok))}", style)
         # The symbol is the Call of Duty Mobile dog tag: two plates fanned on a bead chain (a dotted stroke with a
         # clasp bead at the apex), each a rounded plate with a rim highlight, a ringed hole, an "M" emblem over
         # its own shadow and two stamped text lines; every colour is a custom property so the button's state
@@ -5516,23 +5542,31 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotIn("transform", style[style.index(".dtag{"):style.index(".dtag.on:hover")])          # CSS moves nothing
         # The title keeps clear of the tag's corner.
         self.assertIn(".c-l{margin:0;padding-right:20px;font:400 14px/1.375 var(--font-sans);", style)
-        # State: one localStorage key, read once at boot, written on every change, tolerant of a blocked store.
-        for snippet in ('let tags=new Set();try{tags=new Set(JSON.parse(localStorage.getItem("k9tags")||"[]"))}catch(e){}',
-                        'const TAG_MS=3000,tag=(k,on)=>{on?tags.add(k):tags.delete(k);try{localStorage.setItem("k9tags",'
-                        'JSON.stringify([...tags]))}catch(e){}for(const b of out.querySelectorAll(".dtag"))if(b.dataset.k===k)'
-                        '{b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on))}};',
+        # State: one localStorage key (k9marks: {key: {s: "o"|"a", t: date}}), read once at boot (the older k9tags
+        # list of opened keys is migrated in memory), written on every change, tolerant of a blocked store.
+        for snippet in ('const marks=new Map();try{const m=JSON.parse(localStorage.getItem("k9marks")||"null");if(m)for(const k in m)'
+                        'marks.set(k,m[k]);else for(const k of JSON.parse(localStorage.getItem("k9tags")||"[]"))marks.set(k,{s:"o",t:AS_OF})}catch(e){}',
+                        'const TAG_MS=3000,FOLLOW_D=7,NEXT={"":"o",o:"a",a:""},',
+                        'mark=(k,s)=>{s?marks.set(k,{s,t:todayIso()}):marks.delete(k);try{localStorage.setItem("k9marks",'
+                        'JSON.stringify(Object.fromEntries(marks)))}catch(e){}render();',
                         # Opening a posting arms the pending key; leaving the page starts the clock; coming back at or
-                        # past three seconds fills the tag. No timers: the clock is the time away, read on return.
+                        # past three seconds marks it opened unless it already carries a mark. No timers: the clock is
+                        # the time away, read on return. A tap cycles the mark: none → opened → applied → none.
                         'let pend=null,away=0;const gone=()=>{if(pend&&!away)away=Date.now()},back=()=>{if(pend&&away){'
-                        'if(Date.now()-away>=TAG_MS)tag(pend,true);pend=null;away=0}};',
-                        'out.addEventListener("click",e=>{const b=e.target.closest(".dtag");if(b){pend=null;tag(b.dataset.k,'
-                        '!b.classList.contains("on"));return}const a=e.target.closest(".job,.ap");pend=a?a.closest(".card")'
+                        'if(Date.now()-away>=TAG_MS&&!marks.has(pend))mark(pend,"o");pend=null;away=0}};',
+                        'out.addEventListener("click",e=>{const b=e.target.closest(".dtag");if(b){pend=null;mark(b.dataset.k,'
+                        'NEXT[(marks.get(b.dataset.k)||{s:""}).s]);return}const a=e.target.closest(".job,.ap");pend=a?a.closest(".card")'
                         '.querySelector(".dtag").dataset.k:null;away=0});',
                         'document.addEventListener("visibilitychange",()=>document.hidden?gone():back());'
                         'addEventListener("blur",gone);addEventListener("focus",back);'):
             self.assertIn(snippet, script, snippet)
-        self.assertEqual(script.count("k9tags"), 2)                       # read and write, nowhere else
+        self.assertEqual(script.count("k9marks"), 2)                      # read and write, nowhere else
+        self.assertEqual(script.count("k9tags"), 1)                       # the migration read only
         self.assertEqual(script.count("setTimeout("), 3)                  # the tag adds no timer
+        # Applied = the same tag in green.
+        self.assertIn(".dtag.ap{--ol:hsl(158 60% 10%);--tb:hsl(158 70% 22%);--tb2:hsl(158 76% 30%);--tf:hsl(158 78% 28%);"
+                      "--tf2:hsl(158 80% 42%);--em:hsl(158 100% 90%);--eo:hsl(158 60% 10%)}"
+                      ".dtag.ap:hover,.dtag.ap:focus-visible{--tf2:hsl(158 80% 50%)}", style)
         # Look: a 30x34 button hanging off the card's top-right corner, above the phone's whole-card title hit area,
         # with a hit area 8 px past its box. Off = muted-steel outlines, plates in the card's own background with a
         # faint plate face, a steel M with no outline (hover/focus turns the lines red). On = near-black outlines,
@@ -5551,6 +5585,107 @@ class SourceHealthTests(unittest.TestCase):
                       "--em:hsl(4 100% 86%);--eo:hsl(2 60% 12%);--hl:hsl(var(--void));--ch:hsl(var(--steel-2))}"
                       ".dtag.on:hover,.dtag.on:focus-visible{--tf2:hsl(2 95% 64%)}", style)
         self.assertNotIn("border-radius", style[style.index(".dsym{"):style.index(".c-h{")])              # rounding is the SVG's
+
+    def test_role_families_hide_list_and_mine(self):
+        """Every title falls into exactly one role family (first matching pattern wins); the Filters panel shows one
+        chip per family with live counts, a tap hides or shows that family on this phone only (k9hide, a
+        preference Reset leaves alone), and a Mine chip narrows the feed to marked openings. Accenture's 0-2
+        bucket is ~86% of the feed and mostly sales / HR / finance operations, so this is how the analyst,
+        data, QA and engineering rows stop being buried."""
+        for title, family in {
+            "Inbound Sales Representative Associate": "sales", "Sales Operations Associate": "sales",
+            "Process Associate – Marcom, Sales and Delivery Services": "sales", "Business Development Representative": "sales",
+            "HR Service Delivery Associate": "hr", "Recruiting Associate": "hr", "Learning Operations Associate": "hr",
+            "Order to Cash Operations Associate": "finance", "Record to Report Ops Associate": "finance",
+            "Procure to Pay Operations New Associate": "finance", "Financial Plan & Analysis Associate": "finance",
+            "Data Science Intern": "intern", "Graduate Engineer Trainee": "intern", "Intern Bachelors AI": "intern",
+            "Quality & Regulatory Leadership Program": "intern", "Executive | Internal Audit | Bengaluru": "finance",
+            "Applied AI ML Lead-AI Engineer": "data", "Data Engineer": "data", "Advanced Data Science Associate": "data",
+            "QA Automation Engineer": "qa", "Manual Test Engineer": "qa", "IDT Assurance Advisor": "qa",
+            "KYC Quality Assurance Associate": "qa",
+            "Software Engineer II - Java, Spring Boot, Microservices": "software", "Consultant | Cloud DevOps | Bengaluru": "software",
+            "Consultant | Mulesoft | Bengaluru | Engineering | Platform Development & Integration": "software",
+            "T&T | Cyber - CST | Consultant | ISO 27001": "software", "Sales Engineer": "sales",
+            "Business Analyst": "analyst", "Credit Analyst | Regulatory & Risk": "analyst", "Business Technology Associate": "analyst",
+            "Customer Contact Comms Associate": "support", "Trust & Safety New Associate": "support",
+            "Product Support Technical Advisor": "support", "Client Onboarding Associate": "support",
+            "Health Operations Associate": "ops", "Program Specialist, IN Seller Reimbursements": "ops",
+            "Technical Writer": "other", "SCM Professional": "other",
+        }.items():
+            with self.subTest(title):
+                self.assertEqual(R.role_of(title), family)
+        self.assertEqual([k for k, _l, _p in R.ROLE_FAMILIES], ["intern", "sales", "hr", "finance", "data", "qa", "software",
+                                                                "analyst", "support", "ops"])
+        self.assertEqual(R.ROLE_VIEW, ("software", "data", "analyst", "qa", "ops", "support", "intern", "sales", "hr", "finance", "other"))
+        self.assertEqual(set(R.ROLE_LABELS), set(R.ROLE_VIEW))
+        for _k, _l, pattern in R.ROLE_FAMILIES:                 # patterns stay portable to JavaScript's RegExp
+            self.assertNotRegex(pattern, r"\(\?[<P]|\\[AZ]|\(\?i\)|\\p\{")
+        doc = R.render(self.state, self.template, self.config)
+        script, style = main_script(doc), style_of(doc)
+        self.assertEqual(json.loads(re.search(r"\nconst ROLES=(\{.*?\});\n", doc).group(1)), R.role_families())
+        self.assertIn("ROLES_JS", R.ONCE_PLACEHOLDERS)
+        # Markup: a full-width "Show" row at the end of the Filters panel, filled by render().
+        self.assertIn('<option value="">All locations</option></select></div><div class="field fw"><span class="flab" id="roles-h">Show'
+                      '</span><div class="rchips" id="roles" role="group" aria-labelledby="roles-h"></div></div></div>\n', doc)
+        for snippet in ('const RX=ROLES.match.map(([k,,p])=>[k,new RegExp(p,"i")]),roleOf=t=>{for(const[k,x]of RX)if(x.test(t))return k;return"other"},'
+                        'ROLE=new Map(jobs.map(r=>[r,roleOf(r[2])])),',
+                        'let hide=new Set(),mine=false;try{hide=new Set(JSON.parse(localStorage.getItem("k9hide")||"[]").filter(k=>k in LABEL))}catch(e){}',
+                        'const saveHide=()=>{try{localStorage.setItem("k9hide",JSON.stringify([...hide]))}catch(e){}};',
+                        # match() takes a flag so the chip counts come from a pool that ignores the hide list and Mine.
+                        'function match(r,roles){', 'if(roles!==true&&hide.has(ROLE.get(r)))return false;if(roles!==true&&mine&&!marks.has(key(r)))return false;',
+                        'const rp=jobs.filter(r=>match(r,true)),rn=Object.fromEntries(ROLES.view.map(k=>[k,0]));for(const r of rp)rn[ROLE.get(r)]++;',
+                        '$("#roles").innerHTML=`<button class="ob rc rm" type="button" data-r="mine" aria-pressed="${mine}">Mine <b>${rp.filter(r=>marks.has(key(r))).length}</b></button>`'
+                        '+ROLES.view.map(k=>`<button class="ob rc" type="button" data-r="${k}" aria-pressed="${!hide.has(k)}"${rn[k]?"":" data-z"}>${LABEL[k]} <b>${rn[k]}</b>'
+                        '<span class="vh"> openings, ${hide.has(k)?"hidden, show them":"shown, hide them"}</span></button>`).join("");',
+                        # Readout, active-filter chips, empty state and the × handlers know both; Reset clears Mine only.
+                        'if(mine)f.push("MINE");if(hide.size)f.push(`HIDING ${[...hide].map(k=>LABEL[k].toUpperCase()).join(", ")}`);',
+                        'if(mine)on.push(["mine","Mine"]);if(hide.size)on.push(["hide",`Hiding ${[...hide].map(k=>LABEL[k]).join(" · ")}`]);',
+                        '$("#empty").hidden=!!(cf.value||q.value.trim()||onlyNew||mine||hide.size||+af.value<30||bf.value||clf.value||lf.value);',
+                        'if(b.dataset.k==="mine"||b.dataset.k==="hide"){if(b.dataset.k==="mine")mine=false;else{hide.clear();saveHide()}render();$("#roles").firstElementChild.focus();return}',
+                        '$("#roles").addEventListener("click",e=>{const b=e.target.closest(".rc");if(!b)return;const k=b.dataset.r;if(k==="mine")mine=!mine;'
+                        'else{hide.has(k)?hide.delete(k):hide.add(k);saveHide()}render();$(`#roles [data-r="${k}"]`).focus()});',
+                        'const reset=()=>{q.value="";cf.value="";af.value="30";bf.value="";lf.value="";clf.value="";onlyNew=false;mine=false;render();q.focus()};'):
+            self.assertIn(snippet, script, snippet)
+        self.assertEqual(script.count("k9hide"), 2)
+        # A shown family is a quiet outline, a hidden one dims and strikes through; Mine is the usual pressed chip.
+        self.assertIn(".field.fw{grid-column:1/-1}.flab{font:500 10px/1.4 var(--font-mono);letter-spacing:.18em;text-transform:uppercase;"
+                      "color:hsl(var(--steel-muted))}.rchips{display:flex;flex-wrap:wrap;gap:6px}.rc{position:relative}.rc b{font-weight:600;"
+                      "color:hsl(var(--steel))}.rc[aria-pressed=true]:not(.rm){border-color:hsl(var(--hull-2));background:transparent;"
+                      "color:hsl(var(--steel-muted))}.rc[aria-pressed=false]:not(.rm){opacity:.5;text-decoration:line-through}.rc[data-z]{opacity:.6}"
+                      ".rm{margin-right:6px}.rm[aria-pressed=true] b{color:inherit}", style)
+        # The public page itself hides nothing: the hide list starts empty and lives in the reader's browser.
+        self.assertNotIn("k9hide", doc.replace(script, ""))
+
+    def test_signal_me_block_keeps_skills_and_marks_on_the_device(self):
+        """Requests › signal me: the reader's skill list (matched against every JD in the sheet) and a summary of
+        their marks, with an Export that copies the marks as JSON for the laptop pipeline. Nothing is sent
+        anywhere: the only fetch() calls on the page stay the push registration and the JD route."""
+        doc = R.render(self.state, self.template, self.config)
+        script, dialog = main_script(doc), api_dialog(doc)
+        self.assertIn('<div class="tb" id="me" style="--d:5"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
+                      'signal me</p>\n<p class="kv">Marks on this phone: <b id="me-marks">none</b></p>\n'
+                      '<p class="kv">Skills for the JD match: <b id="me-sk">none</b></p>\n', dialog)
+        self.assertIn('<p class="pn-act"><input class="ob me-in" id="me-skills" type="text" autocomplete="off" spellcheck="false" '
+                      'placeholder="python, sql, react" aria-label="Your skills, comma separated"><button class="ob" id="me-save" '
+                      'type="button">Save skills</button><button class="ob" id="me-export" type="button">Export marks</button></p></div>\n'
+                      '<div class="tb" style="--d:6">', dialog)
+        self.assertNotIn(' hidden><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal me', dialog)
+        self.assertEqual(doc.count("<input"), 2)                                     # the search box and the skill list
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
+        for snippet in ('let skills=[];try{skills=JSON.parse(localStorage.getItem("k9skills")||"[]").filter(s=>typeof s==="string")}catch(e){}',
+                        '$("#me-save").addEventListener("click",()=>{skills=[...new Set(skIn.value.split(/[,\\n;]+/).map(s=>s.trim().toLowerCase())'
+                        '.filter(s=>s.length>1&&s.length<40))].slice(0,60);try{localStorage.setItem("k9skills",JSON.stringify(skills))}catch(e){}showSk()});',
+                        'marks:[...marks].map(([k,m])=>({company:k.split("|")[0],id:k.split("|").slice(1).join("|"),state:m.s==="a"?"applied":"opened",date:m.t}))',
+                        'try{await navigator.clipboard.writeText(j);o.textContent=`${marks.size} copied as JSON`}catch(e){o.textContent="copy blocked · allow clipboard for this site"}',
+                        # Skill words are matched whole (not inside longer tokens such as c++ or .net) and escaped for RegExp.
+                        'const skRx=()=>skills.length?new RegExp(`(^|[^a-z0-9+#.])(${skills.map(s=>s.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&")).join("|")})(?![a-z0-9+#])`,"gi"):null,',
+                        '$("#me-marks").textContent=marks.size?'):
+            self.assertIn(snippet, script, snippet)
+        self.assertEqual(script.count("k9skills"), 2)
+        self.assertEqual(script.count("setTimeout("), 3)                              # the copied/saved notes use no timer
+        self.assertIn(".me-in{flex:1 1 180px;min-width:0;cursor:text;letter-spacing:0;text-transform:none}.me-in::placeholder{color:hsl(var(--steel-muted))}"
+                      "mark.sk{background:hsl(var(--signal)/.18);color:hsl(var(--signal));padding:0 2px;font-weight:600}.sk-n{color:hsl(var(--ok))}"
+                      ".sk-m{color:hsl(2 88% 57%)}", style_of(doc))
 
     def test_feed_cards_sorting_and_company_chips(self):
         doc = R.render(self.state, self.template, self.config)
@@ -5588,7 +5723,7 @@ class SourceHealthTests(unittest.TestCase):
                         '${anim?`;--i:${i}`:""}">',
                         # Posting age tints the card: hue 152 (green) today, sliding to 28 (orange) at 30 days and
                         # beyond; the hue rides on the card as --ah and one CSS rule paints every card.
-                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30),tg=tags.has(`${c}|${id}`);return `',
+                        'anim=!booted&&i<12,ah=Math.round(152-124*Math.min(Math.max(a,0),30)/30),mk=marks.get(`${c}|${id}`),tg=mk?mk.s:"",',
                         # The posting date the portal shows (first-seen date for sources without one, row 11 = 1) sits
                         # beside the relative age in the meta line: "Oct 31 · 1 day ago", or "Nov 2 · seen today".
                         'ago=(sb?"seen ":"")+(a===0?"today":`${a} day${a===1?"":"s"} ago`)',
@@ -5625,15 +5760,16 @@ class SourceHealthTests(unittest.TestCase):
                         'today=visibleJobs.filter(r=>r[10]===0).length;',
                         'put("today",today);$("#only-today").setAttribute("aria-pressed",String(onlyNew));',
                         'if(onlyNew)f.push("NEW TODAY");',
-                        'if(onlyNew)on.push(["new","New today"]);if(af.value!=="30")on.push(["age",af.value==="0"?"Posted today":'
+                        'if(onlyNew)on.push(["new","New today"]);if(mine)on.push(["mine","Mine"]);if(hide.size)on.push(["hide",'
+                        '`Hiding ${[...hide].map(k=>LABEL[k]).join(" · ")}`]);if(af.value!=="30")on.push(["age",af.value==="0"?"Posted today":'
                         '`Posted ≤${af.value} days`]);',
                         'if(b.dataset.k==="new"){onlyNew=false;render();$("#only-today").focus();return}',
                         # Removing a select's chip puts focus on that select, or on the Filters toggle when the
                         # phone panel hiding it is collapsed (a hidden select cannot take focus).
                         '(b.dataset.k==="company"?ci.querySelector(".ci"):el.closest("#fsel")&&cmd.hasAttribute("data-fc")'
                         '?ftog:el).focus()});',
-                        'q.value.trim()||onlyNew||+af.value<30',
-                        'clf.value="";onlyNew=false;render();q.focus()};',
+                        'q.value.trim()||onlyNew||mine||hide.size||+af.value<30',
+                        'clf.value="";onlyNew=false;mine=false;render();q.focus()};',
                         # Two groups: where/when (loud) first, details (quiet) second; the groups share a line when there
                         # is room and stack on phones, so each fact has a fixed place.
                         '<p class="c-m"><span class="mg">${nw===0?\'<span class="nw">New</span>\':""}<span class="wh">${esc(l)}</span>',
@@ -5684,7 +5820,7 @@ class SourceHealthTests(unittest.TestCase):
         # names it; option labels carry live counts (like the company chips), and it takes part in match(),
         # the chips, the Filters count, the status readout, the Informational aside and Reset.
         self.assertIn('<div class="field"><label for="city">Location</label><select id="city"><option value="">All '
-                      'locations</option></select></div></div>\n', doc)
+                      'locations</option></select></div><div class="field fw">', doc)   # then the role chips row
         city = re.search(r"\nconst CITY=(\{.*?\});\n", doc).group(1)
         self.assertEqual(json.loads(city), R.city_filter(self.config))
         self.assertIn("CITY_JS", R.ONCE_PLACEHOLDERS)
@@ -5697,7 +5833,7 @@ class SourceHealthTests(unittest.TestCase):
                         'if(lf.value)f.push(CITY[lf.value][0].toUpperCase());',
                         'if(lf.value)on.push(["city",CITY[lf.value][0]]);',
                         '||bf.value||clf.value||lf.value);',
-                        'bf.value="";lf.value="";clf.value="";onlyNew=false;render();q.focus()};[q,cf,af,bf,lf,clf].forEach('):
+                        'bf.value="";lf.value="";clf.value="";onlyNew=false;mine=false;render();q.focus()};[q,cf,af,bf,lf,clf].forEach('):
             self.assertIn(snippet, script, snippet)
         # Every published row names at least one of the filter's terms (the crawl only admits target places).
         rows = json.loads(re.search(r"const jobs=(\[.*?\n\]);", doc, re.S).group(1))

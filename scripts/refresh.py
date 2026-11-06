@@ -1495,7 +1495,7 @@ def health_js() -> str:
 # Fragments that carry element ids or script data: the template must use each exactly once.
 ONCE_PLACEHOLDERS = frozenset({"JOBS_JS", "EMPTY_JS", "ORDER_JS", "STALE_JS", "AS_OF_JS", "HEALTH_JS", "HEALTH_REF",
                                "HEALTH_SUMMARY", "HEALTH_ROWS", "HEALTH_KEY", "CRON", "STATUS_BLOCK", "LOGOS_JS",
-                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS", "JD_URL_JS"})
+                               "VAPID_JS", "PUSH_URL_JS", "CITY_JS", "JD_URL_JS", "ROLES_JS"})
 LOGO_PATH = re.compile(r"/[A-Za-z0-9._~/-]*\.(?:png|ico|svg)(?:\?v=\d{1,4})?")   # a plain icon path, nothing else
 
 
@@ -1544,6 +1544,50 @@ def city_filter(config: Config) -> dict[str, list]:
     return out
 
 
+# Role families: the page sorts every title into exactly one family by the FIRST pattern that matches (so a
+# "Sales Engineer" is sales, a "Data Science Intern" is an internship, a "QA Automation Engineer" is QA and a
+# Deloitte "Consultant | Cloud DevOps" is software). The reader hides whole families on their phone (the
+# hide list lives in that browser only); the public page itself shows everything. Patterns are plain
+# alternations with \b, valid for both Python's re and JavaScript's RegExp. ROLE_VIEW is the chip order.
+ROLE_FAMILIES = (
+    ("intern", "Intern", r"\binterns?\b|internship|trainee|apprentice|graduate|fresher|campus|early career|leadership program"),
+    ("sales", "Sales", r"sales|marketing|marcom|business development|account (manager|executive)|inbound|outbound|revenue|"
+                       r"pre-?sales|growth|advertis|brand|campaign|lead gen"),
+    ("hr", "HR", r"\bhr\b|human resources|recruit|talent|learning (ops|operations|delivery)|people (ops|operations|partner)|"
+                 r"payroll|workforce"),
+    ("finance", "Finance", r"financ|accounting|\baccounts?\b|\btax\b|audit|treasury|payable|receivable|billing|order to cash|"
+                           r"procure to pay|record to report|invoice|collections|reconcil|pricing|budget"),
+    ("data", "Data/AI", r"\bdata\b|analytics|\bai\b|\bml\b|machine learning|deep learning|scientist|\bbi\b|power bi|tableau|"
+                        r"statistic|gen ?ai|\bllm|\bnlp\b|computer vision"),
+    ("qa", "QA", r"\bqa\b|quality|\btest(ing|er)?\b|validation|\bsdet\b|assurance"),
+    ("software", "Software", r"software|develop|engineer|\bengr\b|devops|\bsre\b|cloud|full ?stack|front ?end|back ?end|"
+                             r"\bjava\b|python|\.net\b|mulesoft|platform|programmer|architect|infrastructure|network|security|"
+                             r"cyber|\bit\b|systems?\b|\bsap\b|oracle|salesforce|servicenow|automation|embedded|firmware|"
+                             r"hardware|silicon|verification"),
+    ("analyst", "Analyst", r"analyst|business|consult|strateg|research|product (manager|owner)|\brisk\b|compliance|regulatory"),
+    ("support", "Support", r"support|customer|client|contact cent|help ?desk|service desk|advisor|trust|safety|moderat|"
+                           r"success|\bcare\b"),
+    ("ops", "Ops", r"operations?|\bops\b|program|project|process|supply|logistic|procure|coordinator|scheduler|planner|"
+                   r"delivery|admin|facilities|specialist|associate"),
+)
+ROLE_VIEW = ("software", "data", "analyst", "qa", "ops", "support", "intern", "sales", "hr", "finance", "other")
+ROLE_LABELS = {k: label for k, label, _p in ROLE_FAMILIES} | {"other": "Other"}
+_ROLE_RX = tuple((k, re.compile(p, re.I)) for k, _l, p in ROLE_FAMILIES)
+
+
+def role_of(title: str) -> str:
+    """The family key for a title: the first family whose pattern matches, else 'other'."""
+    for key, rx in _ROLE_RX:
+        if rx.search(title):
+            return key
+    return "other"
+
+
+def role_families() -> dict:
+    """The page's role data: families in match order ([key, label, pattern]) and the chip order."""
+    return {"match": [[k, label, p] for k, label, p in ROLE_FAMILIES], "view": list(ROLE_VIEW)}
+
+
 def render(state: State, template: str, config: Config) -> str:
     for r in state.jobs:
         validate_row(r, config)
@@ -1571,6 +1615,7 @@ def render(state: State, template: str, config: Config) -> str:
         "ORDER_JS": js_json(list(config.companies)),
         "LOGOS_JS": js_json(logo_urls(config)),
         "CITY_JS": js_json(city_filter(config)),           # the location filter's options and their place terms
+        "ROLES_JS": js_json(role_families()),              # the role families the page sorts titles into
         "VAPID_JS": js_json(config.vapid_public_key),      # the key the page subscribes with (push.mjs signs with its pair)
         "PUSH_URL_JS": js_json(config.register_url),       # where a Home Screen web app registers this device
         "JD_URL_JS": js_json(jd_url(config)),              # where the JD sheet fetches a posting's text from
