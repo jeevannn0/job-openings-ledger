@@ -1173,7 +1173,19 @@ class NewSourceHelperTests(unittest.TestCase):
                       '<span class="vh"> — read the job description here</span></button><a class="ap" ', card)
         self.assertEqual(card.count("<a "), 2)                       # the title and the Apply link
         self.assertEqual(card.count("<button"), 3)                   # the dog tag, JD and "+N more"
-        for snippet in ('const jdl=$("#jd"),jdw=$("#jd .term-win"),jdB=$("#jd-b"),jdT=$("#jd-t"),jdM=$("#jd-m"),jdL=$("#jd-l");',
+        for snippet in ('const jdl=$("#jd"),jdw=$("#jd .term-win"),jdB=$("#jd-b"),jdT=$("#jd-t"),jdM=$("#jd-m"),jdK=$("#jd-k"),'
+                        'jdL=$("#jd-l"),jdA=$("#jd-ap"),JOB=new Map(jobs.map(r=>[key(r),r]));',
+                        # The sheet reads like command output: `signal jd --id N`, then a key/value block built from
+                        # the opening's own row (company, location, posted/first seen, closes, experience, skills), every
+                        # value through esc(); the Apply link appears only when the row has an apply URL.
+                        'const jdRow=(k,v)=>`<div><dt>${k}</dt><dd>${v}</dd></div>`,jdOpen=async b=>{const u=b.dataset.u,'
+                        'r0=JOB.get(b.closest(".card").querySelector(".dtag").dataset.k)||[],[,id,,e,d,a,l,,bd,cd,,sb,ap]=r0;',
+                        'jdM.textContent=id?`--id ${id}`:"";jdL.href=u;jdA.hidden=!ap;if(ap)jdA.href=ap;',
+                        'jdK.innerHTML=jdRow("company",esc(b.dataset.c))+jdRow("location",esc(b.dataset.l))',
+                        '+(d?jdRow(sb?"first seen":"posted",`${esc(d)} <span class="age">${a===0?"today":`${a} day${a===1?"":"s"} ago`}</span>`):"")',
+                        '+(cd?jdRow("closes",`${esc(fmtClose(cd))} <span class="age">${k===null?"":k<0?"passed":k===0?"today":`in ${k} d`}</span>`):"")',
+                        '+(bd?jdRow("experience",`${esc(BAND[bd]||"")}${ns?"":` <span class="age">${esc(x)}</span>`}`):"")',
+                        '+(skills.length?jdRow("skills",\'<span class="age" id="jd-sk">matching\\u2026</span>\'):"");',
                         'if(x.startsWith("\\u2022 ")){ul.push(x.slice(2));continue}',
                         'out.push(x.startsWith("## ")?`<h3>${esc(x.slice(3))}</h3>`:`<p>${esc(x)}</p>`)',
                         'jdL.href=u;', 'jdl.showModal();jdw.focus();',
@@ -1185,8 +1197,8 @@ class NewSourceHelperTests(unittest.TestCase):
                         'skMark=h=>{const rx=skRx();if(!rx)return[h,new Set()];const hit=new Set();return[h.split(/(<[^>]+>)/)'
                         '.map(s=>s.startsWith("<")?s:s.replace(rx,(m,a,w)=>{hit.add(w.toLowerCase());return`${a}<mark class="sk">${w}</mark>`}))'
                         '.join(""),hit]};',
-                        'if(skills.length){const miss=skills.filter(s=>!hit.has(s));jdM.innerHTML=`${esc(b.dataset.c)} \\u00b7 ${esc(b.dataset.l)}'
-                        ' \\u00b7 <b class="sk-n">${hit.size} of ${skills.length} skills</b>',
+                        'const sk=$("#jd-sk");if(skills.length&&sk){const miss=skills.filter(s=>!hit.has(s));sk.innerHTML=`<b class="sk-n">'
+                        '${hit.size} of ${skills.length} skills</b>',
                         'out.addEventListener("click",e=>{const b=e.target.closest(".jd");if(b)jdOpen(b)});',
                         'jdl.addEventListener("click",e=>{if(e.target===jdl)jdl.close()});',
                         '$("#jd-x").addEventListener("click",()=>jdl.close());',
@@ -1200,17 +1212,34 @@ class NewSourceHelperTests(unittest.TestCase):
         self.assertEqual(dialog.count("<button"), 1)                 # the close dot
         # The link has no href until the sheet opens (the script sets the posting's URL), so <base target="_blank">
         # applies to it like to every job link and the in-page-anchor rule does not.
-        self.assertIn('<a class="jd-l" id="jd-l" rel="noopener noreferrer">Open the posting on the employer’s site ↗</a>', dialog)
+        # Sheet markup: a terminal window — title bar, a prompt line whose flag is the job ID, the key/value block,
+        # the title, the description, then a status strip holding the two outbound links and a privacy note.
+        self.assertIn('<span id="jd-h">ops@job-signal — job description</span><span class="term-esc" aria-hidden="true">esc</span></div>\n'
+                      '<div class="term-out jd-out"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal jd '
+                      '<span class="flag" id="jd-m"></span></p><dl class="kvs jd-k" id="jd-k"></dl><h2 class="jd-t" id="jd-t"></h2>'
+                      '<div class="jd-b" id="jd-b"></div></div>\n'
+                      '<div class="term-status"><span class="ts-l"><a class="jd-l" id="jd-l" rel="noopener noreferrer">open posting ↗</a>'
+                      '<a class="jd-ap" id="jd-ap" rel="noopener noreferrer" hidden>apply ↗</a></span>'
+                      '<span class="ts-n">fetched live from the employer · nothing is stored</span></div>\n</div></dialog>', doc)
         self.assertNotIn("http", dialog)
+        self.assertEqual(dialog.count("<a "), 2)                     # the posting and its Apply page, nothing else
         style = style_of(doc)
         self.assertIn(".jd{padding:0;border:0;background:none;font:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:700;"
                       'color:hsl(var(--signal));cursor:pointer}.jd:after{content:"";position:absolute;inset:-8px -4px}', style)
-        self.assertIn(".jd-out{padding:22px 24px 40px;font-family:var(--font-sans);font-size:13px;line-height:1.65;", style)
-        self.assertIn(".jd-b{max-width:68ch}", style)
-        # Phones: larger type, more air between blocks, and room above the home indicator.
+        # Mono throughout, like the rest of the terminal: a bold title over a rule, "## " section heads in cyan,
+        # dash bullets, body copy a step dimmer than the values above it, cyan pill links in the strip.
+        self.assertIn(".jd-out{padding:18px 22px 28px}.jd-k{margin:0 0 18px}", style)
+        self.assertIn(".jd-t{margin:0 0 4px;padding:16px 0 0;border-top:1px solid hsl(var(--t-line));font:700 17px/1.4 var(--font-mono);", style)
+        self.assertIn(".jd-b{max-width:76ch;margin-top:14px;color:hsl(var(--t-fg2))}", style)
+        self.assertIn('.jd-b li:before{content:"-";position:absolute;left:.3em;color:hsl(var(--t-dimmer))}', style)
+        self.assertIn('.jd-b h3:before{content:"## ";color:hsl(var(--t-dimmer))}', style)
+        self.assertIn(".jd-l,.jd-ap{display:inline-flex;align-items:center;min-height:30px;padding:4px 12px;border:1px solid hsl(189 43% 27%);"
+                      "border-radius:5px;", style)
+        # Phones: full-width text, a slightly smaller title; the strip (outside the scroll area) keeps the links
+        # reachable and pads for the home indicator.
         _base, blocks = media_blocks(style)
-        self.assertIn(".term-out.jd-out{padding:22px 20px calc(44px + env(safe-area-inset-bottom));font-size:14px;line-height:1.7}"
-                      ".jd-t{margin-bottom:24px;font-size:19px}", blocks[SHEET_MQ])     # outranks the sheet's .term-out rule
+        self.assertIn(".term-out.jd-out{padding:16px 16px 24px}.jd-t{font-size:16px}.jd-b{max-width:none}", blocks[SHEET_MQ])
+        self.assertIn(".term-status{padding-bottom:calc(8px + env(safe-area-inset-bottom))}", blocks[SHEET_MQ])
 
     def test_kerala_cities_are_the_region_terms(self):
         # The region's term list is built from the city table, "kerala" itself first, so the filter and the crawl
@@ -4567,7 +4596,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotIn("h-key", page_outside_dialog(doc))
         self.assertNotIn('id="key"', doc)
         self.assertLess(dialog.index('<ol class="ch-list"'), dialog.index('<dl class="h-key">'))
-        card = dialog[dialog.index("signal sources --help</p>"):]
+        card = dialog[dialog.index('signal sources <span class="flag">--help</span></p>'):]
         card = card[:card.index("</div>", card.index('<p class="h-note">'))]
         self.assertIn('<h3 class="vh">What the freshness statuses mean</h3><dl class="h-key">', card)
         self.assertIn('<p class="h-note">Fresh = checked within 6h 30m. Scheduled times are approximate.</p>', card)
@@ -4649,9 +4678,15 @@ class SourceHealthTests(unittest.TestCase):
         self.assertTrue(fonts["sans"].endswith("sans-serif"))
         self.assertTrue(fonts["mono"].startswith('"JetBrains Mono",ui-monospace') and fonts["mono"].endswith("monospace"))
         self.assertIn('font-feature-settings:"liga" 0,"calt" 0,"zero","ss01"', style)
-        # Square corners everywhere except the round status LED and the terminal's lights (the dog tag is an SVG).
+        # Square corners on the page itself (the dog tag is an SVG); the only round things are the status LED and the
+        # terminal's lights. The terminal windows (Requests, JD sheet) are the one rounded surface: a 10px window
+        # that goes edge-to-edge (0) on phones, 7px prompt boxes and source table, 5px buttons, 3px key caps.
         self.assertIn("*,:before,:after{box-sizing:border-box;border-radius:0}", style)
-        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style), ["0", "50%", "50%"])
+        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style),
+                         ["0", "50%", "10px", "50%", "3px", "5px", "7px", "7px 7px 0 0", "0 0 7px 7px", "5px", "0", "7px"])
+        base_rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
+        for sel in (".panel", ".card", ".ob,.ci,.chip", ".chamfer-btn", ".qbox", ".av", ".none", ".side"):
+            self.assertNotIn("border-radius", base_rules[tuple(s.strip() for s in sel.split(","))], sel)
         self.assertIn(".led{display:inline-block;flex:none;width:6px;height:6px;border-radius:50%;", style)
         self.assertIn(".dot{position:relative;display:block;flex:none;width:12px;height:12px;padding:0;border:0;"
                       "border-radius:50%;", style)                       # the terminal's traffic lights
@@ -4705,21 +4740,25 @@ class SourceHealthTests(unittest.TestCase):
         prompt = '<p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> '
         order = [prompt + "signal status</p>", '<dl class="kvs">', "<dt>Last refresh</dt>", "<dt>Result</dt>",
                  "<dt>Openings</dt>", "<dt>Freshness</dt>", "<dt>Next run</dt>", 'id="h-next"', 'id="h-late"',
-                 prompt + "signal sources --verbose</p>", '<section class="health" id="health"', '<p class="hs">',
-                 '<p class="h-scope">', '<div class="ch-head"',
-                 '<ol class="ch-list"', prompt + "signal sources --help</p>", '<dl class="h-key">',
+                 prompt + 'signal sources <span class="flag">--verbose</span></p>', '<section class="health" id="health"',
+                 '<p class="hs">', '<p class="h-scope">', '<div class="ch-head"',
+                 '<ol class="ch-list"', prompt + 'signal sources <span class="flag">--help</span></p>', '<dl class="h-key">',
                  '<p class="h-note">', prompt + "signal schedule</p>",
                  '<p class="kv">every 3 h on the hour IST · armed 15 min ahead by an external clock · cron '
                  '20,35 0,3,6,9,12,15,18,21 * * * UTC as fallback · last 6 pulls kept per source</p>',
                  prompt + "signal notify</p>", 'id="pn-state"', 'id="pn-on"', 'id="pn-off"',
                  prompt + "signal me</p>", 'id="me-marks"', 'id="me-sk"', 'id="me-skills"', 'id="me-save"', 'id="me-export"',
-                 prompt + '<span class="caret" aria-hidden="true"></span></p>']
+                 prompt + '<span class="caret" aria-hidden="true"></span></p>',
+                 # A status strip closes the window, like the title bar opens it: connector count and cadence.
+                 '<div class="term-status"><span>19 connectors · first-party portals</span>'
+                 '<span class="ts-n">8 refreshes a day · on the hour IST</span></div></div></dialog>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb"(?: id="\w+")? style="--d:(\d)"', dialog), list("0123456"))
         self.assertIn('<div class="tb" style="--d:0">' + prompt + 'signal status</p>\n<dl class="kvs">', dialog)
         self.assertLess(doc.index('<dialog id="api"'), doc.index('<dl class="kvs">'))
         self.assertLess(doc.index("</dl></div>", doc.index('<dl class="kvs">')),
-                        doc.index(prompt + "signal sources --verbose</p>"))
+                        doc.index(prompt + 'signal sources <span class="flag">--verbose</span></p>'))
+        self.assertEqual(doc.count('class="flag"'), 3)                  # --verbose, --help and the JD sheet's --id
         self.assertEqual(doc.count('<dl class="kvs">'), 1)
         for frag in ('id="health"', 'id="h-next"', 'id="h-late"', 'id="st-at"', 'id="st-age"', 'class="h-key"',
                      'class="kvs"'):
@@ -4752,17 +4791,46 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn("body:has(dialog[open]){overflow:hidden}", base)
         for decl in ("position:fixed", "margin:auto", "background:transparent"):
             self.assertIn(decl, rules[("dialog.term",)], decl)
-        for decl in ("display:flex;flex-direction:column", "width:min(920px,94vw)", "max-height:86vh",
-                     "border:1px solid hsl(var(--hull-2))", "background:hsl(264 28% 5%/.98)",
-                     "box-shadow:var(--shadow-dialog)"):
+        # The window is a dark navy terminal in its own palette (--t-* tokens on the dialog), independent of the
+        # page theme: the page's tokens are remapped inside it so every nested element (buttons, badges, pull
+        # lists) takes the terminal colours without its own rule. Mono type throughout; no yellow anywhere.
+        term = rules[("dialog.term",)]
+        for decl in ("--t-bg:218 33% 6%", "--t-bar:221 33% 11%", "--t-line:218 27% 16%", "--t-fg:217 29% 88%",
+                     "--t-dim:214 12% 50%", "--t-cyan:184 66% 60%", "--t-green:125 69% 70%", "--t-red:4 100% 72%",
+                     "--t-mag:269 100% 83%", "--t-blue:208 100% 74%", "--t-orange:27 92% 66%",
+                     "--signal:var(--t-cyan)", "--steel:var(--t-fg)", "--steel-muted:var(--t-dim)", "--hull:var(--t-line)",
+                     "--ok:var(--t-green)", "--bad:var(--t-red)", "--info:var(--t-blue)", "--warn:var(--t-orange)",
+                     "color:hsl(var(--t-fg))", "font:400 13px/1.6 var(--font-mono)"):
+            self.assertIn(decl, term, decl)
+        for decl in ("display:flex;flex-direction:column", "width:min(920px,94vw)", "max-height:86vh", "overflow:hidden",
+                     "border:1px solid hsl(var(--t-line))", "border-radius:10px", "background:hsl(var(--t-bg))"):
             self.assertIn(decl, rules[(".term-win",)], decl)
+        self.assertNotIn("data-theme=light] .term", style)              # a terminal stays dark in light mode
         self.assertIn("dialog.term[open]{display:flex;animation:dialog-pop-in .2s", base)
-        for decl in ("height:36px", "background:var(--btn-grad)", "border-bottom:1px solid hsl(var(--hull))"):
+        for decl in ("display:flex", "height:40px", "background:hsl(var(--t-bar))", "border-bottom:1px solid hsl(var(--t-line))"):
             self.assertIn(decl, rules[(".term-bar",)], decl)
+        # Traffic lights: red close, lavender, green (no yellow in this theme); the title sits beside them, dim.
         self.assertEqual((rules[(".dot-x",)], rules[(".dot-m",)], rules[(".dot-z",)]),
-                         ("--dc:var(--bad);cursor:pointer", "--dc:var(--warn)", "--dc:var(--ok)"))
-        for decl in ("overflow:auto", "padding:14px 16px", "font-size:12px", "line-height:1.6"):
+                         ("--dc:3 100% 67%;cursor:pointer", "--dc:var(--t-mag)", "--dc:129 67% 47%"))
+        self.assertIn("flex:1 1 auto;min-width:0;margin-left:6px;overflow:hidden;font-size:12px", rules[("#api-h", "#jd-h")])
+        self.assertIn("border-radius:3px", rules[("kbd", ".term-esc")])
+        for decl in ("overflow:auto", "padding:18px 20px 24px", "font-size:13px", "line-height:1.6"):
             self.assertIn(decl, rules[(".term-out",)], decl)
+        # Prompt: green user, dim "~ %", plain command, magenta flags; the key/value rows use dot leaders from a
+        # dim lowercase key to a bold value.
+        self.assertEqual(rules[(".pu",)], "color:hsl(var(--t-green))")
+        self.assertEqual(rules[(".pp",)], "color:hsl(var(--t-dim))")
+        self.assertEqual(rules[(".flag",)], "color:hsl(var(--t-mag))")
+        self.assertIn("text-transform:lowercase", rules[(".kvs dt",)])
+        self.assertEqual(rules[(".kvs dt:after",)], 'content:" ..........................................";color:hsl(var(--t-dimmer))')
+        self.assertIn("font-weight:700;color:hsl(var(--t-fg))", rules[(".kvs dd",)])
+        # Buttons inside the terminal are cyan-outlined pills in sentence case; inputs are prompt boxes.
+        for decl in ("border-radius:5px", "color:hsl(var(--t-cyan))", "text-transform:none", "letter-spacing:0"):
+            self.assertIn(decl, rules[(".term-out .ob",)], decl)
+        for decl in ("border-radius:7px", "background:hsl(var(--t-bg2))", "caret-color:hsl(var(--t-cyan))"):
+            self.assertIn(decl, rules[(".term-out .me-in",)], decl)
+        self.assertIn("border-top:1px solid hsl(var(--t-line))", rules[(".term-status",)])
+        self.assertIn("text-overflow:ellipsis;white-space:nowrap", rules[(".term-status>span",)])
         self.assertFalse([s for s, _b in css_rules(re.sub(r"@media[^{]*\{", "", style))
                           if any(x in (".pre", ".ps", ".term .pre") or x.startswith(".pre ") for x in s)])
         self.assertIn("grid-template-columns:8rem minmax(0,1fr)", rules[(".h-key div",)])
@@ -4772,10 +4840,10 @@ class SourceHealthTests(unittest.TestCase):
         sheet_rules = dict((tuple(s), b) for s, b in css_rules(sheet))
         for decl in ("inset:0", "width:100vw", "height:100dvh", "max-height:none", "margin:0"):
             self.assertIn(decl, sheet_rules[("dialog.term",)], decl)
-        self.assertIn("box-shadow:none", sheet_rules[(".term-win",)])
+        self.assertIn("border:0;border-radius:0;box-shadow:none", sheet_rules[(".term-win",)])
         self.assertIn("position:sticky;top:0", sheet_rules[(".term-bar",)])
-        self.assertIn("grid-template-columns:auto minmax(0,1fr) auto", sheet_rules[(".term-bar",)])  # title fits at 320
-        self.assertIn("font-size:11px;line-height:1.55", sheet_rules[(".term-out",)])
+        self.assertIn("font-size:12px;line-height:1.55", sheet_rules[(".term-out",)])
+        self.assertIn(".ts-n{display:none}", sheet)                      # the strip keeps one line on a phone
         self.assertIn(".h-key div{grid-template-columns:minmax(0,1fr);", sheet)
         self.assertIn("dialog.term[open]{animation:sheet-up .2s", sheet)
         self.assertIn(".hdr-r{display:none}", sheet)
@@ -4800,12 +4868,12 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(doc.count('id="h-late"'), 1)
         for gone in ("hs-a", "hs-n", 'class="hc"', ".hc", "h-rw", "hs-w", "hs-c", "hs-x", "h-roll", "h-rl"):
             self.assertNotIn(gone, doc, gone)
-        # Status block: a two-column key/value grid on desktop, one column on phones.
-        self.assertEqual(rules[(".kvs",)], "display:grid;grid-template-columns:7.5rem minmax(0,1fr);gap:4px 12px;"
-                                           "margin:0;font-size:12px;line-height:1.6")
+        # Status block: a two-column key/value grid on desktop (dot leaders fill the fixed key column), one column
+        # on phones, where the leaders go.
+        self.assertEqual(rules[(".kvs",)], "display:grid;grid-template-columns:12rem minmax(0,1fr);gap:3px 12px;margin:0")
         self.assertEqual(rules[(".kvs div",)], "display:contents")
         self.assertIn("overflow-wrap:anywhere", rules[(".kvs dd",)])
-        self.assertIn(".kvs{grid-template-columns:minmax(0,1fr);gap:0}.kvs dt{margin-top:6px}", sheet)
+        self.assertIn(".kvs{grid-template-columns:minmax(0,1fr);gap:0}.kvs dt{margin-top:8px}.kvs dt:after{content:\"\"}", sheet)
 
     def test_compact_breakpoint_is_shared_and_selects_stay_visible(self):
         doc = R.render(self.state, self.template, self.config)
@@ -5833,9 +5901,11 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(script.count("Authorization"), 1)                            # the code travels only as this header
         self.assertNotIn("k9sync", doc.replace(script, ""))                           # the page itself carries no code
         self.assertIn("#me-sync[data-s=on]{color:hsl(var(--ok))}#me-sync{overflow-wrap:anywhere}", style_of(doc))
-        self.assertIn(".me-in{flex:1 1 180px;min-width:0;cursor:text;letter-spacing:0;text-transform:none}.me-in::placeholder{color:hsl(var(--steel-muted))}"
-                      "mark.sk{background:hsl(var(--signal)/.18);color:hsl(var(--signal));padding:0 2px;font-weight:600}.sk-n{color:hsl(var(--ok))}"
-                      ".sk-m{color:hsl(2 88% 57%)}", style_of(doc))
+        self.assertIn(".term-out .me-in{flex:1 1 180px;min-width:0;padding:4px 10px;border:1px solid hsl(var(--t-line));border-radius:7px;"
+                      "background:hsl(var(--t-bg2));color:hsl(var(--t-fg));font-size:13px;letter-spacing:0;text-transform:none;cursor:text;"
+                      "caret-color:hsl(var(--t-cyan))}", style_of(doc))
+        self.assertIn(".me-in::placeholder{color:hsl(var(--t-dimmer))}mark.sk{background:hsl(var(--t-cyan)/.16);color:hsl(var(--t-cyan));"
+                      "padding:0 2px;font-weight:600}.sk-n{color:hsl(var(--ok))}.sk-m{color:hsl(var(--bad))}", style_of(doc))
 
     def test_feed_cards_sorting_and_company_chips(self):
         doc = R.render(self.state, self.template, self.config)
