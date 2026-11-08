@@ -1803,9 +1803,9 @@ class PushTests(unittest.TestCase):
                         'await register(await subscribe())',
                         'if(s){try{await send("DELETE",s)}catch(e){}await s.unsubscribe()}'):
             self.assertIn(snippet, script, snippet)
-        # Three network calls on the whole page: this registration, the marks sync and the JD sheet's on-demand
-        # description fetch, all to the same Worker.
-        self.assertEqual(script.count("fetch("), 3)
+        # Four network calls on the whole page: this registration, the marks sync and the JD sheet's on-demand
+        # description fetch (all to the same Worker), and the site's own alerts.json for the newer-refresh check.
+        self.assertEqual(script.count("fetch("), 4)
         self.assertIn('fetch(JD_URL+"?u="+encodeURIComponent(u),{mode:"cors"})', script)
         self.assertNotIn("serviceWorker", self.doc)                          # declarative push: no worker
         style = style_of(self.doc)
@@ -4469,8 +4469,12 @@ class SourceHealthTests(unittest.TestCase):
         for needle in ("zzdetailsentinel", "KeyError", "876543", "999991", "999992", "999993",
                        "2026-10-29T03:17", "29 Oct 03:17", "2026-10-28T04:19", "28 Oct 04:19",
                        "2026-10-30T09:11", "30 Oct 09:11", "removal", "screened", "listing_total",
-                       "stale_since", "last_discovery", "excluded_public", "EXCLUDED_PUBLIC_IDS_JSON", "alerts.json"):
+                       "stale_since", "last_discovery", "excluded_public", "EXCLUDED_PUBLIC_IDS_JSON"):
             self.assertNotIn(needle, doc, needle)
+        # The published alert file is public and the page reads it (newer-refresh check); it is named once, as a
+        # relative fetch, and nothing of its content is rendered server-side.
+        self.assertEqual(doc.count("alerts.json"), 1)
+        self.assertIn('fetch("alerts.json",{cache:"no-store"})', main_script(doc))
         self.assertEqual([f.name for f in dataclasses.fields(R.SourceHealth)],
                          ["company", "state", "published", "attempt_at", "attempt", "success_at", "age"])
         self.assertEqual(set(json.loads(R.health_js())),
@@ -4670,11 +4674,11 @@ class SourceHealthTests(unittest.TestCase):
                       "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\") 0 0/160px 160px;", style)
         self.assertNotIn("http", style.replace("http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg", ""))
         self.assertNotRegex(doc, r"(?i)<iframe\b|<script\s+src|XMLHttpRequest|setInterval|requestAnimationFrame|<table")
-        # The page's only network calls go to the ledger's own Worker (config push.register_url, an allowlisted host):
-        # a Home Screen web app registering (or removing) this device's push subscription, the sync route carrying
-        # the reader's marks between their paired devices, and the JD sheet asking for one posting's description.
-        # Nothing else is fetched.
-        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", "SYNC_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
+        # The page's network calls: the site's own alerts.json (same origin, the newer-refresh check) and the
+        # ledger's own Worker (config push.register_url, an allowlisted host) for a Home Screen web app registering
+        # (or removing) this device's push subscription, the sync route carrying the reader's marks between their
+        # paired devices, and the JD sheet asking for one posting's description. Nothing else is fetched.
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ['"alerts.json"', "PUSH_URL", "SYNC_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
         # The only <link>s name this site's own web app manifest and Home Screen icon by relative path (the page
         # still names no host); nothing else is linked, preloaded or prefetched.
         self.assertEqual(re.findall(r"<link\b[^>]*>", doc), ['<link rel="manifest" href="manifest.webmanifest">',
@@ -5116,6 +5120,23 @@ class SourceHealthTests(unittest.TestCase):
         self.assertNotIn(".hs-w", script)
         # Re-aging runs before the search-panel LED and the cards read HS/STALE.
         self.assertLess(script.index("H.grace_ms"), script.index("const HS={}"))
+        # Re-aging is a function, run at load and again every time the page comes back into view (a Home Screen
+        # web app keeps one document open for hours): ages, stale badges, the worst-state LED and the late flag
+        # all follow the clock. The same return also asks the site (alerts.json, same origin, no cache, at most
+        # once a minute) whether a newer refresh is published than the one this page was rendered from, and if
+        # so shows the reload button in the feed toolbar; nothing reloads on its own.
+        for snippet in ("const reage=()=>{const sec=$(\"#health\"),ref=Date.parse(sec.dataset.ref||\"\"),now=Date.now();if(!(now>ref))return;",
+                        '$("#src-led").dataset.s=ws;', "H.late};reage();",
+                        'let nwAt=0;const newer=async()=>{const sa=$("#st-at");if(!sa||Date.now()-nwAt<6e4)return;nwAt=Date.now();'
+                        'try{const r=await fetch("alerts.json",{cache:"no-store"});if(!r.ok)return;const d=await r.json();'
+                        'if(d&&typeof d.checked_at==="string"&&Date.parse(d.checked_at)>Date.parse(sa.dateTime))$("#newer").hidden=false}catch(e){}};'
+                        '$("#newer").addEventListener("click",()=>location.reload());',
+                        'render();syncPull();newer();'):
+            self.assertIn(snippet, script, snippet)
+        self.assertEqual(script.count("location.reload()"), 1)
+        self.assertIn('<button class="ob newer" id="newer" type="button" hidden><span class="led" aria-hidden="true"></span>'
+                      'Newer refresh published · reload</button></div>\n<nav class="cidx"', doc)
+        self.assertIn(".newer{border-color:hsl(var(--signal)/.7);color:hsl(var(--signal))}.newer .led{color:hsl(var(--signal))}", style_of(doc))
         self.assertNotIn(".tile", doc)
         self.assertEqual(h["late"], " · update not yet published, retrying")
         self.assertEqual(h["stale"], "stale since ")
@@ -5734,8 +5755,9 @@ class SourceHealthTests(unittest.TestCase):
                         'out.addEventListener("click",e=>{const b=e.target.closest(".dtag");if(b){pend=null;mark(b.dataset.k,'
                         'NEXT[(live(b.dataset.k)||{s:""}).s]);return}const a=e.target.closest(".job,.ap");pend=a?a.closest(".card")'
                         '.querySelector(".dtag").dataset.k:null;away=0});',
-                        # Coming back to the page also asks the sync route whether the other device changed anything.
-                        'document.addEventListener("visibilitychange",()=>{if(document.hidden)gone();else{back();syncPull()}});'
+                        # Coming back to the page also asks the sync route whether the other device changed anything,
+                        # re-ages every time on the page and asks the site whether a newer refresh is published.
+                        'document.addEventListener("visibilitychange",()=>{if(document.hidden)gone();else{back();syncPull();reage();newer()}});'
                         'addEventListener("blur",gone);addEventListener("focus",back);'):
             self.assertIn(snippet, script, snippet)
         self.assertEqual(script.count("k9marks"), 2)                      # read and write, nowhere else
@@ -5866,7 +5888,7 @@ class SourceHealthTests(unittest.TestCase):
                       '<div class="tb" style="--d:6">', dialog)
         self.assertNotIn(' hidden><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal me', dialog)
         self.assertEqual(doc.count("<input"), 3)                                     # the search box, the skill list, the code
-        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ["PUSH_URL", "SYNC_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
+        self.assertEqual(re.findall(r"\bfetch\(([^,)]*)", doc), ['"alerts.json"', "PUSH_URL", "SYNC_URL", 'JD_URL+"?u="+encodeURIComponent(u'])
         for snippet in (# Skills are stored as {v: [...], u: epoch ms} (a bare array still reads) so paired devices can tell
                         # which copy is newer; saving stamps it unless the sync is writing what it just received.
                         'let skills=[],skillsU=0;try{const s=JSON.parse(localStorage.getItem("k9skills")||"[]"),v=Array.isArray(s)?s:s.v,'
@@ -5990,10 +6012,15 @@ class SourceHealthTests(unittest.TestCase):
             self.assertNotIn(gone, script, gone)
         # The title and the Apply link are the card's only links.
         self.assertEqual(script[script.index("const card="):script.index("function render()")].count("<a "), 2)
-        # Sorting: newest = age then configured company order; closing soon = known deadlines first.
-        self.assertIn("byNew=(x,y)=>x[5]-y[5]||oi(x[0])-oi(y[0]),byClose=(x,y)=>{const a=daysToClose(x[9]),"
+        # Sorting: newest = the day the ledger first listed the opening (row 10), then the posting's own age, then
+        # the configured company order; closing soon = known deadlines first. The first key is what makes the
+        # feed agree with the terminal: a refresh that reports "+3 new" puts those three at the top even when the
+        # employer dated them days ago (8 Nov 2026: three Siemens roles posted 29 Oct surfaced at cards 170-171,
+        # and the page looked unchanged).
+        self.assertIn("byNew=(x,y)=>x[10]-y[10]||x[5]-y[5]||oi(x[0])-oi(y[0]),byClose=(x,y)=>{const a=daysToClose(x[9]),"
                       "b=daysToClose(y[9]);return a===b?byNew(x,y):a===null?1:b===null?-1:a-b}", script)
         self.assertIn('jobs.filter(match).sort(sortBy==="close"?byClose:byNew)', script)
+        self.assertIn('<span id="sort-l">· newly listed first</span></h2>', doc)
         # Toolbar: a "New today" filter toggle ahead of the sort pair. "New" means first seen by the ledger today
         # (row 10 == 0), the same thing the terminal's "+N new" pull lines and "N new today" count mean; the
         # posting's own date stays on the "Posted within" select, whose chip reads "Posted today" so the two
@@ -6050,7 +6077,7 @@ class SourceHealthTests(unittest.TestCase):
             self.assertEqual(r[10], max(0, (self.state.as_of - first).days), r[1])
         shown = [r for r in rows if r[5] <= self.config.max_age_days]
         self.assertEqual(int(re.search(r'<dd id="today">(\d+)</dd>', doc).group(1)), sum(1 for r in shown if r[10] == 0))
-        self.assertIn('$("#sort-l").textContent=sortBy==="close"?"· closing soon":"· newest first"', script)
+        self.assertIn('$("#sort-l").textContent=sortBy==="close"?"· closing soon":"· newly listed first"', script)
         # Company chips: "All companies" plus one per configured company, kept in sync with #company, which is a
         # non-visible state holder placed just before the phone Filters toggle and the four visible filters.
         self.assertIn('<select id="company" class="vh" aria-hidden="true" tabindex="-1"><option value="">All '
