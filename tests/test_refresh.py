@@ -1843,12 +1843,30 @@ class PushTests(unittest.TestCase):
         self.assertIn("extra.png: file not in allowlist", problems)
 
     def test_sender_and_test_workflow_are_the_only_additions(self):
-        for rel in ("scripts/push.mjs", "scripts/push.test.mjs", ".github/workflows/push-test.yml", "manifest.webmanifest"):
+        for rel in ("scripts/push.mjs", "scripts/push.test.mjs", "scripts/island.mjs", "scripts/island.test.mjs",
+                    ".github/workflows/push-test.yml", "manifest.webmanifest"):
             self.assertIn(rel, R.ALLOWED_FILES, rel)
             self.assertEqual(R.find_forbidden(R.read_text(os.path.join(ROOT, rel))), [], rel)
         sender = R.read_text(os.path.join(ROOT, "scripts", "push.mjs"))
         self.assertRegex(sender, r'(?m)^import \{[^}]*\} from "node:crypto";$')
         self.assertNotRegex(sender, r'from "(?!node:)')                        # standard library only
+        # The Live Activity bridge (Dynamic Island) is the same shape: standard library only, one third party
+        # (PushWard's API, which the reader opts into with a key), the key never logged, silent cards, and a run
+        # without the key is a no-op so the public ledger does not depend on it.
+        island = R.read_text(os.path.join(ROOT, "scripts", "island.mjs"))
+        self.assertNotRegex(island, r'from "(?!node:)')
+        self.assertEqual(re.findall(r"https://[a-z0-9.-]+", island), ["https://example.github.io", "https://example.github.io",
+                                                                        "https://api.pushward.app"])
+        self.assertIn('if (!key) {\n    log("island: no PushWard key (PUSHWARD_KEY secret); the Live Activity is off, nothing to do");\n'
+                      "    return 0;\n  }", island)
+        self.assertEqual(island.count("${key}"), 1)                              # the key is used once: as the bearer token
+        self.assertIn("Authorization: `Bearer ${key}`", island)
+        for line in re.findall(r"(?m)^[^\n]*\blog\([^\n]*$", island):              # what the run prints never names the key
+            self.assertNotRegex(line, r"\$\{[^}]*\bkey\b|\bkey\b[^\n]*\)$", line)
+        self.assertNotIn("sound", island.split("export function contentFor")[1].split("\n}")[0])
+        self.assertIn('export const SLUG = "k9-openings";', island)
+        self.assertIn('template: "log",', island)
+        self.assertIn('if (result.code === "quota.exceeded") {', island)      # the free tier running out is not a failure
         self.assertIn("web_push:8030", sender.replace(" ", ""))                 # the declarative format
         self.assertIn("if (status === 404 || status === 410) return { status, outcome: \"expired\" };", sender)
         self.assertNotRegex(sender, r"console\.log\([^\n]*(endpoint|VAPID_PRIVATE_KEY|PUSH_STORE_KEY)[^\n]*\)")
@@ -2388,18 +2406,29 @@ class PrivateExclusionTests(unittest.TestCase):
 
     def test_workflow_passes_secret_only_to_refresh_step(self):
         text = R.read_text(os.path.join(ROOT, ".github", "workflows", "refresh.yml"))
-        self.assertEqual(text.count("secrets."), 3)
+        self.assertEqual(text.count("secrets."), 4)
         step = re.search(r"- name: Refresh public sources\n(.*?)(?=\n      - name:)", text, re.S).group(1)
         self.assertIn("EXCLUDED_PUBLIC_IDS_JSON: ${{ secrets.EXCLUDED_PUBLIC_IDS_JSON }}", step)
         self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*EXCLUDED_PUBLIC_IDS_JSON")
         # The two push secrets reach only the notify job's send step, as environment, never a run script.
         notify = re.search(r"^  notify:\n(.*)\Z", text, re.S | re.M).group(1)
-        send = re.search(r"- name: Send the phone notification\n(.*)\Z", notify, re.S).group(1)
+        send = re.search(r"- name: Send the phone notification\n(.*?)(?=\n      - name:)", notify, re.S).group(1)
         self.assertIn("VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}", send)
         self.assertIn("PUSH_STORE_KEY: ${{ secrets.PUSH_STORE_KEY }}", send)
-        self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*(VAPID_PRIVATE_KEY|PUSH_STORE_KEY)")
+        self.assertNotRegex(text, r"(echo|printf|cat)[^\n]*(VAPID_PRIVATE_KEY|PUSH_STORE_KEY|PUSHWARD_KEY)")
         self.assertEqual(text.count("secrets.VAPID_PRIVATE_KEY") + text.count("secrets.PUSH_STORE_KEY"), 2)
         self.assertNotIn("PUSH_SUBSCRIPTIONS", text)                 # the registry replaced the hand-pasted secret
+        # The Live Activity (Dynamic Island) step is the notify job's last: the same alert payload, the PushWard key
+        # as environment only, and it runs even when the notification step failed, since the two are independent.
+        island = re.search(r"- name: Update the Dynamic Island\n(.*)\Z", notify, re.S).group(1)
+        self.assertIn("if: ${{ !cancelled() }}", island)
+        self.assertIn("PUSHWARD_KEY: ${{ secrets.PUSHWARD_KEY }}", island)
+        self.assertIn("ALERT: ${{ needs.refresh.outputs.alert }}", island)
+        self.assertIn('run: node scripts/island.mjs --alert-env ALERT --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/'
+                      '${GITHUB_REPOSITORY#*/}/"', island)
+        self.assertEqual(text.count("secrets.PUSHWARD_KEY"), 1)
+        self.assertNotIn("PUSHWARD_KEY", text.replace(island, ""))
+        self.assertEqual(text.count("run: node --test scripts/push.test.mjs scripts/island.test.mjs"), 2)   # both producers
 
 
 class DryRunTests(unittest.TestCase):

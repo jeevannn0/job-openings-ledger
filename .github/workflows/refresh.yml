@@ -91,7 +91,7 @@ jobs:
         run: python3 -m unittest discover -s tests -v
 
       - name: Sender tests
-        run: node --test scripts/push.test.mjs
+        run: node --test scripts/push.test.mjs scripts/island.test.mjs
 
       - name: Verify index.html matches state
         run: python3 scripts/refresh.py check   # fails loudly if index.html was edited outside the state
@@ -185,7 +185,7 @@ jobs:
         run: python3 -m unittest discover -s tests -v
 
       - name: Sender tests
-        run: node --test scripts/push.test.mjs
+        run: node --test scripts/push.test.mjs scripts/island.test.mjs
 
       - name: Verify index.html matches state
         run: python3 scripts/refresh.py check
@@ -275,3 +275,13 @@ jobs:
           PUSH_STORE_KEY: ${{ secrets.PUSH_STORE_KEY }}
           ALERT: ${{ needs.refresh.outputs.alert }}
         run: node scripts/push.mjs --alert-env ALERT --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+
+      - name: Update the Dynamic Island
+        # The Live Activity on the reader's iPhone (Lock Screen card and Dynamic Island), drawn by PushWard from
+        # the same alert payload: scripts/island.mjs. Independent of the notification above, so it still runs
+        # when that step failed; without the PUSHWARD_KEY secret the script says so and does nothing.
+        if: ${{ !cancelled() }}
+        env:
+          PUSHWARD_KEY: ${{ secrets.PUSHWARD_KEY }}
+          ALERT: ${{ needs.refresh.outputs.alert }}
+        run: node scripts/island.mjs --alert-env ALERT --ledger-url "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"

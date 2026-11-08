@@ -465,6 +465,8 @@ ALLOWED_FILES = frozenset({
     "index.html",
     "manifest.webmanifest",
     "config/public_sources.json",
+    "scripts/island.mjs",
+    "scripts/island.test.mjs",
     "scripts/push.mjs",
     "scripts/push.test.mjs",
     "scripts/refresh.py",
