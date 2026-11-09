@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "as_of": "2026-11-09",
-  "checked_at": "2026-11-09T09:00+05:30",
+  "checked_at": "2026-11-09T12:00+05:30",
   "companies": {
     "Siemens": {
       "status": "ok",
       "detail": "liveness 19/20",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": null,
       "last_discovery_attempt": "2026-11-08T18:00+05:30",
@@ -84,14 +84,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 21,
-          "added": 3,
-          "removed": 1,
-          "took": 233
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 21,
@@ -130,16 +122,24 @@
           "added": 0,
           "removed": 0,
           "took": 95
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 20,
+          "added": 0,
+          "removed": 0,
+          "took": 90
         }
       ]
     },
     "JPMorganChase": {
       "status": "ok",
-      "detail": "listing 141",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 137",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 141,
+      "listing_total": 137,
       "last_discovery_attempt": null,
       "screened": {
         "210715495": "2026-11-03#e76288b93a35",
@@ -167,6 +167,7 @@
         "210784079": "2026-11-04#c1a90e4fd280",
         "210786065": "2026-10-31#f4190ad4716d",
         "210787030": "2026-10-31#fd72a055a5f2",
+        "210787754": "2026-11-09#1c745eaaa847",
         "210787801": "2026-11-04#658709aa09b3",
         "210788244": "2026-10-31#f73c48e333fe",
         "210788647": "2026-11-05#72f94a5afbd7",
@@ -289,18 +290,11 @@
         "210806222": "2026-11-03#9b1025530129",
         "210806676": "2026-11-04#bf7476cfa6ab",
         "210806725": "2026-11-06#2165068ca33a",
-        "210807072": "2026-11-05#0a2d8b33422e"
+        "210807072": "2026-11-05#0a2d8b33422e",
+        "210807403": "2026-11-09#26c51a1b60d1"
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 25,
-          "added": 0,
-          "removed": 0,
-          "took": 48
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -340,16 +334,24 @@
           "added": 0,
           "removed": 0,
           "took": 45
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 24,
+          "added": 1,
+          "removed": 1,
+          "took": 52
         }
       ]
     },
     "GE HealthCare": {
       "status": "ok",
-      "detail": "listing 1048",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 1052",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 1048,
+      "listing_total": 1052,
       "last_discovery_attempt": null,
       "screened": {
         "R4042035": "2026-11-01#9c3def9446fb",
@@ -514,6 +516,8 @@
         "R4048235": "2026-11-03#6b062dac188f",
         "R4048237": "2026-11-03#fffbac43b998",
         "R4048238": "2026-11-03#b6476da01774",
+        "R4048239": "2026-11-09#f84643b1d264",
+        "R4048244": "2026-11-09#ef06df9db54d",
         "R4048272": "2026-11-01#0fee26fb6cee",
         "R4048280": "2026-11-01#bb29a16a74f7",
         "R4048282": "2026-11-01#23c7588a68b1",
@@ -526,6 +530,7 @@
         "R4048351": "2026-11-01#d8b61e8206b1",
         "R4048366": "2026-11-01#507a31c8f62d",
         "R4048390": "2026-11-02#ae9938d052a6",
+        "R4048404": "2026-11-09#40789fab6ea6",
         "R4048412": "2026-11-01#ea2c5f43650d",
         "R4048413": "2026-10-31#d7b0de2d72bd",
         "R4048414": "2026-10-31#7ab6ab9b9cc4",
@@ -599,14 +604,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 19,
-          "added": 0,
-          "removed": 0,
-          "took": 112
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 19,
@@ -645,28 +642,28 @@
           "added": 0,
           "removed": 0,
           "took": 98
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 17,
+          "added": 0,
+          "removed": 0,
+          "took": 115
         }
       ]
     },
     "GE Vernova": {
       "status": "ok",
-      "detail": "listing 117",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 116",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 117,
+      "listing_total": 116,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 13,
-          "added": 0,
-          "removed": 0,
-          "took": 10
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -706,16 +703,24 @@
           "added": 0,
           "removed": 0,
           "took": 26
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 13,
+          "added": 0,
+          "removed": 0,
+          "took": 10
         }
       ]
     },
     "IQVIA": {
       "status": "ok",
-      "detail": "listing 42 across 3 searches",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 43 across 3 searches",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 42,
+      "listing_total": 43,
       "last_discovery_attempt": null,
       "screened": {
         "R1528688": "2026-11-04#aeeb76659c0f",
@@ -753,14 +758,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 10,
-          "added": 0,
-          "removed": 0,
-          "took": 23
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -800,28 +797,28 @@
           "added": 0,
           "removed": 0,
           "took": 23
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 10,
+          "added": 0,
+          "removed": 0,
+          "took": 22
         }
       ]
     },
     "ZS": {
       "status": "ok",
       "detail": "listing 56",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 56,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 2,
-          "added": 0,
-          "removed": 0,
-          "took": 34
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -861,14 +858,22 @@
           "added": 0,
           "removed": 0,
           "took": 37
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 2,
+          "added": 0,
+          "removed": 0,
+          "took": 35
         }
       ]
     },
     "Accenture": {
       "status": "ok",
       "detail": "listing 878",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 878,
       "last_discovery_attempt": null,
@@ -1066,14 +1071,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 821,
-          "added": 0,
-          "removed": 0,
-          "took": 17
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 821,
@@ -1112,14 +1109,22 @@
           "added": 1,
           "removed": 0,
           "took": 16
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 764,
+          "added": 0,
+          "removed": 58,
+          "took": 16
         }
       ]
     },
     "Lilly": {
       "status": "ok",
       "detail": "listing 20",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 20,
       "last_discovery_attempt": null,
@@ -1152,14 +1157,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 4,
-          "added": 0,
-          "removed": 0,
-          "took": 12
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -1199,14 +1196,22 @@
           "added": 0,
           "removed": 0,
           "took": 10
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 3,
+          "added": 0,
+          "removed": 0,
+          "took": 9
         }
       ]
     },
     "AstraZeneca": {
       "status": "ok",
       "detail": "listing 29",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 29,
       "last_discovery_attempt": null,
@@ -1257,14 +1262,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 4
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 1,
@@ -1303,16 +1300,24 @@
           "added": 0,
           "removed": 0,
           "took": 5
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 4
         }
       ]
     },
     "Shell": {
       "status": "ok",
-      "detail": "listing 136",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 135",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 136,
+      "listing_total": 135,
       "last_discovery_attempt": null,
       "screened": {
         "R200923": "2026-11-03#ae37a2a39bea",
@@ -1336,14 +1341,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 16
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -1383,14 +1380,22 @@
           "added": 0,
           "removed": 0,
           "took": 19
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 16
         }
       ]
     },
     "GE Aerospace": {
       "status": "ok",
       "detail": "listing 6",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 6,
       "last_discovery_attempt": null,
@@ -1410,14 +1415,6 @@
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 6
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -1457,14 +1454,22 @@
           "added": 0,
           "removed": 0,
           "took": 6
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 6
         }
       ]
     },
     "Fractal": {
       "status": "ok",
       "detail": "listing 81",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 81,
       "last_discovery_attempt": null,
@@ -1492,14 +1497,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 4,
-          "added": 0,
-          "removed": 0,
-          "took": 16
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 4,
@@ -1538,14 +1535,22 @@
           "added": 0,
           "removed": 0,
           "took": 16
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 4,
+          "added": 0,
+          "removed": 0,
+          "took": 16
         }
       ]
     },
     "D. E. Shaw India": {
       "status": "ok",
       "detail": "catalogue 74",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 74,
       "last_discovery_attempt": null,
@@ -1624,14 +1629,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 1,
-          "added": 0,
-          "removed": 0,
-          "took": 3
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 1,
@@ -1670,14 +1667,22 @@
           "added": 0,
           "removed": 0,
           "took": 3
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 1,
+          "added": 0,
+          "removed": 0,
+          "took": 3
         }
       ]
     },
     "Honeywell": {
       "status": "ok",
       "detail": "listing 119",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 119,
       "last_discovery_attempt": null,
@@ -1760,14 +1765,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 32,
-          "added": 0,
-          "removed": 0,
-          "took": 57
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 32,
@@ -1806,28 +1803,28 @@
           "added": 0,
           "removed": 0,
           "took": 60
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 32,
+          "added": 0,
+          "removed": 0,
+          "took": 57
         }
       ]
     },
     "AMD": {
       "status": "ok",
       "detail": "listing 116",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 116,
       "last_discovery_attempt": null,
       "screened": {},
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 9,
-          "added": 0,
-          "removed": 0,
-          "took": 70
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -1867,16 +1864,24 @@
           "added": 0,
           "removed": 0,
           "took": 74
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 9,
+          "added": 0,
+          "removed": 0,
+          "took": 70
         }
       ]
     },
     "Qualcomm": {
       "status": "ok",
-      "detail": "listing 362",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 361",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 362,
+      "listing_total": 361,
       "last_discovery_attempt": null,
       "screened": {
         "446715068593": "2026-11-03#024aba1900de",
@@ -2017,14 +2022,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 17,
-          "added": 0,
-          "removed": 0,
-          "took": 72
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 17,
@@ -2063,14 +2060,22 @@
           "added": 0,
           "removed": 0,
           "took": 116
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 17,
+          "added": 0,
+          "removed": 0,
+          "took": 89
         }
       ]
     },
     "Deloitte": {
       "status": "ok",
       "detail": "listing 779 across 3 searches",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 779,
       "last_discovery_attempt": null,
@@ -2806,24 +2811,16 @@
         "61342144": "2026-11-06#f47d646e96c1",
         "61344544": "2026-11-06#44bd36bc4644",
         "61351744": "2026-11-06#2530717132ff",
-        "61354044": "2026-11-06#ddf297c1b453",
+        "61354044": "2026-11-09#901be60bd07e",
         "61355044": "2026-11-06#dc875e6b1389",
         "61355544": "2026-11-06#ecdca40e6406",
         "61357044": "2026-11-06#76951d187f00",
         "61359244": "2026-11-06#84804cee0d0c",
         "61361644": "2026-11-06#4631f9624778",
-        "61364344": "2026-11-07#38d05500c555"
+        "61364344": "2026-11-09#fcc534e7535c"
       },
       "removal_hold": null,
       "pulls": [
-        {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 50,
-          "added": 1,
-          "removed": 0,
-          "took": 158
-        },
         {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
@@ -2863,18 +2860,54 @@
           "added": 0,
           "removed": 0,
           "took": 132
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 64,
+          "added": 0,
+          "removed": 0,
+          "took": 90
         }
       ]
     },
     "EY": {
       "status": "ok",
-      "detail": "listing 1152 across 3 searches",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "detail": "listing 1158 across 3 searches",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
-      "listing_total": 1152,
+      "listing_total": 1158,
       "last_discovery_attempt": null,
       "screened": {
+        "1444551133": "2026-11-09#bd24f6cb658a",
+        "1444551533": "2026-11-09#33959c1f9666",
+        "1444551933": "2026-11-09#50412b3f298d",
+        "1444552333": "2026-11-09#b58cebb2463d",
+        "1444552833": "2026-11-09#9f25991817a5",
+        "1444553233": "2026-11-09#d8d08a6ecb4c",
+        "1444554133": "2026-11-09#30a450ef34ce",
+        "1444556533": "2026-11-09#a1249eb8b6bc",
+        "1444556933": "2026-11-09#7ac4a1d90734",
+        "1444557533": "2026-11-09#baa8d94338fe",
+        "1444558133": "2026-11-09#076940cebc1b",
+        "1444558633": "2026-11-09#f1886215a9c4",
+        "1444558833": "2026-11-09#a4d49cdcfef7",
+        "1444559433": "2026-11-09#4468146e71c0",
+        "1444561333": "2026-11-09#6348a5ec243b",
+        "1444561633": "2026-11-09#54d3032fea51",
+        "1444561933": "2026-11-09#67b24222b8a8",
+        "1444562133": "2026-11-09#b9f0fec38478",
+        "1444562633": "2026-11-09#0956a60cb8ee",
+        "1444562833": "2026-11-09#8d9dc08cd774",
+        "1444563033": "2026-11-09#ee4cbb28eb19",
+        "1444564333": "2026-11-09#1db645cd4080",
+        "1444565133": "2026-11-09#e3c3ca1e6a17",
+        "1444565733": "2026-11-09#bb0474631641",
+        "1444566433": "2026-11-09#5634e99bf9ba",
+        "1444567033": "2026-11-09#c7a261f23b37",
+        "1444567833": "2026-11-09#d20a6158b1f6",
+        "1444568533": "2026-11-09#98a4f0dbdd05",
         "1444569033": "2026-11-09#0827d0a8f71f",
         "1444569833": "2026-11-09#fd82b205526c",
         "1444570733": "2026-11-09#b97b2042569f",
@@ -3357,14 +3390,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 39,
-          "added": 1,
-          "removed": 0,
-          "took": 161
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 41,
@@ -3403,14 +3428,22 @@
           "added": 1,
           "removed": 0,
           "took": 198
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 44,
+          "added": 0,
+          "removed": 0,
+          "took": 156
         }
       ]
     },
     "Oracle": {
       "status": "ok",
       "detail": "listing 226",
-      "last_success": "2026-11-09T09:00+05:30",
-      "last_attempt": "2026-11-09T09:00+05:30",
+      "last_success": "2026-11-09T12:00+05:30",
+      "last_attempt": "2026-11-09T12:00+05:30",
       "stale_since": null,
       "listing_total": 226,
       "last_discovery_attempt": null,
@@ -3623,14 +3656,6 @@
       "removal_hold": null,
       "pulls": [
         {
-          "at": "2026-11-08T18:00+05:30",
-          "result": "accepted",
-          "published": 23,
-          "added": 0,
-          "removed": 0,
-          "took": 57
-        },
-        {
           "at": "2026-11-08T21:00+05:30",
           "result": "accepted",
           "published": 23,
@@ -3669,6 +3694,14 @@
           "added": 0,
           "removed": 0,
           "took": 56
+        },
+        {
+          "at": "2026-11-09T12:00+05:30",
+          "result": "accepted",
+          "published": 23,
+          "added": 0,
+          "removed": 0,
+          "took": 55
         }
       ]
     }
@@ -3977,6 +4010,21 @@
     },
     {
       "company": "JPMorganChase",
+      "job_id": "210794929",
+      "title": "Software Engineer II - Payments and Automation",
+      "experience_text": "2+ years applied experience ( NAMR/APAC – India/ LATAM/ Hong Kong) Hands-on practical experience in system design, application development,…",
+      "experience_band": "2",
+      "location": "Bengaluru and Mumbai",
+      "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210794929",
+      "posted_date": "2026-11-09",
+      "closing_date": "2026-11-10",
+      "first_seen": "2026-11-09",
+      "last_seen": "2026-11-09",
+      "liveness": "live",
+      "absent_runs": 0
+    },
+    {
+      "company": "JPMorganChase",
       "job_id": "210713605",
       "title": "GPB Advisor Support - Analyst",
       "experience_text": "2 years of professional experience in a similar capacity Strong knowledge of Private Bank product offerings, asset class knowledge Inclinat…",
@@ -4225,21 +4273,6 @@
       "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210803329",
       "posted_date": "2026-10-27",
       "closing_date": "2026-11-27",
-      "first_seen": "2026-10-31",
-      "last_seen": "2026-11-09",
-      "liveness": "live",
-      "absent_runs": 0
-    },
-    {
-      "company": "JPMorganChase",
-      "job_id": "210796708",
-      "title": "Analyst - Product Controller",
-      "experience_text": "1–3 years of experience in an accounting/controllership environment (internal or external)",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210796708",
-      "posted_date": "2026-10-26",
-      "closing_date": "2026-11-09",
       "first_seen": "2026-10-31",
       "last_seen": "2026-11-09",
       "liveness": "live",
@@ -5012,21 +5045,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "R00357526",
-      "title": "Associate Engineer - Backend 4",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Kochi",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=R00357526_en",
-      "posted_date": "2026-10-31",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01673086",
       "title": "Record to Report Ops New Associate",
       "experience_text": "0-2 years",
@@ -5792,21 +5810,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01659401",
-      "title": "HR Service Delivery Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01659401_en",
-      "posted_date": "2026-10-31",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01659400",
       "title": "HR Service Delivery Associate",
       "experience_text": "0-2 years",
@@ -6029,21 +6032,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01641003",
-      "title": "Inbound Sales Representative Associate-Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01641003_en",
-      "posted_date": "2026-10-31",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8027,36 +8015,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01665570",
-      "title": "Sales Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665570_en",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01665516",
-      "title": "Sales Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665516_en",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01665344",
       "title": "AI/ML Computational Science Associate",
       "experience_text": "0-2 years",
@@ -8102,21 +8060,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01664354",
-      "title": "Procurement Practice Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664354_en",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01664344",
       "title": "Procurement Practice Associate",
       "experience_text": "0-2 years",
@@ -8144,21 +8087,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01663716",
-      "title": "Inbound Sales Representative Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01663716_en",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -8219,36 +8147,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01641000",
-      "title": "Inbound Sales Representative Associate-Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01641000_en",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01640997",
-      "title": "Inbound Sales Representative Associate-Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01640997_en",
-      "posted_date": "2026-10-30",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -9572,21 +9470,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01640959",
-      "title": "Inbound Sales Representative Associate-Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01640959_en",
-      "posted_date": "2026-10-29",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01640956",
       "title": "Inbound Sales Representative Associate-Voice",
       "experience_text": "0-2 years",
@@ -9812,171 +9695,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01669665",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669665_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669664",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669664_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669663",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669663_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669662",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669662_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669657",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669657_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669656",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669656_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669655",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669655_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669654",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669654_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669652",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669652_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669651",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669651_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669650",
-      "title": "Health Admin Services New Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669650_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01668640",
       "title": "Capital Markets Operations New Associate",
       "experience_text": "0-2 years",
@@ -10049,21 +9767,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01668336",
-      "title": "Record to Report Ops New Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01668336_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10142,21 +9845,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01667097",
-      "title": "HR Service Delivery New Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01667097_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01666106",
       "title": "Capital Markets Services Associate",
       "experience_text": "0-2 years",
@@ -10202,21 +9890,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01666058",
-      "title": "Procurement Practice New Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01666058_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01665773",
       "title": "Sales Operations Associate",
       "experience_text": "0-2 years",
@@ -10244,21 +9917,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01665572",
-      "title": "Sales Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665572_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -10637,21 +10295,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01669973",
-      "title": "Inbound Sales Representative Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669973_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01669972",
       "title": "Inbound Sales Representative Associate - Voice",
       "experience_text": "0-2 years",
@@ -10772,21 +10415,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01666622",
-      "title": "Order to Cash Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01666622_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01665779",
       "title": "Sales Operations Associate",
       "experience_text": "0-2 years",
@@ -10844,36 +10472,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01665771",
-      "title": "Sales Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665771_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01665770",
-      "title": "Sales Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665770_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11264,21 +10862,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01665291",
-      "title": "Order to Cash Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665291_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -11957,21 +11540,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01664701",
-      "title": "Procure to Pay Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664701_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01664700",
       "title": "Procure to Pay Operations Associate",
       "experience_text": "0-2 years",
@@ -12077,21 +11645,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01663408",
-      "title": "HR Service Delivery Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01663408_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01663396",
       "title": "HR Service Delivery Associate",
       "experience_text": "0-2 years",
@@ -12104,21 +11657,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01663368",
-      "title": "HR Service Delivery Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01663368_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -12722,21 +12260,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01654461",
-      "title": "Total Rewards Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01654461_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01654394",
       "title": "HR Service Delivery Associate",
       "experience_text": "0-2 years",
@@ -12869,21 +12392,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01642715",
-      "title": "Recruiting Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01642715_en",
-      "posted_date": "2026-10-28",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -13532,21 +13040,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01664921",
-      "title": "HR Service Delivery Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664921_en",
-      "posted_date": "2026-10-27",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01664270",
       "title": "Business Advisory Associate",
       "experience_text": "0-2 years",
@@ -14012,21 +13505,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01671108",
-      "title": "HR Service Delivery Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01671108_en",
-      "posted_date": "2026-10-23",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01670923",
       "title": "Order to Cash Operations New Associate",
       "experience_text": "0-2 years",
@@ -14219,21 +13697,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01662672",
-      "title": "Procure to Pay Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01662672_en",
-      "posted_date": "2026-10-23",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -14657,21 +14120,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01666143",
-      "title": "Learning Exp Design & Dev Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01666143_en",
-      "posted_date": "2026-10-21",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01665101",
       "title": "Record to Report Ops Associate",
       "experience_text": "0-2 years",
@@ -14927,186 +14375,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01669682",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669682_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669679",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669679_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669676",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669676_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669675",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669675_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669671",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669671_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669669",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669669_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669667",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669667_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669666",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669666_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669661",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669661_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669660",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669660_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669659",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669659_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01669658",
-      "title": "Health Admin Services Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01669658_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01669494",
       "title": "Record to Report Ops Associate",
       "experience_text": "0-2 years",
@@ -15299,21 +14567,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01668334",
-      "title": "Record to Report Ops Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01668334_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16022,21 +15275,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01666056",
-      "title": "Procurement Practice Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01666056_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01666053",
       "title": "Procure to Pay Operations Associate",
       "experience_text": "0-2 years",
@@ -16082,21 +15320,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01665744",
-      "title": "Sales Operations Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665744_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01665654",
       "title": "Supply Chain Operations Associate",
       "experience_text": "0-2 years",
@@ -16124,21 +15347,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "AIOC-S01665487",
-      "title": "Record to Report Ops Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01665487_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
@@ -16952,21 +16160,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01649565",
-      "title": "IT Service Management Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01649565_en",
-      "posted_date": "2026-10-20",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "AIOC-S01645931",
       "title": "Procure to Pay Operations New Associate",
       "experience_text": "0-2 years",
@@ -17042,21 +16235,6 @@
     },
     {
       "company": "Accenture",
-      "job_id": "AIOC-S01664649",
-      "title": "Customer Contact Comms Associate - Voice",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=AIOC-S01664649_en",
-      "posted_date": "2026-10-17",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
-    },
-    {
-      "company": "Accenture",
       "job_id": "14290743",
       "title": "ISSRRN000761 - Infra Tech Support Practitioner",
       "experience_text": "0-2 years",
@@ -17069,21 +16247,6 @@
       "last_seen": "2026-11-09",
       "liveness": "live",
       "absent_runs": 0
-    },
-    {
-      "company": "Accenture",
-      "job_id": "14155408",
-      "title": "RRN00015431, Service Desk Associate",
-      "experience_text": "0-2 years",
-      "experience_band": "2",
-      "location": "Bengaluru",
-      "canonical_url": "https://www.accenture.com/in-en/careers/jobdetails?id=14155408_en",
-      "posted_date": "2026-10-16",
-      "closing_date": null,
-      "first_seen": "2026-11-02",
-      "last_seen": "2026-11-09",
-      "liveness": "absent",
-      "absent_runs": 1
     },
     {
       "company": "Accenture",
