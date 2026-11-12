@@ -50,8 +50,6 @@
     "southasiacareers.deloitte.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "rmkcdn.successfactors.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "careers.ey.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
-    "eeho.fa.us2.oraclecloud.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
-    "www.oracle.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "www.amazon.jobs": {"fetch": true, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
@@ -191,13 +189,6 @@
       "search_terms": ["Kochi", "Thiruvananthapuram", "Bengaluru"],
       "max_total": 2000,
       "max_new_details": 30
-    },
-    {
-      "company": "Oracle",
-      "mode": "oracle_ce",
-      "budget_s": 90,
-      "max_total": 300,
-      "max_new_details": 25
     },
     {
       "company": "Amazon",

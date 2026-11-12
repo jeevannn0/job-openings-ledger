@@ -225,11 +225,6 @@ COMPANY_SPECS = {
     "EY": _spec(r"https://careers\.ey\.com/ey/job/[A-Za-z]+/(\d{8,12})/", {"sf_csb_html"}, {"careers.ey.com"},
                 "https://rmkcdn.successfactors.com/bcfdbc8a/013850a8-6899-42b9-89b8-9.ico",
                 "https://careers.ey.com/ey/talentcommunity/apply/{id}/?locale=en_US"),
-    # Oracle's own Recruiting CE tenant; careers.oracle.com only hash-routes to it, so the Fusion host is the public
-    # job URL too. Oracle's 192 px favicon is on www.oracle.com.
-    "Oracle": _spec(r"https://eeho\.fa\.us2\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/jobsearch/job/(\d{4,9})",
-                    {"oracle_ce"}, {"eeho.fa.us2.oraclecloud.com"},
-                    "https://www.oracle.com/asset/web/favicons/favicon-192.png", APPLY_ORACLE),
     # amazon.jobs: the public posting page /en/jobs/{id_icims}/{slug}. Its icon is the site's own favicon.ico (a
     # multi-size ICO, checked 11 Nov 2026). The Apply button is the posting itself: the apply flow lives on another
     # host (account.amazon.jobs) that the ledger does not list.
@@ -245,7 +240,7 @@ JOB_ID_RE = {
     "GE Aerospace": re.compile(r"R\d{6,9}"), "Fractal": re.compile(r"SR-\d{4,7}"),
     "D. E. Shaw India": re.compile(r"\d{3,7}"), "Honeywell": re.compile(r"\d{5,8}"), "AMD": re.compile(r"\d{4,7}"),
     "Qualcomm": re.compile(r"\d{9,15}"),
-    "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"), "Oracle": re.compile(r"\d{4,9}"),
+    "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"),
     "Amazon": re.compile(r"\d{6,10}"),
 }
 
@@ -321,8 +316,6 @@ ORACLE_SITES = {
     "JPMorganChase": (JPM_REST, "CX_1001", JPM_FRONT),
     "Honeywell": ("https://ibqbjb.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/", "CX_1",
                   "https://careers.honeywell.com/en/sites/Honeywell/job/{id}"),
-    "Oracle": ("https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/", "CX_45001",
-               "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/jobsearch/job/{id}"),
 }
 
 GEHC_FRONT = "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite"
@@ -438,7 +431,7 @@ AMZ_PAGE = 100
 AMZ_PATH = re.compile(r"/en/jobs/(\d{6,10})/([a-z0-9]+(?:-[a-z0-9]+)*)")
 AMZ_MAX_SLUG = 200
 
-# Wall-clock cap for one whole refresh run, so the twenty sources together stay inside the 46 minutes
+# Wall-clock cap for one whole refresh run, so the nineteen sources together stay inside the 46 minutes
 # the workflow's 75-minute job timeout leaves after its 20-minute schedule lead; the unit tests, render,
 # commit and push need the rest (tests alone take up to 3.5 min in CI). load_config rejects source budgets
 # that sum to more than this.
@@ -2652,9 +2645,9 @@ def _jpm_listing(cfg: dict, fetcher: Fetcher, config: Config, company: str = "JP
         found = {r["Id"]: r for r in reqs if isinstance(r, dict) and isinstance(r.get("Id"), str)
                  and JOB_ID_RE[company].fullmatch(r["Id"])}
         # Unique IDs: a shifted page cannot hide a skipped role, and a role that left mid-walk (same count, one
-        # duplicate) is drift, walked again. One row short of the count is tolerated: Oracle's own tenant counts
-        # 225 in its Bengaluru facet and returns 224 on every walk (a requisition the facet counts but never
-        # lists), and every unlisted row is still checked on its own detail record before it can be removed.
+        # duplicate) is drift, walked again. One row short of the count is tolerated: a tenant facet can count a
+        # requisition it never lists (one tenant counted 225 and returned 224 on every walk), and every unlisted
+        # row is still checked on its own detail record before it can be removed.
         if len(found) < total - JPM_COUNT_SLACK:
             return DRIFT_DETAIL
         for jid, r in found.items():
@@ -2681,18 +2674,8 @@ def _jpm_detail(fetcher: Fetcher, jid: str, company: str = "JPMorganChase") -> t
     return "live", info
 
 
-ORACLE_LEVEL = re.compile(r"\b([1-9])(?:-[A-Za-z&/ ]+)?$")     # "Financial Analyst 3", "Contracts Administrator 2-Fin"
-ORACLE_SENIOR_LEVEL = 3                                            # IC3 and up ask for five or more years
-
-
-def _oracle_level(title: str) -> int | None:
-    """The career level an Oracle Recruiting title ends in (its own tenant's convention), or None."""
-    m = ORACLE_LEVEL.search(title.strip())
-    return int(m.group(1)) if m else None
-
-
 def _uncaps(place: str) -> str:
-    """'BENGALURU, KARNATAKA, India' (Oracle's own tenant shouts its places) -> 'Bengaluru, Karnataka, India'."""
+    """'BENGALURU, KARNATAKA, India' (some Oracle CE tenants shout their places) -> 'Bengaluru, Karnataka, India'."""
     return ", ".join(s.title() if s.isupper() else s for s in place.split(", "))
 
 
@@ -2725,7 +2708,7 @@ def _jpm_requirements(info: dict) -> tuple[str, bool]:
     reported as "no number of years". Preferred qualifications never raise the requirement.
     """
     text = strip_html(str(info.get("ExternalDescriptionStr") or ""))
-    # Oracle's own tenant states its requirements ("10 years of experience in FP&A") in the responsibilities field.
+    # Some tenants state their requirements ("10 years of experience in FP&A") in the responsibilities field.
     extra = "\n".join(strip_html(str(info.get(k) or "")) for k in ("ExternalQualificationsStr", "ExternalResponsibilitiesStr"))
     head = JPM_REQUIRED_HEAD.search(text)
     if head:
@@ -2799,8 +2782,6 @@ def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, 
         title = clean_text(info.get("Title") or listing[jid].get("Title"), 160)
         text, cue = _jpm_requirements(info)
         ok, band, exp = qualifies(title, text, posted, places, today, config, require_cue=cue)
-        if ok and company == "Oracle" and (_oracle_level(title) or 0) >= ORACLE_SENIOR_LEVEL:
-            ok = False                               # Oracle titles end in the career level: 3+ is 5+ years' experience
         if not ok:
             res.screened[jid] = mark                 # definitive: does not qualify
             continue
