@@ -2114,6 +2114,85 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("needs: [refresh, publish]", self.block("deploy"))
 
 
+class WidgetFeedTests(unittest.TestCase):
+    """dist/widget.json feeds a Home Screen widget drawn by the Scriptable app (widget/k9-widget.js): iOS gives web
+    apps no widgets, so the page's newest openings and counts are published as a small feed the script reads."""
+
+    def setUp(self):
+        self.config, _e, self.state, self.template = env()
+
+    def test_feed_is_the_page_in_miniature(self):
+        feed = R.build_widget(self.state, self.config)
+        self.assertEqual(tuple(feed), R.WIDGET_FIELDS)
+        self.assertEqual(feed["schema"], 1)
+        # The same three counts the page's search panel shows, from the same rows (posted within max_age_days).
+        doc = R.render(self.state, self.template, self.config)
+        self.assertEqual(str(feed["total_jobs"]), re.search(r'<dd id="total">(\d+)</dd>', doc).group(1))
+        self.assertEqual(str(feed["company_count"]), re.search(r'<dd id="companies">(\d+)</dd>', doc).group(1))
+        self.assertEqual(str(feed["new_today"]), re.search(r'<dd id="today">(\d+)</dd>', doc).group(1))
+        self.assertEqual(feed["as_of"], self.state.as_of.isoformat())
+        # The frozen fixture is a seeded state (no run yet): a null stamp. After a run the stamp is the run's start.
+        self.assertIsNone(self.state.checked_at)
+        self.assertIsNone(feed["checked_at"])
+        stamped = dataclasses.replace(self.state, checked_at="2026-10-31T12:30+00:00")
+        self.assertEqual(R.build_widget(stamped, self.config)["checked_at"], "2026-10-31T18:00+05:30")   # the run's start, in IST
+        # The jobs are the page's rows in the page's own "Newest" order: first-seen age, posting age, company order.
+        rows = json.loads(re.search(r"\nconst jobs=(\[.*?\n\]);\n", doc, re.S).group(1))
+        order = {c: i for i, c in enumerate(self.config.companies)}
+        visible = [r for r in rows if r[5] <= self.config.max_age_days]
+        visible.sort(key=lambda r: (r[10], r[5], order[r[0]]))
+        self.assertEqual([(j["company"], j["job_id"]) for j in feed["jobs"]], [(r[0], r[1]) for r in visible[:R.WIDGET_JOBS_MAX]])
+        self.assertLessEqual(len(feed["jobs"]), R.WIDGET_JOBS_MAX)
+        by_key = {(r[0], r[1]): r for r in rows}
+        for j in feed["jobs"]:
+            self.assertEqual(tuple(j), R.WIDGET_JOB_FIELDS)
+            r = by_key[(j["company"], j["job_id"])]
+            self.assertEqual((j["title"], j["location"], j["url"], j["band"], j["closing"], j["apply_url"], j["seen_basis"]),
+                             (r[2], r[6], r[7], r[8], r[9], r[12], bool(r[11])))
+            self.assertEqual(j["first_seen"], next(x.first_seen for x in self.state.jobs if x.job_id == j["job_id"] and x.company == j["company"]))
+        # Compact ASCII JSON, inert in any reader, well under the size cap; nothing but what the page shows.
+        text = R.widget_json(feed)
+        self.assertTrue(text.isascii() and text.endswith("\n"))
+        self.assertNotRegex(text, r"[<>&]")
+        self.assertLess(len(text), R.MAX_WIDGET_BYTES)
+        self.assertEqual(json.loads(text), feed)
+        for private in ("screened", "removal_hold", "listing_total", "stale_since", "last_discovery", "pulls", "excluded"):
+            self.assertNotIn(private, text, private)
+        for bad in ({**feed, "schema": 2}, {**feed, "total_jobs": -1}, {**feed, "jobs": feed["jobs"] + [{"x": 1}]},
+                    {**feed, "checked_at": "yesterday"}, {**feed, "jobs": [{**feed["jobs"][0], "posted": "Nov 6"}]}):
+            with self.assertRaises(ValueError):
+                R.validate_widget(bad)
+
+    def test_widget_command_writes_the_feed_and_is_deterministic(self):
+        root = temp_repo(self, self.state, self.template, self.config)
+        out = os.path.join(root, "dist", "widget.json")
+        code, stdout, stderr = run_main(["--root", root, "widget", "--out", out], None)
+        self.assertEqual(code, 0, stderr)
+        self.assertRegex(stdout, r"^widget: \d+ newest of \d+ openings, \d+ new today\n$")
+        first = R.read_text(out)
+        self.assertEqual(run_main(["--root", root, "widget", "--out", out], None)[0], 0)
+        self.assertEqual(R.read_text(out), first)
+        self.assertEqual(json.loads(first), R.build_widget(self.state, self.config))
+        self.assertNotIn("widget.json", " ".join(R.ALLOWED_FILES))             # built into dist, never committed
+
+    def test_widget_script_is_served_as_is_and_names_no_host(self):
+        # The script is a repository file copied into the artifact; the loader on the phone passes the ledger's
+        # base URL in, so the public repository still names no host, and the scan rules apply to it like any file.
+        self.assertIn("widget/k9-widget.js", R.ALLOWED_FILES)
+        script = R.read_text(os.path.join(ROOT, "widget", "k9-widget.js"))
+        self.assertEqual(R.find_forbidden(script), [])
+        self.assertNotRegex(script, r"https?://")
+        self.assertIn("module.exports = async function run(base, parameter) {", script)
+        self.assertIn('new Request(base + "widget.json")', script)
+        self.assertIn("w.url = base;", script)
+        self.assertEqual(script.count("Script.setWidget(w)"), 1)
+        self.assertIn("Script.complete();", script)
+        for family in ("small", "medium", "large", "accessoryRectangular", "accessoryCircular", "accessoryInline"):
+            self.assertIn(f'"{family}"', script, family)
+        self.assertNotIn("eval(", script)
+        self.assertNotIn("importModule", script)                                  # the loader imports; this file imports nothing
+
+
 class AlertVerifyTests(unittest.TestCase):
     """`alert-verify` guards the publish-only path: the live alerts.json is redeployed only when it is
     the canonical payload for the committed state's own run."""
@@ -3110,8 +3189,15 @@ class AlertTests(unittest.TestCase):
         self.assertNotIn("refresh-outcome", publish)
         self.assertNotIn("alert --outcome", publish)
         self.assertIn("refresh.py alert-verify dist/alerts.json", publish)
-        self.assertEqual(publish.count('test "$(ls -A dist | tr \'\\n\' \' \')" = "alerts.json icon-180.png icon-192.png '
-                                       'icon-512.png index.html manifest.webmanifest "'), 1)
+        # Both producers ship exactly the same eight files: the page, the alert, the manifest and icons, and the
+        # Home Screen widget's script and feed (the feed is rebuilt from the committed state on either path).
+        listing = ('test "$(ls -A dist | tr \'\\n\' \' \')" = "alerts.json icon-180.png icon-192.png icon-512.png index.html '
+                   'k9-widget.js manifest.webmanifest widget.json "')
+        self.assertEqual(publish.count(listing), 1)
+        self.assertEqual(text.count(listing), 2)
+        self.assertEqual(text.count("cp manifest.webmanifest icon-180.png icon-192.png icon-512.png widget/k9-widget.js dist/"), 2)
+        self.assertEqual(text.count("python3 scripts/refresh.py widget --out dist/widget.json"), 2)
+        self.assertNotIn("widget.json", re.search(r"(?m)^\s*git add[^\n]*", text).group(0))
 
 
 # --------------------------------------------------------------------------- live adapters: JPMorganChase, GE HealthCare, ZS

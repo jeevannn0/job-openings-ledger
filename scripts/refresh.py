@@ -500,6 +500,7 @@ ALLOWED_FILES = frozenset({
     "state/jobs.json",
     "templates/index.template.html",
     "tests/test_refresh.py",
+    "widget/k9-widget.js",
 })
 ALLOWED_FIXTURE = re.compile(r"tests/fixtures/[a-z0-9_.-]+\.(?:html|json)")
 # The only binary files: the Home Screen icons, plain PNGs of exactly these sizes (png_problem checks them).
@@ -4235,6 +4236,85 @@ def alert_json(payload: dict) -> str:
     return out.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "\n"
 
 
+# --------------------------------------------------------------------------- widget feed (dist/widget.json)
+# A small public feed for a Home Screen widget on the reader's phone: iOS gives web apps no widgets, so a
+# Scriptable script (widget/k9-widget.js, served next to this) fetches it every quarter hour or so and draws
+# the newest openings in the page's own order with the page's three counts. Built from the committed state
+# alone (deterministic, so both producers rebuild it), compact, ASCII, and holding nothing the page does not
+# already show.
+WIDGET_JOBS_MAX = 40
+WIDGET_FIELDS = ("schema", "checked_at", "as_of", "total_jobs", "company_count", "new_today", "closing_soon_count",
+                 "jobs")
+WIDGET_JOB_FIELDS = ("company", "job_id", "title", "location", "url", "apply_url", "posted", "first_seen", "closing",
+                     "band", "seen_basis")
+MAX_WIDGET_BYTES = 32_768
+
+
+def build_widget(state: State, config: Config) -> dict:
+    """The widget payload for the committed state: counts and the WIDGET_JOBS_MAX newest openings, newly listed
+    first, then by posting date, then company order — the feed's own "newest" sort."""
+    for r in state.jobs:
+        validate_row(r, config)
+    as_of = state.as_of
+    visible = [r for r in state.jobs if days_since(r.posted_date, as_of) <= config.max_age_days]
+    order = {c: i for i, c in enumerate(config.companies)}
+    newest = sorted(visible, key=lambda r: (days_since(r.first_seen, as_of), days_since(r.posted_date, as_of),
+                                            order[r.company]))
+    closing = sum(1 for r in visible if r.closing_date
+                  and 0 <= (dt.date.fromisoformat(r.closing_date) - as_of).days <= ALERT_CLOSING_DAYS)
+    checked = iso_time(state.checked_at)
+    payload = {
+        "schema": 1,
+        "checked_at": checked.astimezone(IST).isoformat(timespec="minutes") if checked else None,
+        "as_of": as_of.isoformat(),
+        "total_jobs": len(visible),
+        "company_count": len({r.company for r in visible}),
+        "new_today": sum(1 for r in visible if days_since(r.first_seen, as_of) == 0),
+        "closing_soon_count": closing,
+        "jobs": [{"company": r.company, "job_id": r.job_id, "title": r.title, "location": r.location,
+                  "url": r.canonical_url, "apply_url": apply_url(r, config), "posted": r.posted_date,
+                  "first_seen": r.first_seen, "closing": r.closing_date, "band": r.experience_band,
+                  "seen_basis": config.sources[r.company]["mode"] in SEEN_BASIS_MODES}
+                 for r in newest[:WIDGET_JOBS_MAX]],
+    }
+    validate_widget(payload)
+    return payload
+
+
+def validate_widget(payload: dict) -> None:
+    if not isinstance(payload, dict) or tuple(payload) != WIDGET_FIELDS or payload["schema"] != 1:
+        raise ValueError("widget: schema")
+    if payload["checked_at"] is not None and iso_time(payload["checked_at"]) is None:
+        raise ValueError("widget: checked_at")
+    for key in ("total_jobs", "company_count", "new_today", "closing_soon_count"):
+        v = payload[key]
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            raise ValueError(f"widget: {key}")
+    jobs = payload["jobs"]
+    if not isinstance(jobs, list) or len(jobs) > WIDGET_JOBS_MAX:
+        raise ValueError("widget: jobs")
+    for job in jobs:
+        if not isinstance(job, dict) or tuple(job) != WIDGET_JOB_FIELDS:
+            raise ValueError("widget: job fields")
+        for key in ("company", "job_id", "title", "location", "url", "apply_url", "posted", "first_seen", "band"):
+            if not isinstance(job[key], str) or not job[key]:
+                raise ValueError(f"widget: job {key}")
+        for key in ("posted", "first_seen", "closing"):
+            if job[key] is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", job[key]):
+                raise ValueError(f"widget: job {key}")
+        if not isinstance(job["seen_basis"], bool):
+            raise ValueError("widget: job seen_basis")
+
+
+def widget_json(payload: dict) -> str:
+    """Compact ASCII JSON with '<', '>' and '&' escaped (the same rule as the alert file)."""
+    out = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+    out = out.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "\n"
+    if len(out.encode("ascii")) > MAX_WIDGET_BYTES:
+        raise ValueError("widget: payload is too large")
+    return out
+
+
 def validate_alert(payload: dict, config: Config) -> None:
     if not isinstance(payload, dict) or tuple(payload) != ALERT_FIELDS or type(payload["schema"]) is not int \
             or payload["schema"] != 1:
@@ -4602,6 +4682,15 @@ def cmd_alert(args, root: str) -> int:
 MAX_ALERT_BYTES = 65_536
 
 
+def cmd_widget(args, root: str) -> int:
+    """Write the Home Screen widget feed (dist/widget.json) from the committed state."""
+    config, state, _template = load_all(root)
+    payload = build_widget(state, config)
+    write_atomic(os.path.join(root, args.out) if not os.path.isabs(args.out) else args.out, widget_json(payload))
+    print(f"widget: {len(payload['jobs'])} newest of {payload['total_jobs']} openings, {payload['new_today']} new today")
+    return 0
+
+
 def cmd_alert_verify(args, root: str) -> int:
     """Check a carried-forward alerts.json (the publish-only path): it must pass every alert check and
     describe the committed state's own run, so a stale or foreign payload is never redeployed."""
@@ -4680,6 +4769,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ledger-url", required=True, help="the repository's GitHub Pages URL")
     p = sub.add_parser("alert-verify", help="verify a carried-forward alerts.json against the committed state")
     p.add_argument("path", help="alerts.json to verify, e.g. dist/alerts.json")
+    p = sub.add_parser("widget", help="build the Home Screen widget feed from the committed state")
+    p.add_argument("--out", required=True, help="widget.json path, e.g. dist/widget.json")
     sub.add_parser("check", help="verify index.html matches the state")
     p = sub.add_parser("scan", help="recursive public-boundary scan")
     p.add_argument("scan_root", nargs="?", metavar="ROOT")
@@ -4688,7 +4779,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--as-of", required=True)
     args = ap.parse_args(argv)
     handlers = {"refresh": cmd_refresh, "render": cmd_render, "alert": cmd_alert, "alert-verify": cmd_alert_verify,
-                "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed, "due": cmd_due, "wait": cmd_wait}
+                "widget": cmd_widget, "check": cmd_check, "scan": cmd_scan, "seed": cmd_seed, "due": cmd_due,
+                "wait": cmd_wait}
     try:
         return handlers[args.cmd](args, args.root)
     except (OSError, ValueError) as exc:
