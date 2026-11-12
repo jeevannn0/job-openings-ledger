@@ -230,6 +230,11 @@ COMPANY_SPECS = {
     "Oracle": _spec(r"https://eeho\.fa\.us2\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/jobsearch/job/(\d{4,9})",
                     {"oracle_ce"}, {"eeho.fa.us2.oraclecloud.com"},
                     "https://www.oracle.com/asset/web/favicons/favicon-192.png", APPLY_ORACLE),
+    # amazon.jobs: the public posting page /en/jobs/{id_icims}/{slug}. Its icon is the site's own favicon.ico (a
+    # multi-size ICO, checked 11 Nov 2026). The Apply button is the posting itself: the apply flow lives on another
+    # host (account.amazon.jobs) that the ledger does not list.
+    "Amazon": _spec(r"https://www\.amazon\.jobs/en/jobs/(\d{6,10})/[a-z0-9]+(?:-[a-z0-9]+)*", {"amazon_jobs_api"},
+                    {"www.amazon.jobs"}, "https://www.amazon.jobs/favicon.ico"),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -241,6 +246,7 @@ JOB_ID_RE = {
     "D. E. Shaw India": re.compile(r"\d{3,7}"), "Honeywell": re.compile(r"\d{5,8}"), "AMD": re.compile(r"\d{4,7}"),
     "Qualcomm": re.compile(r"\d{9,15}"),
     "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"), "Oracle": re.compile(r"\d{4,9}"),
+    "Amazon": re.compile(r"\d{6,10}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -419,7 +425,20 @@ SF_PLACE_META = ("streetAddress", "addressLocality")   # Deloitte names cities i
 SF_DESC = re.compile(r'<span class="jobdescription">(.*?)</span>\s*(?:</div>|<div)', re.S)
 SF_DATE = re.compile(r"[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) \d{2}:\d{2}:\d{2} [A-Z]{3,4} (\d{4})")   # Wed Nov 04 02:00:00 UTC 2026
 
-# Wall-clock cap for one whole refresh run, so the nineteen sources together stay inside the 46 minutes
+# Amazon: the public amazon.jobs search service (GET, no credentials, 100 a page, `hits` on every page). It is
+# first-party but undocumented, so every page is checked strictly and anything unexpected holds the cached rows.
+# One search per configured region (Bengaluru by city, Kerala by region); sort=recent is not strictly ordered by
+# posted_date, so every reported hit is paged. Records are complete (title, path, date, locations and the basic
+# qualifications), so a new row needs no further request. The public ID is id_icims, never the UUID `id`.
+AMZ_BASE = "https://www.amazon.jobs"
+AMZ_SEARCH = (AMZ_BASE + "/en/search.json?base_query=&loc_query=&country=IND{place}&result_limit=100&sort=recent"
+              "&offset={offset}")
+AMZ_PLACES = {"bengaluru": "&city=Bengaluru&region=Karnataka", "kerala": "&region=Kerala"}
+AMZ_PAGE = 100
+AMZ_PATH = re.compile(r"/en/jobs/(\d{6,10})/([a-z0-9]+(?:-[a-z0-9]+)*)")
+AMZ_MAX_SLUG = 200
+
+# Wall-clock cap for one whole refresh run, so the twenty sources together stay inside the 46 minutes
 # the workflow's 75-minute job timeout leaves after its 20-minute schedule lead; the unit tests, render,
 # commit and push need the rest (tests alone take up to 3.5 min in CI). load_config rejects source budgets
 # that sum to more than this.
@@ -432,7 +451,15 @@ MIN_SOURCE_BUDGET_S = 30.0  # default floor; source_floor() uses each mode's own
 FORBIDDEN_PATTERNS = tuple(re.compile(p, re.I) for p in (
     r"a[t]oz",
     r"a[2]z\.com",
-    r"\bam[a]zon",
+    # Amazon is a public employer on the page (www.amazon.jobs postings); its internal-only hosts and phrases are not.
+    r"\b(?:[a-z0-9-]+\.)*(?:corp|aka|integ|desktop)\.am[a]zon\.com\b",
+    r"\b(?:w|wiki|code|sim|issues|t|tt|phonetool|quip-am[a]zon|mid[w]ay-auth|pipelines|apollo|brazil|builderhub|"
+    r"permissions|ldap|kiro)\.am[a]zon\.com\b",
+    r"\bam[a]zon\.dev\b",
+    r"\baws\.dev\b",
+    r"\bam[a]zon\.jobs/(?:[a-z]{2}(?:-[a-z]{2})?/)?internal\b",
+    r"\bam[a]zon[ _-]?internal\b|\binternal[ _-]am[a]zon\b",
+    r"\bam[a]zonian",
     r"\bmid[w]ay\b",
     r"employee[ _-]?i[d]\b",
     r"intern[a]l[ _-]?transfer",
@@ -696,6 +723,8 @@ _TUNABLES = {
     "jibe_api": {"budget_s": (60, 600), "max_total": (10, 500), "max_new_checks": (0, 20)},
     "eightfold_pcsx_api": {"budget_s": (30, 600), "location": "term", "max_total": (10, 2000), "max_new_details": (0, 60)},
     "sf_csb_html": {"budget_s": (30, 600), "search_terms": "terms", "max_total": (25, 2000), "max_new_details": (0, 60)},
+    # Amazon: max_total caps the hits summed over the region searches (100 a page, so at most 50 pages).
+    "amazon_jobs_api": {"budget_s": (30, 600), "max_total": (100, 5000)},
     "static": {},
 }
 SIEMENS_MIN_DELAY_S = 2.0
@@ -1173,6 +1202,7 @@ CONNECTOR_LABELS = {
     "jibe_api": "Jibe Jobs API",
     "eightfold_pcsx_api": "Eightfold search API",
     "sf_csb_html": "SuccessFactors HTML",
+    "amazon_jobs_api": "Amazon Jobs search API",
     "static": "Static snapshot",
 }
 # Plain-language meaning of each freshness state; {limit} is the freshness threshold.
@@ -3691,6 +3721,156 @@ def refresh_successfactors(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt
     return res
 
 
+# -- Amazon: the public amazon.jobs search service
+
+def _amz_page(fetcher: Fetcher, place: str, offset: int) -> dict | None:
+    """One search page ({hits, jobs}), or None when unavailable or malformed."""
+    data = fetcher.request(AMZ_SEARCH.format(place=place, offset=offset), accept="json").json_obj()
+    if not isinstance(data, dict) or data.get("error") or not _count(data.get("hits")) \
+            or not isinstance(data.get("jobs"), list) or len(data["jobs"]) > AMZ_PAGE:
+        return None
+    return data
+
+
+def _amz_ident(job: object) -> tuple[str, str] | None:
+    """(id_icims, job_path) of a well-formed record whose path carries its own ID, else None."""
+    if not isinstance(job, dict):
+        return None
+    jid = job.get("id_icims")
+    jid = str(jid) if isinstance(jid, int) and not isinstance(jid, bool) else jid
+    path = job.get("job_path")
+    if not isinstance(jid, str) or not JOB_ID_RE["Amazon"].fullmatch(jid) or not isinstance(path, str):
+        return None
+    m = AMZ_PATH.fullmatch(path)
+    if not m or m.group(1) != jid or len(m.group(2)) > AMZ_MAX_SLUG:
+        return None
+    if not isinstance(job.get("title"), str) or not job["title"].strip():
+        return None
+    return jid, path
+
+
+def _amz_posted(job: dict) -> dt.date | None:
+    """posted_date such as 'November 11, 2026'; the service sometimes doubles the inner spaces."""
+    value = job.get("posted_date")
+    return parse_any_date(re.sub(r"\s+", " ", value).strip()) if isinstance(value, str) else None
+
+
+def _amz_places(job: dict) -> list[str]:
+    """Every place a record names. `locations` holds JSON-encoded objects, one per site (the target city can be a
+    secondary one); normalized_location and location repeat the primary site in other spellings ('IN, KA,
+    Bangalore'), so they are used only when no object decodes."""
+    places: list[str] = []
+    for raw in job.get("locations") if isinstance(job.get("locations"), list) else []:
+        try:
+            obj = json.loads(raw) if isinstance(raw, str) else None
+        except ValueError:
+            obj = None
+        if not isinstance(obj, dict):
+            continue
+        parts = [str(obj.get(k) or "").strip() for k in ("normalizedCityName", "normalizedStateName", "normalizedCountryName")]
+        place = ", ".join(p for p in parts if p) or str(obj.get("normalizedLocation") or obj.get("location") or "").strip()
+        if place:
+            places.append(place)
+    if not places:
+        for key in ("normalized_location", "location"):
+            if isinstance(job.get(key), str) and job[key].strip():
+                places.append(job[key].strip())
+    return list(dict.fromkeys(places))
+
+
+def _amz_requirements(job: dict) -> str:
+    """The basic qualifications, one '• ' clause per line ('- item<br/>- item' in the record), so a year count's
+    summary ends at its own item instead of running into the next one."""
+    lines = strip_html(str(job.get("basic_qualifications") or "")).splitlines()
+    return "\n".join("• " + s for s in (ln.strip().lstrip("-•·* ").strip() for ln in lines) if s)
+
+
+@rewalk_once
+def _amz_listing(cfg: dict, fetcher: Fetcher, config: Config) -> tuple[dict, int] | str:
+    """{id_icims: record} across every configured region search, or why the listing cannot be trusted. A role listed
+    by two searches (a Bengaluru posting with a Kochi secondary site) counts once."""
+    listing: dict[str, dict] = {}
+    grand = 0
+    for region in config.regions:
+        place = AMZ_PLACES[region]
+        ids: set[str] = set()
+        total: int | None = None
+        offset = 0
+        while True:
+            page = _amz_page(fetcher, place, offset)
+            if page is None:
+                return "search unavailable or malformed"
+            n = page["hits"]
+            if grand + n > cfg["max_total"]:                # max_total caps the sum over all regions
+                return "listing total invalid"
+            if total is None:
+                total = n
+            elif n != total:
+                return DRIFT_DETAIL
+            if not page["jobs"] and offset < total:
+                return "partial pagination"
+            for job in page["jobs"]:
+                ident = _amz_ident(job)
+                if ident is None:
+                    return "malformed job record"
+                ids.add(ident[0])
+                listing.setdefault(ident[0], job)
+            offset += AMZ_PAGE
+            if offset >= total:
+                break
+        if len(ids) != total:                               # a shifted page duplicated one role and skipped another
+            return DRIFT_DETAIL
+        grand += total
+    return listing, len(listing)
+
+
+def refresh_amazon(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                   excluded: frozenset, config: Config) -> SourceResult:
+    """Only the basic (required) qualifications are assessed; preferred qualifications never reject a posting."""
+    today = now.astimezone(IST).date()
+    got = _amz_listing(cfg, fetcher, config)
+    if isinstance(got, str):
+        return held("Amazon", got)
+    listing, total = got
+    # The listing is complete across every configured region, so a row it no longer shows counts toward removal.
+    res = SourceResult("Amazon", True, f"listing {total} across {len(config.regions)} searches", listing_complete=True,
+                       listing_total=total, listed=set(listing))
+    for r in rows:
+        if r.job_id in listing:
+            res.live.add(r.job_id)
+    existing = {r.job_id for r in rows}
+    fresh: list[tuple[dt.date, str, str]] = []
+    for jid, job in listing.items():
+        posted = _amz_posted(job)
+        if jid in existing or jid in excluded or not _recent(posted, today, config):
+            continue
+        fp = _fingerprint(job.get("title"), job.get("posted_date"), job.get("job_path"), job.get("basic_qualifications"),
+                          *_amz_places(job))
+        if _unscreened(jid, fp, cs):
+            fresh.append((posted, jid, fp))
+    fresh.sort(reverse=True)                                 # newest posting first
+    invalid = 0
+    for posted, jid, fp in fresh:
+        job = listing[jid]
+        mark = screened_entry(today, fp)
+        title = clean_text(job.get("title"), 160)
+        places = _amz_places(job)
+        ok, band, exp = qualifies(title, _amz_requirements(job), posted, places, today, config, require_cue=False)
+        if not ok:
+            res.screened[jid] = mark                         # definitive: does not qualify
+            continue
+        row = make_row("Amazon", jid, title, exp, join_places(target_places(places, config)), AMZ_BASE + job["job_path"],
+                       band, None, posted, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            invalid += 1                                     # qualifies but fails row validation: retried, not screened
+    res.counts = {"listed": len(listing), "live": len(res.live), "new_checked": len(fresh), "added": len(res.added),
+                  "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
 RUNNERS = {
     "siemens_avature_html": refresh_siemens,
     "iqvia_workday_cxs": refresh_iqvia,
@@ -3706,6 +3886,7 @@ RUNNERS = {
     "jibe_api": refresh_zs,
     "eightfold_pcsx_api": refresh_eightfold,
     "sf_csb_html": refresh_successfactors,
+    "amazon_jobs_api": refresh_amazon,
 }
 
 

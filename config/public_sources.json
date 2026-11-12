@@ -51,7 +51,8 @@
     "rmkcdn.successfactors.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "careers.ey.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "eeho.fa.us2.oraclecloud.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
-    "www.oracle.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
+    "www.oracle.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "www.amazon.jobs": {"fetch": true, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
     {
@@ -197,6 +198,12 @@
       "budget_s": 90,
       "max_total": 300,
       "max_new_details": 25
+    },
+    {
+      "company": "Amazon",
+      "mode": "amazon_jobs_api",
+      "budget_s": 120,
+      "max_total": 2000
     }
   ]
 }
