@@ -91,27 +91,42 @@ module.exports = async function run(base, parameter) {
     [0.75, "25,0,11,1 37,0,1,1 46,0,17,1 34,1,1,1 40,1,1,1 70,2,1,1 30,3,1,1 47,3,1,1 62,3,1,1 39,4,1,1 63,4,1,1 14,5,1,1 63,5,1,1 22,6,1,1 42,6,1,1 47,6,1,1 61,6,1,1 45,8,1,1 63,8,1,1 19,9,1,1 47,9,10,1 17,10,1,1 21,10,1,1 26,10,2,1 63,10,1,1 29,11,1,1 29,12,1,1 50,12,1,1 70,12,1,1 24,13,1,1 29,13,1,1 1,14,8,1 27,14,2,1 57,14,6,1"],
     [1, "1,1,8,1 23,1,10,1 41,1,28,1 1,2,8,1 21,2,11,1 39,2,31,1 1,3,8,1 19,3,11,1 39,3,8,1 63,3,8,1 1,4,8,1 17,4,10,1 40,4,6,1 64,4,7,1 1,5,8,1 15,5,10,1 41,5,5,1 64,5,7,1 1,6,21,1 43,6,4,1 62,6,9,1 1,7,18,1 44,7,27,1 1,8,18,1 46,8,17,1 64,8,7,1 1,9,8,1 15,9,4,1 64,9,7,1 1,10,8,1 18,10,3,1 64,10,7,1 1,11,8,1 20,11,9,1 62,11,9,1 1,12,8,1 22,12,7,1 51,12,19,1 1,13,8,1 25,13,4,1 51,13,18,1 52,14,5,1"],
   ];
-  const drawMark = (cell, hex) => {
+  // The page's logo glitch, frozen in one frame: two or three horizontal slices of the mark knocked two or three
+  // cells sideways, a faint ghost left where each came from. A widget cannot animate, so every render picks new
+  // slices and the mark glitches a little differently at each refresh.
+  const glitchBands = () => {
+    const bands = [];
+    const n = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < n; i++) {
+      const h = 1 + Math.floor(Math.random() * 3), y = 1 + Math.floor(Math.random() * (13 - h));
+      if (bands.some((b) => y < b.y + b.h && b.y < y + h)) continue;
+      bands.push({ y, h, dx: (Math.random() < 0.5 ? -1 : 1) * (2 + Math.floor(Math.random() * 2)) });
+    }
+    return bands;
+  };
+  const drawMark = (cell, hex, { glow = true, glitch = true, ghost = "#ffffff" } = {}) => {
     // Cells are 1:2 (the wordmark's designed proportion); a soft glow of the accent sits behind the lit cells.
-    const W = 72 * cell, H = 15 * cell * 2, pad = cell * 3;
+    const W = 72 * cell, H = 15 * cell * 2, pad = cell * 4;         // the padding holds the widest glitch shift
     const ctx = new DrawContext();
     ctx.size = new Size(W + pad * 2, H + pad * 2);
     ctx.opaque = false;
     ctx.respectScreenScale = true;
-    for (const [op, list] of MARK) {
-      if (op < 1) continue;
+    const bands = glitch ? glitchBands() : [];
+    const shift = (y) => { const b = bands.find((b) => y >= b.y && y < b.y + b.h); return b ? b.dx : 0; };
+    const cells = [];
+    for (const [op, list] of MARK) for (const r of list.split(" ")) { const [x, y, w, h] = r.split(",").map(Number); cells.push({ op, x, y, w, h }); }
+    if (glow) {
       ctx.setFillColor(new Color(hex, 0.08));
-      for (const r of list.split(" ")) {
-        const [x, y, w, h] = r.split(",").map(Number);
-        ctx.fillEllipse(new Rect(pad + x * cell - cell * 2, pad + y * cell * 2 - cell * 2, w * cell + cell * 4, h * cell * 2 + cell * 4));
-      }
+      for (const c of cells) if (c.op >= 1) ctx.fillEllipse(new Rect(pad + (c.x + shift(c.y)) * cell - cell * 2, pad + c.y * cell * 2 - cell * 2, c.w * cell + cell * 4, c.h * cell * 2 + cell * 4));
     }
-    for (const [op, list] of MARK) {
-      ctx.setFillColor(new Color(hex, op));
-      for (const r of list.split(" ")) {
-        const [x, y, w, h] = r.split(",").map(Number);
-        ctx.fillRect(new Rect(pad + x * cell, pad + y * cell * 2, w * cell, h * cell * 2));
+    for (const c of cells) {
+      const dx = shift(c.y);
+      if (dx) {
+        ctx.setFillColor(new Color(ghost, c.op * 0.3));
+        ctx.fillRect(new Rect(pad + c.x * cell, pad + c.y * cell * 2, c.w * cell, c.h * cell * 2));
       }
+      ctx.setFillColor(new Color(hex, c.op));
+      ctx.fillRect(new Rect(pad + (c.x + dx) * cell, pad + c.y * cell * 2, c.w * cell, c.h * cell * 2));
     }
     return ctx.getImage();
   };
@@ -265,12 +280,20 @@ module.exports = async function run(base, parameter) {
 
   // ---- layouts
   if (family === "accessoryCircular") {
+    // The round Lock Screen widget is the K9 mark itself, glitching anew at each refresh (the Lock Screen renders
+    // it in its own tint, so the mark is drawn white and the glow is left off); the counts live in the inline and
+    // rectangular shapes beside it. A tap opens the ledger.
     w.addAccessoryWidgetBackground = true;
+    w.setPadding(0, 0, 0, 0);
     const s = w.addStack();
     s.layoutVertically();
-    s.centerAlignContent();
-    text(s, feed ? `+${feed.new_today}` : "K9", Font.heavyRoundedSystemFont(feed ? 20 : 16), Color.white()).centerAlignText();
-    text(s, feed ? "new" : "offline", Font.mediumSystemFont(9), Color.white()).centerAlignText();
+    s.addSpacer();
+    const m = s.addStack();
+    m.layoutHorizontally();
+    m.addSpacer();
+    image(m, drawMark(2, "#ffffff", { glow: false }), 60, 28);
+    m.addSpacer();
+    s.addSpacer();
   } else if (family === "accessoryInline") {
     text(w, feed ? `K9 · ${feed.total_jobs} open · +${feed.new_today} today` : "K9 · offline", Font.mediumSystemFont(12), Color.white());
   } else if (family === "accessoryRectangular") {
@@ -298,7 +321,7 @@ module.exports = async function run(base, parameter) {
         const m = w.addStack();
         m.layoutHorizontally();
         m.addSpacer();
-        image(m, drawMark(1, accentHex), 78, 36);
+        image(m, drawMark(1, accentHex), 80, 38);
       }
     } else if (family === "medium") {
       w.setPadding(12, 14, 10, 14);
@@ -319,7 +342,7 @@ module.exports = async function run(base, parameter) {
         const hero = top.addStack();
         hero.layoutVertically();
         hero.addSpacer(2);
-        image(hero, drawMark(2, accentHex), 110, 51);
+        image(hero, drawMark(2, accentHex), 110, 52);
         w.addSpacer();
         buttons(w);
       }
@@ -342,7 +365,7 @@ module.exports = async function run(base, parameter) {
         const hero = top.addStack();
         hero.layoutVertically();
         hero.addSpacer(4);
-        image(hero, drawMark(2, accentHex), 130, 60);
+        image(hero, drawMark(2, accentHex), 130, 62);
         w.addSpacer(12);
         buttons(w);
         w.addSpacer(12);
