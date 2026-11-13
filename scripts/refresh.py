@@ -4225,7 +4225,31 @@ def alert_json(payload: dict) -> str:
 # already show.
 WIDGET_JOBS_MAX = 40
 WIDGET_FIELDS = ("schema", "checked_at", "as_of", "total_jobs", "company_count", "new_today", "closing_soon_count",
-                 "jobs")
+                 "new_by_day", "companies", "jobs")
+WIDGET_DAYS = 14                 # the widget's chart: openings first listed on each of the last 14 days
+WIDGET_COMPANY_FIELDS = ("name", "open", "new_today", "icon")
+# The widget's company row shows each company's icon: its site's favicon, fetched once by the phone through a
+# public favicon service and cached there. The careers hosts the ledger reads are mostly vendor-hosted
+# (Workday, Oracle, SuccessFactors), whose favicons are the vendor's, so the company's own domain is named here;
+# an unlisted company falls back to the registrable domain of its careers host.
+WIDGET_ICON_URL = "https://www.google.com/s2/favicons?domain={domain}&sz=64"
+WIDGET_COMPANY_DOMAINS = {
+    "AMD": "amd.com", "Accenture": "accenture.com", "Amazon": "amazon.com", "AstraZeneca": "astrazeneca.com",
+    "D. E. Shaw India": "deshawindia.com", "Deloitte": "deloitte.com", "EY": "ey.com", "Fractal": "fractal.ai",
+    "GE HealthCare": "gehealthcare.com", "GE Vernova": "gevernova.com", "Honeywell": "honeywell.com",
+    "IQVIA": "iqvia.com", "JPMorganChase": "jpmorganchase.com", "Lilly": "lilly.com", "Oracle": "oracle.com",
+    "Qualcomm": "qualcomm.com", "Shell": "shell.com", "Siemens": "siemens.com", "ZS": "zs.com",
+}
+
+
+def company_domain(company: str, url: str) -> str:
+    """The domain whose favicon stands for the company: the listed one, else the registrable part of its careers
+    host (the last two labels, three under a two-letter country code such as .co.in)."""
+    if company in WIDGET_COMPANY_DOMAINS:
+        return WIDGET_COMPANY_DOMAINS[company]
+    labels = (urllib.parse.urlparse(url).netloc.split(":")[0].lower().split("."))
+    keep = 3 if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in ("co", "com", "org", "net", "ac", "gov") else 2
+    return ".".join(labels[-keep:])
 WIDGET_JOB_FIELDS = ("company", "job_id", "title", "location", "url", "apply_url", "posted", "first_seen", "closing",
                      "band", "seen_basis")
 MAX_WIDGET_BYTES = 32_768
@@ -4244,14 +4268,30 @@ def build_widget(state: State, config: Config) -> dict:
     closing = sum(1 for r in visible if r.closing_date
                   and 0 <= (dt.date.fromisoformat(r.closing_date) - as_of).days <= ALERT_CLOSING_DAYS)
     checked = iso_time(state.checked_at)
+    by_day = [0] * WIDGET_DAYS                      # oldest first; the last entry is today
+    for r in visible:
+        age = days_since(r.first_seen, as_of)
+        if age < WIDGET_DAYS:
+            by_day[WIDGET_DAYS - 1 - age] += 1
+    # One entry per company with openings: its open count, today's new listings, and its icon; the ones with news
+    # first (most first), then the biggest, then the page's company order.
+    per: dict[str, dict] = {}
+    for r in newest:                                                            # newest first: the first row's host
+        c = per.setdefault(r.company, {"name": r.company, "open": 0, "new_today": 0,
+                                       "icon": WIDGET_ICON_URL.format(domain=company_domain(r.company, r.canonical_url))})
+        c["open"] += 1
+        c["new_today"] += days_since(r.first_seen, as_of) == 0
+    companies = sorted(per.values(), key=lambda c: (-c["new_today"], -c["open"], order[c["name"]]))
     payload = {
         "schema": 1,
         "checked_at": checked.astimezone(IST).isoformat(timespec="minutes") if checked else None,
         "as_of": as_of.isoformat(),
         "total_jobs": len(visible),
         "company_count": len({r.company for r in visible}),
-        "new_today": sum(1 for r in visible if days_since(r.first_seen, as_of) == 0),
+        "new_today": by_day[-1],
         "closing_soon_count": closing,
+        "new_by_day": by_day,
+        "companies": companies,
         "jobs": [{"company": r.company, "job_id": r.job_id, "title": r.title, "location": r.location,
                   "url": r.canonical_url, "apply_url": apply_url(r, config), "posted": r.posted_date,
                   "first_seen": r.first_seen, "closing": r.closing_date, "band": r.experience_band,
@@ -4271,6 +4311,24 @@ def validate_widget(payload: dict) -> None:
         v = payload[key]
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise ValueError(f"widget: {key}")
+    days = payload["new_by_day"]
+    if not isinstance(days, list) or len(days) != WIDGET_DAYS \
+            or any(not isinstance(d, int) or isinstance(d, bool) or d < 0 for d in days) \
+            or days[-1] != payload["new_today"] or sum(days) > payload["total_jobs"]:
+        raise ValueError("widget: new_by_day")
+    companies = payload["companies"]
+    if not isinstance(companies, list) or len(companies) != payload["company_count"]:
+        raise ValueError("widget: companies")
+    for c in companies:
+        if not isinstance(c, dict) or tuple(c) != WIDGET_COMPANY_FIELDS or not isinstance(c["name"], str) or not c["name"] \
+                or any(not isinstance(c[k], int) or isinstance(c[k], bool) or c[k] < 0 for k in ("open", "new_today")) \
+                or c["new_today"] > c["open"] or not isinstance(c["icon"], str) or not c["icon"].startswith("https://"):
+            raise ValueError("widget: company")
+    if len({c["name"] for c in companies}) != len(companies) or sum(c["open"] for c in companies) != payload["total_jobs"] \
+            or sum(c["new_today"] for c in companies) != payload["new_today"] \
+            or any(c["open"] == 0 for c in companies) \
+            or [c["name"] for c in companies] != [c["name"] for c in sorted(companies, key=lambda c: (-c["new_today"], -c["open"]))]:
+        raise ValueError("widget: companies")
     jobs = payload["jobs"]
     if not isinstance(jobs, list) or len(jobs) > WIDGET_JOBS_MAX:
         raise ValueError("widget: jobs")

@@ -2132,6 +2132,31 @@ class WidgetFeedTests(unittest.TestCase):
         self.assertEqual(str(feed["company_count"]), re.search(r'<dd id="companies">(\d+)</dd>', doc).group(1))
         self.assertEqual(str(feed["new_today"]), re.search(r'<dd id="today">(\d+)</dd>', doc).group(1))
         self.assertEqual(feed["as_of"], self.state.as_of.isoformat())
+        # The bar chart: openings first listed on each of the last 14 days, oldest first, today last (= new_today).
+        rows_all = json.loads(re.search(r"\nconst jobs=(\[.*?\n\]);\n", doc, re.S).group(1))
+        shown = [r for r in rows_all if r[5] <= self.config.max_age_days]
+        self.assertEqual(feed["new_by_day"], [sum(1 for r in shown if r[10] == age) for age in range(R.WIDGET_DAYS - 1, -1, -1)])
+        self.assertEqual(len(feed["new_by_day"]), 14)
+        self.assertEqual(feed["new_by_day"][-1], feed["new_today"])
+        # The company row: every company with openings, its open count, today's new listings and its icon (the
+        # company's own site's favicon via a public favicon service), news first, then size, then company order.
+        want, order = {}, {c: i for i, c in enumerate(self.config.companies)}
+        for r in shown:
+            c = want.setdefault(r[0], {"name": r[0], "open": 0, "new_today": 0, "icon": None})
+            c["open"] += 1
+            c["new_today"] += r[10] == 0
+        self.assertEqual([(c["name"], c["open"], c["new_today"]) for c in feed["companies"]],
+                         [(c["name"], c["open"], c["new_today"]) for c in sorted(want.values(), key=lambda c: (-c["new_today"], -c["open"], order[c["name"]]))])
+        self.assertEqual(len(feed["companies"]), feed["company_count"])
+        self.assertEqual(sum(c["new_today"] for c in feed["companies"]), feed["new_today"])
+        for c in feed["companies"]:
+            self.assertEqual(tuple(c), R.WIDGET_COMPANY_FIELDS)
+            self.assertRegex(c["icon"], r"^https://www\.google\.com/s2/favicons\?domain=[a-z0-9.-]+\.[a-z]+&sz=64$")
+            if c["name"] in R.WIDGET_COMPANY_DOMAINS:
+                self.assertIn("domain=" + R.WIDGET_COMPANY_DOMAINS[c["name"]] + "&", c["icon"])
+        self.assertEqual(R.company_domain("Nobody", "https://acme.wd5.myworkdayjobs.com/x"), "myworkdayjobs.com")
+        self.assertEqual(R.company_domain("Nobody", "https://careers.acme.co.in/x"), "acme.co.in")
+        self.assertEqual(R.company_domain("Siemens", "https://jobs.siemens.com/x"), "siemens.com")
         # The frozen fixture is a seeded state (no run yet): a null stamp. After a run the stamp is the run's start.
         self.assertIsNone(self.state.checked_at)
         self.assertIsNone(feed["checked_at"])
@@ -2160,7 +2185,12 @@ class WidgetFeedTests(unittest.TestCase):
         for private in ("screened", "removal_hold", "listing_total", "stale_since", "last_discovery", "pulls", "excluded"):
             self.assertNotIn(private, text, private)
         for bad in ({**feed, "schema": 2}, {**feed, "total_jobs": -1}, {**feed, "jobs": feed["jobs"] + [{"x": 1}]},
-                    {**feed, "checked_at": "yesterday"}, {**feed, "jobs": [{**feed["jobs"][0], "posted": "Nov 6"}]}):
+                    {**feed, "checked_at": "yesterday"}, {**feed, "jobs": [{**feed["jobs"][0], "posted": "Nov 6"}]},
+                    {**feed, "new_by_day": feed["new_by_day"][:-1]}, {**feed, "new_by_day": feed["new_by_day"][:-1] + [feed["new_today"] + 1]},
+                    {**feed, "new_by_day": [feed["total_jobs"] + 1] * 13 + [feed["new_today"]]},
+                    {**feed, "companies": feed["companies"][1:]}, {**feed, "companies": list(reversed(feed["companies"]))},
+                    {**feed, "companies": [{**feed["companies"][0], "icon": "http://x.test/i.png"}] + feed["companies"][1:]},
+                    {**feed, "companies": [{**feed["companies"][0], "open": feed["companies"][0]["open"] + 1}] + feed["companies"][1:]}):
             with self.assertRaises(ValueError):
                 R.validate_widget(bad)
 
