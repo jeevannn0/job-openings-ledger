@@ -230,6 +230,16 @@ COMPANY_SPECS = {
     # host (account.amazon.jobs) that the ledger does not list.
     "Amazon": _spec(r"https://www\.amazon\.jobs/en/jobs/(\d{6,10})/[a-z0-9]+(?:-[a-z0-9]+)*", {"amazon_jobs_api"},
                     {"www.amazon.jobs"}, "https://www.amazon.jobs/favicon.ico"),
+    # Tesco (Tesco India, Bengaluru) hires through an Avature portal. The ID-only JobDetail/{id} address is served
+    # (the slug is optional); its icon is the portal's own favicon.ico; Apply is the portal's ApplicationMethods page.
+    "Tesco": _spec(r"https://careers\.tesco\.com/en_GB/careers/JobDetail/(\d{5,7})", {"tesco_avature_html"},
+                   {"careers.tesco.com"}, "https://careers.tesco.com/portal/21/favicon.ico",
+                   "https://careers.tesco.com/en_GB/careers/ApplicationMethods?jobId={id}"),
+    # Novotech (clinical CRO) runs Oracle Recruiting CE (site CX_1) on a shared Oracle host. Its icon is the
+    # apple-touch-icon novotech-cro.com declares (checked 18 Nov 2026).
+    "Novotech": _spec(r"https://fa-euzi-saasfaprod1\.fa\.ocs\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1/"
+                      r"job/(\d{3,7})", {"oracle_ce"}, {"fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com"},
+                      "https://novotech-cro.com/themes/novotech2022/images/apple-touch-icon.png", APPLY_ORACLE),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -242,6 +252,7 @@ JOB_ID_RE = {
     "Qualcomm": re.compile(r"\d{9,15}"),
     "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"),
     "Amazon": re.compile(r"\d{6,10}"),
+    "Tesco": re.compile(r"\d{5,7}"), "Novotech": re.compile(r"\d{3,7}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -316,7 +327,24 @@ ORACLE_SITES = {
     "JPMorganChase": (JPM_REST, "CX_1001", JPM_FRONT),
     "Honeywell": ("https://ibqbjb.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/", "CX_1",
                   "https://careers.honeywell.com/en/sites/Honeywell/job/{id}"),
+    "Novotech": ("https://fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/", "CX_1",
+                 "https://fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/{id}"),
 }
+# Tenants whose LOCATIONS facet stops at the country ("India", no cities): that country's facet is paginated in
+# full, and each posting's city is read from its detail record's workLocation (TownOrCity) before screening.
+ORACLE_COUNTRY_FACETS = {"Novotech": "india"}
+
+# Tesco: Avature search pages within 200 km of Bengaluru, newest first, 10 a page (other page sizes are ignored),
+# with "N results" on every page; each job page carries JobPosting JSON-LD. An unpublished job redirects to the
+# portal's Error page on the same host.
+TESCO_BASE = "https://careers.tesco.com/en_GB/careers"
+TESCO_LIST = (TESCO_BASE + "/SearchJobs/?748_location_place=Bengaluru%2C%20Karnataka%2C%20India&748_location_radius=200"
+              "&748_location_coordinates=%5B12.98%2C77.59%5D&listFilterMode=1&jobSort=postedDate&jobSortDirection=DESC"
+              "&jobRecordsPerPage=10&jobOffset={offset}")
+TESCO_DETAIL = TESCO_BASE + "/JobDetail/{id}"
+TESCO_PAGE = 10
+TESCO_TOTAL = re.compile(r"([\d,]+) results?\b")
+TESCO_LINK = re.compile(r'href="https://careers\.tesco\.com/en_GB/careers/JobDetail/[^"/?#]+/(\d{5,7})"')
 
 GEHC_FRONT = "https://gehc.wd5.myworkdayjobs.com/GEHC_ExternalSite"
 GEHC_API = "https://gehc.wd5.myworkdayjobs.com/wday/cxs/gehc/GEHC_ExternalSite"
@@ -711,6 +739,7 @@ _TUNABLES = {
     # Other Workday tenants (WORKDAY_SITES). A search term of "*" means the whole site, paginated in full.
     "workday_cxs": {"budget_s": (30, 600), "search_terms": "terms", "max_total": (20, 3000), "max_new_details": (0, 60)},
     "astrazeneca_talentbrew_html": {"budget_s": (30, 600), "max_total": (10, 500), "max_new_details": (0, 40)},
+    "tesco_avature_html": {"budget_s": (30, 600), "max_total": (10, 500), "max_new_details": (0, 40)},
     "accenture_findjobs_api": {"budget_s": (30, 600), "max_total": (50, 5000), "max_new_rows": (0, 500)},
     "deshaw_nextdata_html": {"budget_s": (30, 600), "max_total": (10, 1000)},
     "oracle_ce": {"budget_s": (30, 600), "max_total": (25, 1000), "max_new_details": (0, 40)},
@@ -1190,6 +1219,7 @@ CONNECTOR_LABELS = {
     "zs_jibe_api": "Jibe Jobs API",
     "workday_cxs": "Workday CXS API",
     "astrazeneca_talentbrew_html": "TalentBrew HTML",
+    "tesco_avature_html": "Avature HTML",
     "accenture_findjobs_api": "Careers search API",
     "deshaw_nextdata_html": "Careers page data",
     "oracle_ce": "Oracle Careers API",
@@ -2604,13 +2634,16 @@ def _jpm_search(fetcher: Fetcher, facet_id: int | None, offset: int, company: st
     return page
 
 
-def _jpm_facets(page: dict, config: Config) -> list[int] | None:
-    """Location-facet IDs whose city (first part of 'Bengaluru, Karnataka, India') is a target city."""
+def _jpm_facets(page: dict, config: Config, company: str = "JPMorganChase") -> list[int] | None:
+    """Location-facet IDs whose city (first part of 'Bengaluru, Karnataka, India') is a target city, or, for a
+    tenant in ORACLE_COUNTRY_FACETS, the ID of its one country facet."""
     facets = page.get("locationsFacet")
     if not isinstance(facets, list):
         return None
+    country = ORACLE_COUNTRY_FACETS.get(company)
     ids = {f["Id"] for f in facets if isinstance(f, dict) and _count(f.get("Id")) and isinstance(f.get("Name"), str)
-           and f["Name"].split(",")[0].strip().lower() in config.cities}
+           and (f["Name"].strip().lower() == country if country else
+                f["Name"].split(",")[0].strip().lower() in config.cities)}
     return sorted(ids)
 
 
@@ -2619,7 +2652,7 @@ def _jpm_listing(cfg: dict, fetcher: Fetcher, config: Config, company: str = "JP
     boot = _jpm_search(fetcher, None, 0, company)
     if boot is None:
         return "search unavailable or malformed"
-    facet_ids = _jpm_facets(boot, config)
+    facet_ids = _jpm_facets(boot, config, company)
     if facet_ids is None:
         return "location facets missing"
     if not facet_ids:                  # a truncated facet list looks the same as "no target roles"
@@ -2679,9 +2712,14 @@ def _uncaps(place: str) -> str:
     return ", ".join(s.title() if s.isupper() else s for s in place.split(", "))
 
 
-def _jpm_places(rec: dict) -> list[str]:
+def _jpm_places(rec: dict, company: str = "JPMorganChase") -> list[str]:
     places = [_uncaps(str(rec.get("PrimaryLocation") or ""))]
     places += [_uncaps(str(s.get("Name") or "")) for s in rec.get("secondaryLocations") or [] if isinstance(s, dict)]
+    if company in ORACLE_COUNTRY_FACETS:
+        # The primary place is only the country here; the city is the work location's town ('Bangalore').
+        towns = [_uncaps(str(w.get("TownOrCity") or "").strip()) for w in
+                 (rec.get("workLocation") or []) + (rec.get("otherWorkLocations") or []) if isinstance(w, dict)]
+        places = [t for t in towns if t] or places
     return [p for p in places if p]
 
 
@@ -2722,7 +2760,7 @@ def _jpm_requirements(info: dict) -> tuple[str, bool]:
 
 def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
                 excluded: frozenset, config: Config) -> SourceResult:
-    """Any Oracle Recruiting CE tenant in ORACLE_SITES (JPMorganChase, Honeywell)."""
+    """Any Oracle Recruiting CE tenant in ORACLE_SITES (JPMorganChase, Honeywell, Novotech)."""
     company = cfg["company"]
     front = _oracle_urls(company)[2]
     today = now.astimezone(IST).date()
@@ -2777,7 +2815,7 @@ def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, 
             continue
         if st != "live" or info is None:
             continue                                 # malformed: retried on a later run
-        places = _jpm_places(info) or _jpm_places(listing[jid])
+        places = _jpm_places(info, company) or _jpm_places(listing[jid], company)
         posted = parse_any_date(info.get("ExternalPostedStartDate")) or posted
         title = clean_text(info.get("Title") or listing[jid].get("Title"), 160)
         text, cue = _jpm_requirements(info)
@@ -3065,6 +3103,128 @@ def refresh_astrazeneca(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.da
             res.screened[jid] = mark
             continue
         row = make_row("AstraZeneca", jid, title, exp, join_places(target_places(places, config)), AZ_BASE + path,
+                       band, generic_closing(data.get("validThrough")), posted, today, config)
+        if row:
+            res.added.append(row)
+        else:
+            invalid += 1
+    res.counts = {"listed": len(listing), "live": len(res.live), "new_checked": checked, "unscreened": len(fresh),
+                  "invalid_rows": invalid}
+    res.detail = _with_invalid(res.detail, invalid)
+    return res
+
+
+# -- Tesco: Avature search pages near Bengaluru plus JobPosting JSON-LD on each job page
+
+@rewalk_once
+def _tesco_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
+    """{job id: listing title} for every posting the Bengaluru search lists, or why it cannot be trusted."""
+    titles: dict[str, str] = {}
+    total: int | None = None
+    offset = 0
+    while True:
+        resp = fetcher.request(TESCO_LIST.format(offset=offset))
+        if not html_ok(resp):
+            return "search page unavailable"
+        text = resp.text()
+        m = TESCO_TOTAL.search(text)
+        if not m:
+            return "search total not found"
+        n = int(m.group(1).replace(",", ""))
+        if n > cfg["max_total"]:
+            return "listing total invalid"
+        if total is None:
+            total = n
+        elif n != total:
+            return DRIFT_DETAIL
+        found = list(dict.fromkeys(TESCO_LINK.findall(text)))
+        if not found and len(titles) < total:
+            return "partial pagination"
+        for jid in found:
+            titles.setdefault(jid, "")
+        offset += TESCO_PAGE
+        if offset >= total:
+            break
+    if len(titles) < total:
+        return DRIFT_DETAIL if len(titles) >= total - 1 else "partial pagination"
+    return titles, total
+
+
+def _tesco_detail(fetcher: Fetcher, jid: str) -> tuple[str, dict | None]:
+    """'live' with the JobPosting JSON-LD naming the ID; 'gone' when the portal redirects the job to its Error
+    page or answers an exact 404/410; 'blocked' for throttling, outages and challenges; otherwise 'unknown'."""
+    resp = fetcher.request(TESCO_DETAIL.format(id=jid))
+    if _is_blocked(resp) or is_challenge(resp) or is_maintenance(resp):
+        return "blocked", None
+    if (resp.status in (404, 410) and not resp.error) or \
+            (resp.status == 200 and urllib.parse.urlsplit(resp.url).path.rstrip("/").endswith("/careers/Error")):
+        return "gone", None
+    if not html_ok(resp) or jid not in resp.text():
+        return "unknown", None
+    for m in AZ_LD.finditer(resp.text()):
+        try:
+            data = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("@type") == "JobPosting":
+            ident = data.get("identifier")
+            if isinstance(ident, dict) and str(ident.get("value")) != jid:
+                return "unknown", None
+            return "live", data
+    return "unknown", None
+
+
+def _tesco_places(data: dict) -> list[str]:
+    loc = data.get("jobLocation")
+    places = _ld_places({"jobLocation": loc if isinstance(loc, list) else [loc] if isinstance(loc, dict) else []})
+    return places
+
+
+def refresh_tesco(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
+                  excluded: frozenset, config: Config) -> SourceResult:
+    today = now.astimezone(IST).date()
+    got = _tesco_listing(cfg, fetcher)
+    if isinstance(got, str):
+        return held("Tesco", got)
+    listing, total = got
+    res = SourceResult("Tesco", True, f"listing {total}", listing_complete=True, listing_total=total,
+                       listed=set(listing), absence_scope=set())
+    streak = 0
+    for r in rows:
+        if r.job_id in listing:
+            res.live.add(r.job_id)
+            continue
+        if streak >= BLOCK_TRIP:
+            continue
+        st, _data = _tesco_detail(fetcher, r.job_id)
+        streak = streak + 1 if st == "blocked" else 0
+        if st == "gone":
+            res.absence_scope.add(r.job_id)   # unpublished and unlisted: counts toward removal
+        # a readable page for an unlisted ID is ambiguous (moved out of the search radius): the row stays
+    existing = {r.job_id for r in rows}
+    fresh = [jid for jid in sorted(listing, key=int, reverse=True)
+             if jid not in existing and jid not in excluded and _unscreened(jid, _fingerprint(jid), cs)]
+    checked = invalid = 0
+    for jid in fresh[:cfg["max_new_details"]]:
+        checked += 1
+        mark = screened_entry(today, _fingerprint(jid))
+        st, data = _tesco_detail(fetcher, jid)
+        if st == "blocked":
+            break
+        if st == "gone":
+            res.screened[jid] = mark
+            continue
+        if st != "live" or data is None:
+            continue
+        title = clean_text(html.unescape(str(data.get("title") or "")), 160)
+        places = _tesco_places(data)
+        posted = parse_any_date(data.get("datePosted"))
+        ok, band, exp = qualifies(title, strip_html(html.unescape(str(data.get("description") or ""))), posted, places,
+                                  today, config)
+        if not ok:
+            res.screened[jid] = mark
+            continue
+        row = make_row("Tesco", jid, title, exp, join_places(target_places(places, config)), TESCO_DETAIL.format(id=jid),
                        band, generic_closing(data.get("validThrough")), posted, today, config)
         if row:
             res.added.append(row)
@@ -3862,6 +4022,7 @@ RUNNERS = {
     "zs_jibe_api": refresh_zs,
     "workday_cxs": refresh_workday,
     "astrazeneca_talentbrew_html": refresh_astrazeneca,
+    "tesco_avature_html": refresh_tesco,
     "accenture_findjobs_api": refresh_accenture,
     "deshaw_nextdata_html": refresh_deshaw,
     "oracle_ce": refresh_jpm,
@@ -4239,6 +4400,7 @@ WIDGET_COMPANY_DOMAINS = {
     "GE HealthCare": "gehealthcare.com", "GE Vernova": "gevernova.com", "Honeywell": "honeywell.com",
     "IQVIA": "iqvia.com", "JPMorganChase": "jpmorganchase.com", "Lilly": "lilly.com", "Oracle": "oracle.com",
     "Qualcomm": "qualcomm.com", "Shell": "shell.com", "Siemens": "siemens.com", "ZS": "zs.com",
+    "Tesco": "tesco.com", "Novotech": "novotech-cro.com",
 }
 
 

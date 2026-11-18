@@ -1477,7 +1477,8 @@ class ConfigTests(unittest.TestCase):
                                               "fractal.wd1.myworkdayjobs.com", "www.deshawindia.com",
                                               "ibqbjb.fa.ocs.oraclecloud.com", "careers.honeywell.com",
                                               "careers.amd.com", "careers.qualcomm.com", "southasiacareers.deloitte.com",
-                                              "careers.ey.com", "www.amazon.jobs"})
+                                              "careers.ey.com", "www.amazon.jobs", "careers.tesco.com",
+                                              "fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com"})
         self.assertEqual({c: config.sources[c]["mode"] for c in config.companies}, {
             "Siemens": "siemens_avature_html", "JPMorganChase": "jpm_oracle_ce", "GE HealthCare": "gehc_workday_cxs",
             "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api",
@@ -1485,7 +1486,7 @@ class ConfigTests(unittest.TestCase):
             "Shell": "workday_cxs", "GE Aerospace": "workday_cxs", "Fractal": "workday_cxs",
             "D. E. Shaw India": "deshaw_nextdata_html", "Honeywell": "oracle_ce", "AMD": "jibe_api",
             "Qualcomm": "eightfold_pcsx_api", "Deloitte": "sf_csb_html", "EY": "sf_csb_html",
-            "Amazon": "amazon_jobs_api"})
+            "Amazon": "amazon_jobs_api", "Tesco": "tesco_avature_html", "Novotech": "oracle_ce"})
         # Two regions; the place terms behind them are what employers actually write.
         self.assertEqual(config.regions, ("bengaluru", "kerala"))
         self.assertEqual(config.cities[:3], ("bengaluru", "bangalore", "kerala"))
@@ -1506,6 +1507,7 @@ class ConfigTests(unittest.TestCase):
                               "ZS": (R.ZS_LIST, R.ZS_FRONT, R.ZS_DETAIL),
                               "Honeywell": R._oracle_urls("Honeywell"), "AMD": R.JIBE_SITES["AMD"][:3],
                               "Amazon": (R.AMZ_SEARCH, R.AMZ_BASE + "/en/jobs/1234567/x"),
+                              "Tesco": (R.TESCO_LIST, R.TESCO_DETAIL), "Novotech": R._oracle_urls("Novotech"),
                               "Qualcomm": tuple(u.replace("{base}", ef_base).replace("{domain}", ef_domain)
                                                 for u in (R.EF_SEARCH, R.EF_JOB, R.EF_FRONT))}.items():
             for url in urls:
@@ -1515,7 +1517,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(R._oracle_urls("JPMorganChase"), (R.JPM_SEARCH, R.JPM_DETAIL, R.JPM_FRONT))
         self.assertIn("siteNumber=CX_1,", R._oracle_urls("Honeywell")[0])
         self.assertIn("ibqbjb.fa.ocs.oraclecloud.com", R._oracle_urls("Honeywell")[1])
-        self.assertEqual(set(R.ORACLE_SITES), {"JPMorganChase", "Honeywell"})     # the shared Oracle CE tenants
+        self.assertEqual(set(R.ORACLE_SITES), {"JPMorganChase", "Honeywell", "Novotech"})     # the shared Oracle CE tenants
         self.assertEqual({c: R.COMPANY_SPECS[c].apply for c in R.ORACLE_SITES}, {c: R.APPLY_ORACLE for c in R.ORACLE_SITES})
         self.assertNotIn("Oracle", R.COMPANY_SPECS)
         self.assertNotIn("Oracle", R.JOB_ID_RE)
@@ -1652,6 +1654,7 @@ class LogoTests(unittest.TestCase):
             "Deloitte": "https://southasiacareers.deloitte.com/talentcommunity/apply/{id}/?locale=en_US",
             "EY": "https://careers.ey.com/ey/talentcommunity/apply/{id}/?locale=en_US",
             "Amazon": "{url}",
+            "Tesco": "https://careers.tesco.com/en_GB/careers/ApplicationMethods?jobId={id}", "Novotech": "{url}/apply/email",
         }
         self.assertEqual({c: R.COMPANY_SPECS[c].apply for c in self.config.companies}, expected)
         self.assertEqual(R.APPLY_WORKDAY, "{url}/apply")
@@ -2619,6 +2622,26 @@ class DryRunTests(unittest.TestCase):
                          ("listing 2 across 2 searches", 2))
         self.assertNotIn("9876543", ids)
         self.assertIn("9876543", after.companies["Amazon"].screened)
+        # Tesco: the Avature search near Bengaluru, JSON-LD job pages (a single jobLocation object, not a list);
+        # the 0-2 years role is added at its ID-only address and the 8+ years role is screened.
+        tes = new["220001"]
+        self.assertEqual((tes.title, tes.location, tes.posted_date, tes.closing_date, tes.experience_band),
+                         ("Associate Data Analyst", "Bengaluru", "2026-10-30", "2027-01-20", "2"))
+        self.assertEqual(tes.canonical_url, "https://careers.tesco.com/en_GB/careers/JobDetail/220001")
+        self.assertEqual(R.apply_url(tes, config),
+                         "https://careers.tesco.com/en_GB/careers/ApplicationMethods?jobId=220001")
+        self.assertEqual(after.companies["Tesco"].detail, "listing 2")
+        self.assertNotIn("220002", ids)
+        self.assertIn("220002", after.companies["Tesco"].screened)
+        # Novotech: an Oracle CE tenant whose location facet is only "India"; the city comes from workLocation, so
+        # the Bangalore role is added and the Mumbai one is screened.
+        nov = new["4001"]
+        self.assertEqual((nov.title, nov.location, nov.experience_band), ("Statistical Programmer I", "Bangalore", "2"))
+        self.assertEqual(nov.canonical_url,
+                         "https://fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/4001")
+        self.assertEqual(after.companies["Novotech"].detail, "listing 2")
+        self.assertNotIn("4002", ids)
+        self.assertIn("4002", after.companies["Novotech"].screened)
         self.assertEqual(R.read_text(os.path.join(tmp, "index.html")), R.render(after, template, config))
         with open(out_file, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "changed=true\nas_of=2026-10-31\n")
@@ -2873,9 +2896,9 @@ class PullHistoryTests(unittest.TestCase):
 LEDGER = "https://example-owner.github.io/job-openings-ledger/"   # synthetic owner; CI derives the real one
 FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999", "60999944",
                  "AIOC-S01699001", "R-199001", "999000001", "R299001", "R5099001", "SR-49001", "9001",
-                 "161001", "95001", "446700000001", "1454290001", "10479782"}
+                 "161001", "95001", "446700000001", "1454290001", "10479782", "220001", "4001"}
 NEW_SOURCES = ("Accenture", "Lilly", "AstraZeneca", "Shell", "GE Aerospace", "Fractal", "D. E. Shaw India",
-               "Honeywell", "AMD", "Qualcomm", "Deloitte", "EY", "Amazon")
+               "Honeywell", "AMD", "Qualcomm", "Deloitte", "EY", "Amazon", "Tesco", "Novotech")
 
 
 def outcome_for(state, added=(), removed=0, run_at="2026-10-31T18:00+05:30", mode="fixtures"):
@@ -3989,8 +4012,9 @@ def source_minimum(company, config, state):
         n = (1 + rows + cfg["max_list_pages"] + cfg["max_list_pages"] // cfg["probe_every_pages"] + 2   # pages,
              + cfg["max_new_details"])                           # a short last page, the capped page), new details
         return n * _per_request(config, "jobs.siemens.com")
-    if company in R.ORACLE_SITES:        # boot search plus two target-city facets (Bengaluru, Bangalore)
-        n = 1 + 1 + 2 * pages(cfg["max_total"], R.JPM_PAGE) + rows + cfg["max_new_details"]
+    if company in R.ORACLE_SITES:        # boot search plus two target-city facets (Bengaluru, Bangalore), or the
+        facets = 1 if company in R.ORACLE_COUNTRY_FACETS else 2                    # one country facet
+        n = 1 + 1 + facets * pages(cfg["max_total"], R.JPM_PAGE) + rows + cfg["max_new_details"]
         return n * _per_request(config, R.ORACLE_SITES[company][0].split("/")[2])
     if company in R.EIGHTFOLD_SITES:     # robots, every search page, one record per unlisted row, new records
         n = 1 + pages(cfg["max_total"], R.EF_PAGE) + rows + cfg["max_new_details"]
@@ -4017,6 +4041,9 @@ def source_minimum(company, config, state):
     if company == "AstraZeneca":         # robots, every search page, one page per unlisted row, new details
         n = 1 + pages(cfg["max_total"], R.AZ_PAGE) + rows + cfg["max_new_details"]
         return n * _per_request(config, "careers.astrazeneca.com")
+    if company == "Tesco":               # robots, every search page, one page per unlisted row, new details
+        n = 1 + pages(cfg["max_total"], R.TESCO_PAGE) + rows + cfg["max_new_details"]
+        return n * _per_request(config, "careers.tesco.com")
     if company == "D. E. Shaw India":    # robots and the one careers page
         return 2 * _per_request(config, "www.deshawindia.com")
     if company in R.SF_SITES:            # robots, a first page per place, the pages the grand total allows (max_total
@@ -4911,7 +4938,7 @@ class SourceHealthTests(unittest.TestCase):
                  prompt + "signal me</p>", 'id="me-marks"', 'id="me-sk"', 'id="me-skills"', 'id="me-save"', 'id="me-export"',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>',
                  # A status strip closes the window, like the title bar opens it: connector count and cadence.
-                 '<div class="term-status"><span>19 connectors · first-party portals</span>'
+                 '<div class="term-status"><span>21 connectors · first-party portals</span>'
                  '<span class="ts-n">8 refreshes a day · on the hour IST</span></div></div></dialog>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb"(?: id="\w+")? style="--d:(\d)"', dialog), list("0123456"))
@@ -5161,7 +5188,7 @@ class SourceHealthTests(unittest.TestCase):
                         and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
-                         "Result2/19 ✓accepted · 2 held · 1 failed · 14 pending"
+                         "Result2/21 ✓accepted · 2 held · 1 failed · 16 pending"
                          f"Openings{records} published · {new_today} new today"
                          "Freshness× FAILED"
                          "Next run1 Nov 00:00 IST · approx.")
@@ -5204,7 +5231,7 @@ class SourceHealthTests(unittest.TestCase):
             with self.subTest(name), self.assertRaises(ValueError):
                 R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
         self.assertNotIn("Companies checked", doc)
-        self.assertIn('<h2 class="vh" id="src-h">Source health: 19 automated sources</h2>', doc)
+        self.assertIn('<h2 class="vh" id="src-h">Source health: 21 automated sources</h2>', doc)
         self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {len(self.state.empty_companies)} '
                       'companies</span>', doc)
         self.assertIn('<dl class="info-dl" id="empty-list"></dl>', doc)
@@ -5308,6 +5335,7 @@ class SourceHealthTests(unittest.TestCase):
             "accenture_findjobs_api": "Careers search API", "deshaw_nextdata_html": "Careers page data",
             "oracle_ce": "Oracle Careers API", "jibe_api": "Jibe Jobs API", "eightfold_pcsx_api": "Eightfold search API",
             "sf_csb_html": "SuccessFactors HTML", "amazon_jobs_api": "Amazon Jobs search API",
+            "tesco_avature_html": "Avature HTML",
             "static": "Static snapshot"})
         section = health_section(R.render(self.state, self.template, self.config))
         expected = {"Siemens": "Avature HTML", "JPMorganChase": "Oracle Careers API", "GE HealthCare": "Workday CXS API",
@@ -5317,7 +5345,7 @@ class SourceHealthTests(unittest.TestCase):
                     "Accenture": "Careers search API", "D. E. Shaw India": "Careers page data",
                     "Honeywell": "Oracle Careers API", "AMD": "Jibe Jobs API", "Qualcomm": "Eightfold search API",
                     "Deloitte": "SuccessFactors HTML", "EY": "SuccessFactors HTML",
-                    "Amazon": "Amazon Jobs search API"}
+                    "Amazon": "Amazon Jobs search API", "Tesco": "Avature HTML", "Novotech": "Oracle Careers API"}
         for company, (_s, rest) in channels(section).items():
             self.assertTrue(rest.startswith(f'<span class="ch-c"><span class="vh">, source connector </span>'
                                             f'{expected[company]}</span></span>'), company)
@@ -5332,18 +5360,18 @@ class SourceHealthTests(unittest.TestCase):
     def test_latest_refresh_rollup_counts(self):
         self.all_states_state()
         sources = R.source_health(self.state, self.config, R.health_reference(self.state))
-        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 14})
+        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 16})
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
         # "N/M ✓" (the word stays for screen readers), then only the non-zero holds/failures/pendings.
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/19 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/21 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span> · <span data-o="held"><b>2</b> held</span> · <span data-o="failed">'
-                      '<b>1</b> failed</span> · <span data-o="pending"><b>14</b> pending</span></dd></div>', block)
+                      '<b>1</b> failed</span> · <span data-o="pending"><b>16</b> pending</span></dd></div>', block)
         self.assertNotIn("sources accepted", doc)
         for c in self.config.companies:
             self.set_company(c, status="ok", last_success=iso(REF), last_attempt=iso(REF))
         clean = status_block(R.render(self.state, self.template, self.config))
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">19</b>/19 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">21</b>/21 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span></dd></div>', clean)                      # no "0 held · 0 failed"
         self.assertNotIn("<b>0</b>", clean)
         for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/16"):
