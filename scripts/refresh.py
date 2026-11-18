@@ -240,6 +240,12 @@ COMPANY_SPECS = {
     "Novotech": _spec(r"https://fa-euzi-saasfaprod1\.fa\.ocs\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1/"
                       r"job/(\d{3,7})", {"oracle_ce"}, {"fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com"},
                       "https://novotech-cro.com/themes/novotech2022/images/apple-touch-icon.png", APPLY_ORACLE),
+    # S&P Global hires through Workday (SPGI_Careers). Its icon is the PNG its careers site (careers.spglobal.com)
+    # declares on its CDN; www.spglobal.com refuses non-browser requests for its own favicon (checked 18 Nov 2026).
+    "S&P Global": _spec(r"https://spgi\.wd5\.myworkdayjobs\.com/SPGI_Careers/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+"
+                        r"_(\d{6,7})(?:-\d{1,3})?", {"workday_cxs"},
+                        {"spgi.wd5.myworkdayjobs.com"},
+                        "https://cms.jibecdn.com/prod/spglobal/assets/FAVICON-en-us-1606120655925.png", APPLY_WORKDAY),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -252,7 +258,7 @@ JOB_ID_RE = {
     "Qualcomm": re.compile(r"\d{9,15}"),
     "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"),
     "Amazon": re.compile(r"\d{6,10}"),
-    "Tesco": re.compile(r"\d{5,7}"), "Novotech": re.compile(r"\d{3,7}"),
+    "Tesco": re.compile(r"\d{5,7}"), "Novotech": re.compile(r"\d{3,7}"), "S&P Global": re.compile(r"\d{6,7}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -395,6 +401,9 @@ WORKDAY_SITES = {
                      re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(R\d{6,9})(?:-\d{1,3})?")),
     "Fractal": ("https://fractal.wd1.myworkdayjobs.com/wday/cxs/fractal/Careers", "https://fractal.wd1.myworkdayjobs.com/Careers",
                 re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(SR-\d{4,7})(?:-\d{1,3})?")),
+    "S&P Global": ("https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/SPGI_Careers",
+                   "https://spgi.wd5.myworkdayjobs.com/SPGI_Careers",
+                   re.compile(r"/job/(?:[A-Za-z0-9._~%-]+/)?[A-Za-z0-9._~%-]+_(\d{6,7})(?:-\d{1,3})?")),
 }
 
 # AstraZeneca: TalentBrew, server-rendered. The India search (location facet 1269750) lists 15 postings a page
@@ -4400,7 +4409,7 @@ WIDGET_COMPANY_DOMAINS = {
     "GE HealthCare": "gehealthcare.com", "GE Vernova": "gevernova.com", "Honeywell": "honeywell.com",
     "IQVIA": "iqvia.com", "JPMorganChase": "jpmorganchase.com", "Lilly": "lilly.com", "Oracle": "oracle.com",
     "Qualcomm": "qualcomm.com", "Shell": "shell.com", "Siemens": "siemens.com", "ZS": "zs.com",
-    "Tesco": "tesco.com", "Novotech": "novotech-cro.com",
+    "Tesco": "tesco.com", "Novotech": "novotech-cro.com", "S&P Global": "spglobal.com",
 }
 
 

@@ -53,7 +53,9 @@
     "www.amazon.jobs": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "careers.tesco.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
-    "novotech-cro.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
+    "novotech-cro.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "spgi.wd5.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "cms.jibecdn.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
     {
@@ -196,7 +198,7 @@
     {
       "company": "Amazon",
       "mode": "amazon_jobs_api",
-      "budget_s": 120,
+      "budget_s": 60,
       "max_total": 2000
     },
     {
@@ -211,6 +213,14 @@
       "mode": "oracle_ce",
       "budget_s": 60,
       "max_total": 50,
+      "max_new_details": 15
+    },
+    {
+      "company": "S&P Global",
+      "mode": "workday_cxs",
+      "budget_s": 60,
+      "search_terms": ["Bengaluru"],
+      "max_total": 60,
       "max_new_details": 15
     }
   ]
