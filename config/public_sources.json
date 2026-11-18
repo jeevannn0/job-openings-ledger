@@ -55,7 +55,9 @@
     "fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
     "novotech-cro.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
     "spgi.wd5.myworkdayjobs.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
-    "cms.jibecdn.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
+    "cms.jibecdn.com": {"fetch": false, "robots": true, "min_delay_s": 1.0},
+    "hdjq.fa.us2.oraclecloud.com": {"fetch": true, "robots": true, "min_delay_s": 1.0},
+    "www.emerson.com": {"fetch": false, "robots": true, "min_delay_s": 1.0}
   },
   "companies": [
     {
@@ -108,7 +110,7 @@
     {
       "company": "Accenture",
       "mode": "accenture_findjobs_api",
-      "budget_s": 90,
+      "budget_s": 75,
       "max_total": 4000,
       "max_new_rows": 400
     },
@@ -123,7 +125,7 @@
     {
       "company": "AstraZeneca",
       "mode": "astrazeneca_talentbrew_html",
-      "budget_s": 90,
+      "budget_s": 75,
       "max_total": 300,
       "max_new_details": 20
     },
@@ -198,7 +200,7 @@
     {
       "company": "Amazon",
       "mode": "amazon_jobs_api",
-      "budget_s": 60,
+      "budget_s": 45,
       "max_total": 2000
     },
     {
@@ -222,6 +224,13 @@
       "search_terms": ["Bengaluru"],
       "max_total": 60,
       "max_new_details": 15
+    },
+    {
+      "company": "Emerson",
+      "mode": "oracle_ce",
+      "budget_s": 45,
+      "max_total": 25,
+      "max_new_details": 10
     }
   ]
 }

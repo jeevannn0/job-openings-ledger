@@ -246,6 +246,9 @@ COMPANY_SPECS = {
                         r"_(\d{6,7})(?:-\d{1,3})?", {"workday_cxs"},
                         {"spgi.wd5.myworkdayjobs.com"},
                         "https://cms.jibecdn.com/prod/spglobal/assets/FAVICON-en-us-1606120655925.png", APPLY_WORKDAY),
+    # Emerson runs Oracle Recruiting CE (site CX_1) on a shared Oracle host; its icon is emerson.com's favicon.ico.
+    "Emerson": _spec(r"https://hdjq\.fa\.us2\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1/job/(\d{6,10})",
+                     {"oracle_ce"}, {"hdjq.fa.us2.oraclecloud.com"}, "https://www.emerson.com/favicon.ico", APPLY_ORACLE),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -259,6 +262,7 @@ JOB_ID_RE = {
     "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"),
     "Amazon": re.compile(r"\d{6,10}"),
     "Tesco": re.compile(r"\d{5,7}"), "Novotech": re.compile(r"\d{3,7}"), "S&P Global": re.compile(r"\d{6,7}"),
+    "Emerson": re.compile(r"\d{6,10}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -335,6 +339,8 @@ ORACLE_SITES = {
                   "https://careers.honeywell.com/en/sites/Honeywell/job/{id}"),
     "Novotech": ("https://fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/", "CX_1",
                  "https://fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/{id}"),
+    "Emerson": ("https://hdjq.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/", "CX_1",
+                "https://hdjq.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/{id}"),
 }
 # Tenants whose LOCATIONS facet stops at the country ("India", no cities): that country's facet is paginated in
 # full, and each posting's city is read from its detail record's workLocation (TownOrCity) before screening.
@@ -2769,7 +2775,7 @@ def _jpm_requirements(info: dict) -> tuple[str, bool]:
 
 def refresh_jpm(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
                 excluded: frozenset, config: Config) -> SourceResult:
-    """Any Oracle Recruiting CE tenant in ORACLE_SITES (JPMorganChase, Honeywell, Novotech)."""
+    """Any Oracle Recruiting CE tenant in ORACLE_SITES (JPMorganChase, Honeywell, Novotech, Emerson)."""
     company = cfg["company"]
     front = _oracle_urls(company)[2]
     today = now.astimezone(IST).date()
@@ -4360,7 +4366,9 @@ def notification_text(new_by_company: list[tuple[str, int]], closing_count: int,
     tail = (f"{closing_count} closing within {ALERT_CLOSING_DAYS} days. {_plural(total, 'job')} across "
             f"{companies} {'company' if companies == 1 else 'companies'}.")
     if new_count:
-        detail = "New: " + ", ".join(f"{c} {n}" for c, n in new_by_company) + ". "
+        # The popup text may carry no '<', '>' or '&' (check_alert); a company name such as "S&P Global" keeps its
+        # look with the full-width ampersand U+FF06, which no renderer reads as markup.
+        detail = "New: " + ", ".join(f"{c.replace('&', '＆')} {n}" for c, n in new_by_company) + ". "
         body = detail + tail
         if len(body) > ALERT_BODY_MAX:
             body = f"New: {new_count}. " + tail
@@ -4409,7 +4417,7 @@ WIDGET_COMPANY_DOMAINS = {
     "GE HealthCare": "gehealthcare.com", "GE Vernova": "gevernova.com", "Honeywell": "honeywell.com",
     "IQVIA": "iqvia.com", "JPMorganChase": "jpmorganchase.com", "Lilly": "lilly.com", "Oracle": "oracle.com",
     "Qualcomm": "qualcomm.com", "Shell": "shell.com", "Siemens": "siemens.com", "ZS": "zs.com",
-    "Tesco": "tesco.com", "Novotech": "novotech-cro.com", "S&P Global": "spglobal.com",
+    "Tesco": "tesco.com", "Novotech": "novotech-cro.com", "S&P Global": "spglobal.com", "Emerson": "emerson.com",
 }
 
 
