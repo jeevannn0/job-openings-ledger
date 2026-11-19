@@ -249,6 +249,10 @@ COMPANY_SPECS = {
     # Emerson runs Oracle Recruiting CE (site CX_1) on a shared Oracle host; its icon is emerson.com's favicon.ico.
     "Emerson": _spec(r"https://hdjq\.fa\.us2\.oraclecloud\.com/hcmUI/CandidateExperience/en/sites/CX_1/job/(\d{6,10})",
                      {"oracle_ce"}, {"hdjq.fa.us2.oraclecloud.com"}, "https://www.emerson.com/favicon.ico", APPLY_ORACLE),
+    # HSBC hires through an Eightfold site whose own icon is a 16 px PNG; hsbc.com publishes a 180 px touch icon.
+    "HSBC": _spec(r"https://portal\.careers\.hsbc\.com/careers/job/(\d{9,15})", {"eightfold_pcsx_api"},
+                  {"portal.careers.hsbc.com"}, "https://www.hsbc.com/apple-touch-icon.png",
+                  "https://portal.careers.hsbc.com/careers/apply?pid={id}&domain=hsbc.com"),
 }
 JOB_ID_RE = {
     "Siemens": re.compile(r"\d{5,7}"), "GE Vernova": re.compile(r"R\d{6,8}"),
@@ -262,7 +266,7 @@ JOB_ID_RE = {
     "Deloitte": re.compile(r"\d{6,10}"), "EY": re.compile(r"\d{8,12}"),
     "Amazon": re.compile(r"\d{6,10}"),
     "Tesco": re.compile(r"\d{5,7}"), "Novotech": re.compile(r"\d{3,7}"), "S&P Global": re.compile(r"\d{6,7}"),
-    "Emerson": re.compile(r"\d{6,10}"),
+    "Emerson": re.compile(r"\d{6,10}"), "HSBC": re.compile(r"\d{9,15}"),
 }
 
 # Target regions. A posting qualifies when any of its locations names one of these terms; the two region
@@ -385,11 +389,17 @@ JIBE_SITES = {
 }
 JIBE_MIN_DELAY_S = {"jobs.zs.com": ZS_MIN_DELAY_S, "careers.amd.com": 5.0}     # each robots.txt: crawl-delay: 5
 
-# Eightfold career sites (Qualcomm): the site's own search lists 10 positions a page with the count on every page,
-# newest postedTs first; the job record is the applicant API's job object (404 "not found" once a posting is gone).
-# careers.qualcomm.com/robots.txt disallows everything except a short list that includes /api/pcsx and /api/apply.
-EIGHTFOLD_SITES = {"Qualcomm": ("https://careers.qualcomm.com", "qualcomm.com")}
+# Eightfold career sites (Qualcomm, HSBC): the site's own search lists 10 positions a page with the count on every
+# page, newest postedTs first; the job record is the applicant API's job object (404 "not found" once a posting is
+# gone). Each robots.txt disallows everything except a short list that includes /api/pcsx and /api/apply.
+# HSBC's tenant answers /api/pcsx with 403 "PCSX is not enabled", so it is searched through the applicant API's
+# own job list (EF_APPLY_SEARCH: count and positions at the top level, creation time as t_create, order unstable
+# between calls, so only the unique-ID check of a complete walk is trusted).
+EIGHTFOLD_SITES = {"Qualcomm": ("https://careers.qualcomm.com", "qualcomm.com"),
+                   "HSBC": ("https://portal.careers.hsbc.com", "hsbc.com")}
 EF_SEARCH = "{base}/api/pcsx/search?domain={domain}&query=&location={location}&start={start}&num=10&sort_by=timestamp"
+EF_APPLY_SEARCH = "{base}/api/apply/v2/jobs?domain={domain}&location={location}&start={start}&num=10&sort_by=timestamp"
+EF_APPLY_LISTING = frozenset({"HSBC"})
 EF_JOB = "{base}/api/apply/v2/jobs/{id}?domain={domain}"
 EF_FRONT = "{base}/careers/job/{id}"
 EF_PAGE = 10
@@ -3598,14 +3608,16 @@ def refresh_zs(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, c
     return res
 
 
-# -- Qualcomm: Eightfold career-site search and job record
+# -- Qualcomm, HSBC: Eightfold career-site search and job record
 
 def _ef_page(fetcher: Fetcher, company: str, location: str, start: int) -> dict | None:
     """The data object of one search page (count, positions), or None when unavailable or malformed."""
     base, domain = EIGHTFOLD_SITES[company]
-    url = EF_SEARCH.format(base=base, domain=domain, location=urllib.parse.quote(location), start=start)
+    apply_list = company in EF_APPLY_LISTING
+    url = (EF_APPLY_SEARCH if apply_list else EF_SEARCH).format(
+        base=base, domain=domain, location=urllib.parse.quote(location), start=start)
     data = fetcher.request(url, accept="json").json_obj()
-    page = data.get("data") if isinstance(data, dict) else None
+    page = (data if apply_list else data.get("data")) if isinstance(data, dict) else None
     if not isinstance(page, dict) or not _count(page.get("count")) or not isinstance(page.get("positions"), list):
         return None
     return page
@@ -3662,6 +3674,14 @@ def _ef_date(ts: object) -> dt.date | None:
     return dt.datetime.fromtimestamp(ts, dt.timezone.utc).date()
 
 
+def _ef_posted_ts(rec: dict) -> object:
+    """The posting's timestamp: postedTs (PCSX search), else creationTs (PCSX), else t_create (applicant list)."""
+    for key in ("postedTs", "creationTs", "t_create"):
+        if _ef_date(rec.get(key)):
+            return rec.get(key)
+    return None
+
+
 def _ef_places(rec: dict) -> list[str]:
     locs = rec.get("locations")
     return [x.strip() for x in locs if isinstance(x, str) and x.strip()] if isinstance(locs, list) else []
@@ -3669,7 +3689,7 @@ def _ef_places(rec: dict) -> list[str]:
 
 def refresh_eightfold(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.datetime, cs: CompanyState,
                       excluded: frozenset, config: Config) -> SourceResult:
-    """Any Eightfold career site in EIGHTFOLD_SITES (Qualcomm)."""
+    """Any Eightfold career site in EIGHTFOLD_SITES (Qualcomm, HSBC)."""
     company = cfg["company"]
     base, _domain = EIGHTFOLD_SITES[company]
     today = now.astimezone(IST).date()
@@ -3696,10 +3716,11 @@ def refresh_eightfold(cfg: dict, rows: list[Row], fetcher: Fetcher, now: dt.date
     existing = {r.job_id for r in rows}
     fresh: list[tuple[dt.date, str, str]] = []
     for jid, rec in listing.items():
-        posted = _ef_date(rec.get("postedTs")) or _ef_date(rec.get("creationTs"))
+        ts = _ef_posted_ts(rec)
+        posted = _ef_date(ts)
         if jid in existing or jid in excluded or not _recent(posted, today, config):
             continue
-        fp = _fingerprint(rec.get("name"), rec.get("postedTs"), *_ef_places(rec))
+        fp = _fingerprint(rec.get("name"), ts, *_ef_places(rec))
         if _unscreened(jid, fp, cs):
             fresh.append((posted, jid, fp))
     fresh.sort(reverse=True)                     # newest posting first
@@ -4418,6 +4439,7 @@ WIDGET_COMPANY_DOMAINS = {
     "IQVIA": "iqvia.com", "JPMorganChase": "jpmorganchase.com", "Lilly": "lilly.com", "Oracle": "oracle.com",
     "Qualcomm": "qualcomm.com", "Shell": "shell.com", "Siemens": "siemens.com", "ZS": "zs.com",
     "Tesco": "tesco.com", "Novotech": "novotech-cro.com", "S&P Global": "spglobal.com", "Emerson": "emerson.com",
+    "HSBC": "hsbc.com",
 }
 
 

@@ -1480,7 +1480,7 @@ class ConfigTests(unittest.TestCase):
                                               "careers.amd.com", "careers.qualcomm.com", "southasiacareers.deloitte.com",
                                               "careers.ey.com", "www.amazon.jobs", "careers.tesco.com",
                                               "fa-euzi-saasfaprod1.fa.ocs.oraclecloud.com", "spgi.wd5.myworkdayjobs.com",
-                                              "hdjq.fa.us2.oraclecloud.com"})
+                                              "hdjq.fa.us2.oraclecloud.com", "portal.careers.hsbc.com"})
         self.assertEqual({c: config.sources[c]["mode"] for c in config.companies}, {
             "Siemens": "siemens_avature_html", "JPMorganChase": "jpm_oracle_ce", "GE HealthCare": "gehc_workday_cxs",
             "GE Vernova": "gevernova_paradox_api", "IQVIA": "iqvia_workday_cxs", "ZS": "zs_jibe_api",
@@ -1489,7 +1489,7 @@ class ConfigTests(unittest.TestCase):
             "D. E. Shaw India": "deshaw_nextdata_html", "Honeywell": "oracle_ce", "AMD": "jibe_api",
             "Qualcomm": "eightfold_pcsx_api", "Deloitte": "sf_csb_html", "EY": "sf_csb_html",
             "Amazon": "amazon_jobs_api", "Tesco": "tesco_avature_html", "Novotech": "oracle_ce",
-            "S&P Global": "workday_cxs", "Emerson": "oracle_ce"})
+            "S&P Global": "workday_cxs", "Emerson": "oracle_ce", "HSBC": "eightfold_pcsx_api"})
         # Two regions; the place terms behind them are what employers actually write.
         self.assertEqual(config.regions, ("bengaluru", "kerala"))
         self.assertEqual(config.cities[:3], ("bengaluru", "bangalore", "kerala"))
@@ -1513,7 +1513,10 @@ class ConfigTests(unittest.TestCase):
                               "Tesco": (R.TESCO_LIST, R.TESCO_DETAIL), "Novotech": R._oracle_urls("Novotech"),
                               "Emerson": R._oracle_urls("Emerson"),
                               "Qualcomm": tuple(u.replace("{base}", ef_base).replace("{domain}", ef_domain)
-                                                for u in (R.EF_SEARCH, R.EF_JOB, R.EF_FRONT))}.items():
+                                                for u in (R.EF_SEARCH, R.EF_JOB, R.EF_FRONT)),
+                              "HSBC": tuple(u.replace("{base}", R.EIGHTFOLD_SITES["HSBC"][0])
+                                            .replace("{domain}", R.EIGHTFOLD_SITES["HSBC"][1])
+                                            for u in (R.EF_APPLY_SEARCH, R.EF_JOB, R.EF_FRONT))}.items():
             for url in urls:
                 self.assertIsNone(R.check_url(url.replace("{", "").replace("}", ""),
                                               R.COMPANY_SPECS[company].hosts), url)
@@ -1527,7 +1530,8 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("Oracle", R.JOB_ID_RE)
         self.assertEqual(R.JIBE_SITES["ZS"], (R.ZS_LIST, R.ZS_FRONT, R.ZS_DETAIL, ("qualifications", "description")))
         self.assertEqual(R.JIBE_SITES["AMD"][3], ("description",))      # AMD's "qualifications" is benefits boilerplate
-        for company in ("Honeywell", "AMD", "Qualcomm", "Deloitte", "EY"):
+        self.assertEqual(R.EF_APPLY_LISTING, {"HSBC"})      # PCSX is disabled on HSBC's tenant (403)
+        for company in ("Honeywell", "AMD", "Qualcomm", "HSBC", "Deloitte", "EY"):
             self.assertIn(company, R.COMPANY_SPECS)
             self.assertIn(company, R.JOB_ID_RE)
         for mode, runner in (("oracle_ce", R.refresh_jpm), ("jibe_api", R.refresh_zs), ("eightfold_pcsx_api", R.refresh_eightfold),
@@ -1660,6 +1664,7 @@ class LogoTests(unittest.TestCase):
             "Amazon": "{url}",
             "Tesco": "https://careers.tesco.com/en_GB/careers/ApplicationMethods?jobId={id}", "Novotech": "{url}/apply/email",
             "S&P Global": "{url}/apply", "Emerson": "{url}/apply/email",
+            "HSBC": "https://portal.careers.hsbc.com/careers/apply?pid={id}&domain=hsbc.com",
         }
         self.assertEqual({c: R.COMPANY_SPECS[c].apply for c in self.config.companies}, expected)
         self.assertEqual(R.APPLY_WORKDAY, "{url}/apply")
@@ -2907,9 +2912,11 @@ class PullHistoryTests(unittest.TestCase):
 LEDGER = "https://example-owner.github.io/job-openings-ledger/"   # synthetic owner; CI derives the real one
 FIXTURE_ADDED = {"528001", "R1580001", "R5060001", "210809001", "R4049001", "68999", "60999944",
                  "AIOC-S01699001", "R-199001", "999000001", "R299001", "R5099001", "SR-49001", "9001",
-                 "161001", "95001", "446700000001", "1454290001", "10479782", "220001", "4001", "332165", "26000001"}
+                 "161001", "95001", "446700000001", "1454290001", "10479782", "220001", "4001", "332165", "26000001",
+                 "563774600000001"}
 NEW_SOURCES = ("Accenture", "Lilly", "AstraZeneca", "Shell", "GE Aerospace", "Fractal", "D. E. Shaw India",
-               "Honeywell", "AMD", "Qualcomm", "Deloitte", "EY", "Amazon", "Tesco", "Novotech", "S&P Global", "Emerson")
+               "Honeywell", "AMD", "Qualcomm", "Deloitte", "EY", "Amazon", "Tesco", "Novotech", "S&P Global", "Emerson",
+               "HSBC")
 
 
 def outcome_for(state, added=(), removed=0, run_at="2026-10-31T18:00+05:30", mode="fixtures"):
@@ -4953,7 +4960,7 @@ class SourceHealthTests(unittest.TestCase):
                  prompt + "signal me</p>", 'id="me-marks"', 'id="me-sk"', 'id="me-skills"', 'id="me-save"', 'id="me-export"',
                  prompt + '<span class="caret" aria-hidden="true"></span></p>',
                  # A status strip closes the window, like the title bar opens it: connector count and cadence.
-                 '<div class="term-status"><span>23 connectors · first-party portals</span>'
+                 '<div class="term-status"><span>24 connectors · first-party portals</span>'
                  '<span class="ts-n">8 refreshes a day · on the hour IST</span></div></div></dialog>']
         self.assertEqual([dialog.index(s) for s in order], sorted(dialog.index(s) for s in order))
         self.assertEqual(re.findall(r'<div class="tb"(?: id="\w+")? style="--d:(\d)"', dialog), list("0123456"))
@@ -5203,7 +5210,7 @@ class SourceHealthTests(unittest.TestCase):
                         and (self.state.as_of - dt.date.fromisoformat(r.posted_date)).days <= self.config.max_age_days)
         self.assertEqual(re.sub(r"<[^>]+>", "", block),
                          "Last refresh31 Oct 22:47 IST 0m ago"
-                         "Result2/23 ✓accepted · 2 held · 1 failed · 18 pending"
+                         "Result2/24 ✓accepted · 2 held · 1 failed · 19 pending"
                          f"Openings{records} published · {new_today} new today"
                          "Freshness× FAILED"
                          "Next run1 Nov 00:00 IST · approx.")
@@ -5246,7 +5253,7 @@ class SourceHealthTests(unittest.TestCase):
             with self.subTest(name), self.assertRaises(ValueError):
                 R.render(self.state, self.template.replace("{{" + name + "}}", ""), self.config)
         self.assertNotIn("Companies checked", doc)
-        self.assertIn('<h2 class="vh" id="src-h">Source health: 23 automated sources</h2>', doc)
+        self.assertIn('<h2 class="vh" id="src-h">Source health: 24 automated sources</h2>', doc)
         self.assertIn(f'<span class="label-sys" id="empty-h">Informational · {len(self.state.empty_companies)} '
                       'companies</span>', doc)
         self.assertIn('<dl class="info-dl" id="empty-list"></dl>', doc)
@@ -5361,7 +5368,8 @@ class SourceHealthTests(unittest.TestCase):
                     "Honeywell": "Oracle Careers API", "AMD": "Jibe Jobs API", "Qualcomm": "Eightfold search API",
                     "Deloitte": "SuccessFactors HTML", "EY": "SuccessFactors HTML",
                     "Amazon": "Amazon Jobs search API", "Tesco": "Avature HTML", "Novotech": "Oracle Careers API",
-                    "S&P Global": "Workday CXS API", "Emerson": "Oracle Careers API"}
+                    "S&P Global": "Workday CXS API", "Emerson": "Oracle Careers API",
+                    "HSBC": "Eightfold search API"}
         for company, (_s, rest) in channels(section).items():
             self.assertTrue(rest.startswith(f'<span class="ch-c"><span class="vh">, source connector </span>'
                                             f'{expected[company]}</span></span>'), company)
@@ -5376,18 +5384,18 @@ class SourceHealthTests(unittest.TestCase):
     def test_latest_refresh_rollup_counts(self):
         self.all_states_state()
         sources = R.source_health(self.state, self.config, R.health_reference(self.state))
-        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 18})
+        self.assertEqual(R.attempt_rollup(sources), {"accepted": 2, "held": 2, "failed": 1, "pending": 19})
         doc = R.render(self.state, self.template, self.config)
         section, block = health_section(doc), status_block(doc)
         # "N/M ✓" (the word stays for screen readers), then only the non-zero holds/failures/pendings.
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/23 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">2</b>/24 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span> · <span data-o="held"><b>2</b> held</span> · <span data-o="failed">'
-                      '<b>1</b> failed</span> · <span data-o="pending"><b>18</b> pending</span></dd></div>', block)
+                      '<b>1</b> failed</span> · <span data-o="pending"><b>19</b> pending</span></dd></div>', block)
         self.assertNotIn("sources accepted", doc)
         for c in self.config.companies:
             self.set_company(c, status="ok", last_success=iso(REF), last_attempt=iso(REF))
         clean = status_block(R.render(self.state, self.template, self.config))
-        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">23</b>/23 <span aria-hidden="true">✓</span>'
+        self.assertIn('<div><dt>Result</dt><dd><b data-o="accepted">24</b>/24 <span aria-hidden="true">✓</span>'
                       '<span class="vh">accepted</span></dd></div>', clean)                      # no "0 held · 0 failed"
         self.assertNotIn("<b>0</b>", clean)
         for gone in ("h-rw", "hs-a", "h-roll", "Latest refresh", "worst freshness", "/16"):
