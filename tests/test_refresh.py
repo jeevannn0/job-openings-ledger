@@ -1175,50 +1175,46 @@ class NewSourceHelperTests(unittest.TestCase):
         self.assertEqual(card.count("<a "), 2)                       # the title and the Apply link
         self.assertEqual(card.count("<button"), 3)                   # the dog tag, JD and "+N more"
         for snippet in ('const jdl=$("#jd"),jdw=$("#jd .term-win"),jdB=$("#jd-b"),jdT=$("#jd-t"),jdM=$("#jd-m"),jdK=$("#jd-k"),'
-                        'jdL=$("#jd-l"),jdA=$("#jd-ap"),JOB=new Map(jobs.map(r=>[key(r),r]));',
-                        # The sheet reads like command output: `signal jd --id N`, then a key/value block built from
-                        # the opening's own row (company, location, posted/first seen, closes, experience, skills), every
-                        # value through esc(); the Apply link appears only when the row has an apply URL.
-                        'const jdRow=(k,v)=>`<div><dt>${k}</dt><dd>${v}</dd></div>`,jdOpen=async b=>{const u=b.dataset.u,'
-                        'r0=JOB.get(b.closest(".card").querySelector(".dtag").dataset.k)||[],[,id,,e,d,a,l,,bd,cd,,sb,ap]=r0;',
-                        'jdM.textContent=id?`--id ${id}`:"";jdL.href=u;jdA.hidden=!ap;if(ap)jdA.href=ap;',
-                        'jdK.innerHTML=jdRow("company",esc(b.dataset.c))+jdRow("location",esc(b.dataset.l))',
-                        '+(d?jdRow(sb?"first seen":"posted",`${esc(d)} <span class="age">${a===0?"today":`${a} day${a===1?"":"s"} ago`}</span>`):"")',
-                        '+(cd?jdRow("closes",`${esc(fmtClose(cd))} <span class="age">${k===null?"":k<0?"passed":k===0?"today":`in ${k} d`}</span>`):"")',
-                        '+(bd?jdRow("experience",`${esc(BAND[bd]||"")}${ns?"":` <span class="age">${esc(x)}</span>`}`):"")',
-                        '+(skills.length?jdRow("skills",\'<span class="age" id="jd-sk">matching\\u2026</span>\'):"");',
-                        'if(x.startsWith("\\u2022 ")){ul.push(x.slice(2));continue}',
-                        'out.push(x.startsWith("## ")?`<h3>${esc(x.slice(3))}</h3>`:`<p>${esc(x)}</p>`)',
-                        'jdL.href=u;', 'jdl.showModal();jdw.focus();',
-                        'const d=r.ok?await r.json():null;if(seq!==jdSeq)return;',
+                        'jdF=$("#jd-f"),jdG=$("#jd-g"),jdR=$("#jd-r"),jdL=$("#jd-l"),jdA=$("#jd-ap"),JOB=new Map(jobs.map(r=>[key(r),r]));',
+                        # The sheet reads like command output (`signal jd --id N`, typed by a CSS steps() animation), then
+                        # the title, a meta line from the opening's own row, four fact cards, a skills + requirements
+                        # panel and the description in sections; every value through esc(); Apply only with an apply URL.
+                        'const jdOpen=async b=>{const u=b.dataset.u,r0=JOB.get(b.closest(".card").querySelector(".dtag").dataset.k)||[],'
+                        '[,id,,e,d,a,l,,bd,cd,,sb,ap]=r0;',
+                        'jdL.href=u;jdA.hidden=!ap;if(ap)jdA.href=ap;',
+                        'jdM.textContent=id?`--id ${id}`:"";',
+                        'jdK.innerHTML=esc(b.dataset.c)+dot+esc(b.dataset.l)',
+                        'jdl.showModal();jdw.focus();',
+                        'const d=r.ok||r.status===404?await r.json().catch(()=>null):null;if(seq!==jdSeq)return;',
+                        # A closed posting (the Worker's 404 "gone") says so instead of blaming the employer's site.
+                        'if(d&&d.error==="gone"){',
                         'if(!d||d.ok!==true||typeof d.text!=="string"||!d.text)throw 0;',
-                        # The description is escaped by jdText first; skMark then wraps the reader's own skill words
-                        # in <mark> between tags only (never inside one), so the on-device skill list cannot inject.
-                        'const[h,hit]=skMark(jdText(d.text));jdB.innerHTML=h;',
-                        'skMark=h=>{const rx=skRx();if(!rx)return[h,new Set()];const hit=new Set();return[h.split(/(<[^>]+>)/)'
-                        '.map(s=>s.startsWith("<")?s:s.replace(rx,(m,a,w)=>{hit.add(w.toLowerCase());return`${a}<mark class="sk">${w}</mark>`}))'
-                        '.join(""),hit]};',
-                        'const sk=$("#jd-sk");if(skills.length&&sk){const miss=skills.filter(s=>!hit.has(s));sk.innerHTML=`<b class="sk-n">'
-                        '${hit.size} of ${skills.length} skills</b>',
+                        # The text is parsed into sections and analysed on the device (no AI, no network): headings with
+                        # or without "## ", "•"/"-"/"1." bullets, repeated blocks dropped, company/legal text folded away.
+                        'const secs=jdParse(d.text,b.dataset.c),A=jdAnalyse(secs,skills);',
+                        'jdF.innerHTML=jdTiles(A,band,detail);jdR.innerHTML=jdRail(A);jdR.hidden=false;jdG.classList.remove("one");'
+                        'jdB.innerHTML=jdMain(secs,A);jdMotion()}',
+                        # Every piece of response text reaches the DOM through esc() inside jdHl/jdBody; highlight tags
+                        # wrap escaped slices only.
+                        'o+=esc(t.slice(p,s0))+`<${g} class="jk ${e.tier}${e.st==="have"?" have":""}" data-s="${esc(e.n)}">'
+                        '${esc(t.slice(s0,f))}</${g}>`',
                         'out.addEventListener("click",e=>{const b=e.target.closest(".jd");if(b)jdOpen(b)});',
                         'jdl.addEventListener("click",e=>{if(e.target===jdl)jdl.close()});',
-                        '$("#jd-x").addEventListener("click",()=>jdl.close());',
+                        '$("#jd-x").addEventListener("click",()=>jdl.close());jdw.addEventListener("click",jdClick);',
                         'jdl.addEventListener("close",()=>{jdSeq++;if(jdOpener&&document.contains(jdOpener))jdOpener.focus()});'):
             self.assertIn(snippet, script, snippet)
         # Response text only ever reaches the DOM through esc(): no raw insertion of d.text or d.title.
         self.assertNotIn("innerHTML=d.", script)
         self.assertNotIn("innerHTML=d.text", script)
-        self.assertEqual(script.count("jdB.innerHTML="), 3)         # loading note, rendered text, failure note
+        self.assertNotIn("skMark", script)                            # the old marker is gone; jdHl highlights
         dialog = re.search(r'<dialog id="jd".*?</dialog>', doc, re.S).group(0)
-        self.assertEqual(dialog.count("<button"), 1)                 # the close dot
-        # The link has no href until the sheet opens (the script sets the posting's URL), so <base target="_blank">
-        # applies to it like to every job link and the in-page-anchor rule does not.
-        # Sheet markup: a terminal window — title bar, a prompt line whose flag is the job ID, the key/value block,
-        # the title, the description, then a status strip holding the two outbound links and a privacy note.
+        self.assertEqual(dialog.count("<button"), 1)                 # the close dot (the rest is built per posting)
+        # Sheet markup: a terminal window — title bar, the prompt line whose flag is the job ID, the title, the
+        # meta line, the fact cards, then the panel + description grid, and the status strip with the two links.
         self.assertIn('<span id="jd-h">ops@job-signal — job description</span><span class="term-esc" aria-hidden="true">esc</span></div>\n'
                       '<div class="term-out jd-out"><p class="pl"><span class="pu">ops@job-signal</span> <span class="pp">~ %</span> signal jd '
-                      '<span class="flag" id="jd-m"></span></p><dl class="kvs jd-k" id="jd-k"></dl><h2 class="jd-t" id="jd-t"></h2>'
-                      '<div class="jd-b" id="jd-b"></div></div>\n'
+                      '<span class="flag" id="jd-m"></span></p><h2 class="jd-t" id="jd-t"></h2><p class="jd-k" id="jd-k"></p>'
+                      '<div class="jd-f" id="jd-f"></div><div class="jd-g" id="jd-g"><div class="jd-r" id="jd-r"></div><div class="jd-b" id="jd-b"></div></div></div>\n'
                       '<div class="term-status"><span class="ts-l"><a class="jd-l" id="jd-l" rel="noopener noreferrer">open posting ↗</a>'
                       '<a class="jd-ap" id="jd-ap" rel="noopener noreferrer" hidden>apply ↗</a></span>'
                       '<span class="ts-n">fetched live from the employer · nothing is stored</span></div>\n</div></dialog>', doc)
@@ -1227,19 +1223,21 @@ class NewSourceHelperTests(unittest.TestCase):
         style = style_of(doc)
         self.assertIn(".jd{padding:0;border:0;background:none;font:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:700;"
                       'color:hsl(var(--signal));cursor:pointer}.jd:after{content:"";position:absolute;inset:-8px -4px}', style)
-        # Mono throughout, like the rest of the terminal: a bold title over a rule, "## " section heads in cyan,
-        # dash bullets, body copy a step dimmer than the values above it, cyan pill links in the strip.
-        self.assertIn(".jd-out{padding:18px 22px 28px}.jd-k{margin:0 0 18px}", style)
-        self.assertIn(".jd-t{margin:0 0 4px;padding:16px 0 0;border-top:1px solid hsl(var(--t-line));font:700 17px/1.4 var(--font-mono);", style)
-        self.assertIn(".jd-b{max-width:76ch;margin-top:14px;color:hsl(var(--t-fg2))}", style)
-        self.assertIn('.jd-b li:before{content:"-";position:absolute;left:.3em;color:hsl(var(--t-dimmer))}', style)
-        self.assertIn('.jd-b h3:before{content:"## ";color:hsl(var(--t-dimmer))}', style)
+        # Two colours carry meaning (purple = must-have, red = in the reader's skills); everything else is grey.
+        self.assertIn("#jd{--must:268 92% 74%;--have:4 100% 70%;", style)
+        self.assertIn(".jd-f{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0 0}", style)
+        self.assertIn(".jd-g{display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;margin:14px 0 0}", style)
+        self.assertIn(".jk.must{padding-bottom:1px;background:linear-gradient(hsl(var(--must)),hsl(var(--must))) 0 100%/100% 2px no-repeat}", style)
+        self.assertIn(".jk.have{background:linear-gradient(hsl(var(--have)/.18),hsl(var(--have)/.18)) 0 0/100% 100% no-repeat;color:hsl(var(--have))}", style)
         self.assertIn(".jd-l,.jd-ap{display:inline-flex;align-items:center;min-height:30px;padding:4px 12px;border:1px solid hsl(189 43% 27%);"
                       "border-radius:5px;", style)
-        # Phones: full-width text, a slightly smaller title; the strip (outside the scroll area) keeps the links
-        # reachable and pads for the home indicator.
+        # Motion only when the reader has not asked for less; the count-up is CSS (a registered integer), no timers.
+        self.assertIn("@media not (prefers-reduced-motion:reduce){#jd-m.typed{", style)
+        self.assertIn('@property --jn{syntax:"<integer>";inherits:false;initial-value:0}', style)
+        # Phones: two fact cards a row, the panel above the text, the strip keeps the links reachable.
         _base, blocks = media_blocks(style)
-        self.assertIn(".term-out.jd-out{padding:16px 16px 24px}.jd-t{font-size:16px}.jd-b{max-width:none}", blocks[SHEET_MQ])
+        self.assertIn(".term-out.jd-out{padding:16px 16px 24px}#jd .term-win{width:100%;max-height:none}.jd-t{font-size:18px}"
+                      ".jd-f{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}", blocks[SHEET_MQ])
         self.assertIn(".term-status{padding-bottom:calc(8px + env(safe-area-inset-bottom))}", blocks[SHEET_MQ])
 
     def test_kerala_cities_are_the_region_terms(self):
@@ -1311,6 +1309,27 @@ class NewSourceHelperTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- IQVIA discovery
+
+class SuccessFactorsClosedPageTests(unittest.TestCase):
+    def test_a_filled_or_withdrawn_posting_page_is_gone(self):
+        # EY and Deloitte keep a closed job's URL: 200, the job's ID in the page, a closed notice, no datePosted.
+        # That is exact evidence the posting is over; a live page (datePosted) or a page without the ID is not.
+        class One:
+            def __init__(self, resp):
+                self.resp = resp
+
+            def request(self, url, **_kw):
+                return self.resp
+        page = lambda body: R.Resp(200, "https://careers.ey.com/ey/job/India/1455361633/", body.encode(), "text/html")
+        for notice in ("The job is no longer available.", "Sorry, this position has been filled."):
+            body = f"<html><a href='/ey/job/India/1455361633/'>x</a><p>{notice}</p></html>"
+            self.assertEqual(R._sf_detail(One(page(body)), "https://careers.ey.com", "/ey/job/India/1455361633/", "1455361633"),
+                             ("gone", None), notice)
+        live = '<meta itemprop="datePosted" content="Thu Nov 19 00:00:00 UTC 2026"> 1455361633 no longer available elsewhere'
+        self.assertNotEqual(R._sf_detail(One(page(live)), "https://careers.ey.com", "/x", "1455361633")[0], "gone")
+        other = "<p>The job is no longer available.</p>"            # no ID on the page: not evidence for this job
+        self.assertEqual(R._sf_detail(One(page(other)), "https://careers.ey.com", "/x", "1455361633"), ("unknown", None))
+
 
 class IqviaDiscoveryTests(unittest.TestCase):
     QUALIFYING = "R1500001"          # lowest ID, so it sorts below every non-qualifying result
@@ -4892,8 +4911,12 @@ class SourceHealthTests(unittest.TestCase):
         # terminal's lights. The terminal windows (Requests, JD sheet) are the one rounded surface: a 10px window
         # that goes edge-to-edge (0) on phones, 7px prompt boxes and source table, 5px buttons, 3px key caps.
         self.assertIn("*,:before,:after{box-sizing:border-box;border-radius:0}", style)
-        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style),
+        # The JD sheet (inside a terminal window) is a dashboard: 16px cards, 10px/8px chips, pill tabs and key.
+        jd_css = style[style.index("#jd{--must"):style.index(".jd-s{")]
+        self.assertEqual(re.findall(r"border-radius:([^;}]+)", style.replace(jd_css, "")),
                          ["0", "50%", "10px", "50%", "3px", "5px", "7px", "7px 7px 0 0", "0 0 7px 7px", "5px", "0", "7px"])
+        self.assertLessEqual(set(re.findall(r"border-radius:([^;}]+)", jd_css)),
+                             {"16px", "3px", "10px", "8px", "4px", "16px 16px 0 0", "999px", "50%", "12px", "2px", "1px"})
         base_rules = dict((tuple(s), b) for s, b in css_rules(media_blocks(style)[0]))
         for sel in (".panel", ".card", ".ob,.ci,.chip", ".chamfer-btn", ".qbox", ".av", ".none", ".side"):
             self.assertNotIn("border-radius", base_rules[tuple(s.strip() for s in sel.split(","))], sel)
@@ -5100,7 +5123,8 @@ class SourceHealthTests(unittest.TestCase):
         script = main_script(doc)
         self.assertIn('q.addEventListener("keydown",e=>{if(e.key==="Enter"&&mq.matches){e.preventDefault();q.blur();'
                       '$("#feed").scrollIntoView({behavior:RM.matches?"auto":"smooth",block:"start"})}})', script)
-        self.assertEqual(script.count("scrollIntoView"), 1)
+        # Besides that jump, the JD sheet scrolls only on the reader's own tap: a section tab or a skill chip.
+        self.assertEqual(script.count("scrollIntoView"), 3)
         for banned in ("mq.addEventListener", "addListener", '"resize"', "onresize", ".onchange"):
             self.assertNotIn(banned, script, banned)
         # On phones the three selects start collapsed behind a Filters toggle; the search box, Reset, the
@@ -5613,7 +5637,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn(".ar{grid-column:2;position:sticky;top:calc(var(--hh) + 16px);", blocks[WIDE_MQ])
         self.assertIn("max-height:calc(100dvh - var(--hh) - 2rem)", blocks[WIDE_MQ])
         # Under the splash (z 50); the fixed theme toggle (z 30) sits bottom-right and never overlaps.
-        self.assertEqual(style.count("position:sticky"), 3)        # .hdr, the desktop aside, the terminal's title bar
+        self.assertEqual(style.count("position:sticky"), 4)        # .hdr, the desktop aside, the terminal's title bar, the JD tab row
         self.assertEqual(style.count("z-index:20"), 1)
         self.assertNotIn("offsetHeight", main_script(doc))        # the CSS numbers are the contract, no measuring
 
@@ -5710,13 +5734,17 @@ class SourceHealthTests(unittest.TestCase):
             self.assertTrue(times, decl)
             self.assertLess(max(secs(t) for t in times), 0.6, decl)
         for name in ("boot-in", "led-pulse", "dialog-pop-in", "overlay-fade-in", "sheet-up", "pxin", "blink", "glitch-x",
-                     "glitch-a", "glitch-b", "nv-on", "nv-flash", "nv-grain", "nv-type", "nv-cut", "nv-off", "nv-off2"):
+                     "glitch-a", "glitch-b", "nv-on", "nv-flash", "nv-grain", "nv-type", "nv-cut", "nv-off", "nv-off2",
+                     "jd-rise", "jd-fill", "jd-pop", "jd-slide", "jd-ping", "jd-count", "jd-type"):
             self.assertIn(f"@keyframes {name}{{", style)
-        self.assertEqual(style.count("@keyframes"), 17)
+        self.assertEqual(style.count("@keyframes"), 24)
         # The reveal stagger is 40ms per card, applied to the first 12 cards on the first render only; the
         # terminal's six output blocks and prompt stagger by 70ms and all finish within .7s.
         self.assertEqual(re.findall(r"animation-delay:([^;}]+)", effects), ["calc(var(--i)*40ms)",
-                                                                            "calc(var(--d)*70ms)"])
+                                                                            "calc(var(--d)*70ms)",
+                                                                            # the JD sheet: cards, bar, chips, rows
+                                                                            "calc(var(--i,0)*55ms)", "calc(.3s + var(--i,0)*50ms)",
+                                                                            "calc(.25s + var(--i,0)*28ms)", "calc(.35s + var(--i,0)*40ms)"])
         # Splash: a violet night-vision scope that powers on, types its HUD readouts, locks and powers off (no
         # big mark in the middle: the reticle is the centre). It is an
         # overlay (the page is complete underneath), finite (every run ends by 1.8s, a 2.2s script ceiling
@@ -6082,7 +6110,7 @@ class SourceHealthTests(unittest.TestCase):
                         'try{await navigator.clipboard.writeText(j);o.textContent=`${[...marks.values()].filter(m=>m.s).length} copied as JSON`}'
                         'catch(e){o.textContent="copy blocked · allow clipboard for this site"}',
                         # Skill words are matched whole (not inside longer tokens such as c++ or .net) and escaped for RegExp.
-                        'const skRx=()=>skills.length?new RegExp(`(^|[^a-z0-9+#.])(${skills.map(s=>s.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&")).join("|")})(?![a-z0-9+#])`,"gi"):null,',
+                        'const jdRx=n=>new RegExp(`(?<![a-z0-9+#.])${n.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&")',
                         'const lv2=[...marks.values()].filter(m=>m.s);$("#me-marks").textContent=lv2.length?'):
             self.assertIn(snippet, script, snippet)
         self.assertEqual(script.count("k9skills"), 2)
@@ -6136,8 +6164,7 @@ class SourceHealthTests(unittest.TestCase):
         self.assertIn(".term-out .me-in{flex:1 1 180px;min-width:0;padding:4px 10px;border:1px solid hsl(var(--t-line));border-radius:7px;"
                       "background:hsl(var(--t-bg2));color:hsl(var(--t-fg));font-size:13px;letter-spacing:0;text-transform:none;cursor:text;"
                       "caret-color:hsl(var(--t-cyan))}", style_of(doc))
-        self.assertIn(".me-in::placeholder{color:hsl(var(--t-dimmer))}mark.sk{background:hsl(var(--t-cyan)/.16);color:hsl(var(--t-cyan));"
-                      "padding:0 2px;font-weight:600}.sk-n{color:hsl(var(--ok))}.sk-m{color:hsl(var(--bad))}", style_of(doc))
+        self.assertIn(".me-in::placeholder{color:hsl(var(--t-dimmer))}#pn-state{", style_of(doc))   # JD highlights live in the sheet now
 
     def test_feed_cards_sorting_and_company_chips(self):
         doc = R.render(self.state, self.template, self.config)

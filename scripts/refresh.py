@@ -3820,8 +3820,9 @@ def _sf_listing(cfg: dict, fetcher: Fetcher) -> tuple[dict, int] | str:
 
 
 def _sf_detail(fetcher: Fetcher, base: str, path: str, jid: str) -> tuple[str, dict | None]:
-    """'live' with {meta itemprops, description, places} of a page that names the ID; 'gone' on an exact 404/410;
-    'blocked' for throttling, outages and challenges; otherwise 'unknown'."""
+    """'live' with {meta itemprops, description, places} of a page that names the ID; 'gone' on an exact 404/410
+    or on the job's own page saying it is closed; 'blocked' for throttling, outages and challenges; otherwise
+    'unknown'."""
     resp = fetcher.request(base + path)
     if _is_blocked(resp) or is_challenge(resp) or is_maintenance(resp):
         return "blocked", None
@@ -3830,6 +3831,11 @@ def _sf_detail(fetcher: Fetcher, base: str, path: str, jid: str) -> tuple[str, d
     if not html_ok(resp) or jid not in resp.text():
         return "unknown", None
     text = resp.text()
+    # A filled or withdrawn posting keeps its own URL and answers 200 with the job's ID and a closed notice
+    # (EY "The job is no longer available.", Deloitte "Sorry, this position has been filled."); an unknown ID
+    # redirects away instead, so the notice on a page that names this ID is exact evidence.
+    if "datePosted" not in text and any(p in re.sub(r"\s+", " ", strip_html(text)).lower() for p in CLOSED_PHRASES):
+        return "gone", None
     pairs = SF_META.findall(text)
     meta = dict(pairs)
     if "datePosted" not in meta:
