@@ -1731,8 +1731,8 @@ class LogoTests(unittest.TestCase):
         self.assertIn('<a class="ap" href="${esc(ap)}" rel="noopener noreferrer">Apply<span class="vh"> on the employer\'s site'
                       '</span></a>${more?', script)
         style = style_of(doc)
-        self.assertIn('.ap{padding:1px 7px;border:1px solid hsl(var(--signal)/.55);font-weight:700;color:hsl(var(--signal))}'
-                      '.ap:after{content:"";position:absolute;inset:-8px -4px}.ap:hover,.ap:focus-visible{background:hsl(var(--signal)/.12)}',
+        self.assertIn('a.ap{padding:1px 7px;border:1px solid hsl(var(--signal)/.55);font-weight:700;color:hsl(var(--signal))}'
+                      'a.ap:after{content:"";position:absolute;inset:-8px -4px}a.ap:hover,a.ap:focus-visible{background:hsl(var(--signal)/.12)}',
                       style)
 
     def test_logo_url_outside_the_allowlist_or_shape_fails_closed(self):
@@ -5842,7 +5842,7 @@ class SourceHealthTests(unittest.TestCase):
         for gone in (".lk{display:flex", ".go{", ".cta{"):       # the old Quick-views rows, card links and CTA stack
             self.assertNotIn(gone, style, gone)
         # On phones the card title link covers the whole card.
-        self.assertIn('.job:after{content:"";position:absolute;inset:0}', blocks[PHONE_MQ])
+        self.assertIn('a.job:after{content:"";position:absolute;inset:0}', blocks[PHONE_MQ])
         self.assertTrue(rules[(".card",)].startswith("position:relative;"))
         # The card wears the search panel's faded vertical gradient (three stops, 0/55/100%, like --panel-grad) as a
         # faint wash in its age hue over the page background; the outline stays the plain hull border. No per-age
@@ -6260,7 +6260,7 @@ class SourceHealthTests(unittest.TestCase):
                         '<span class="mg"><span class="bd" data-b="${esc(b)}"><span class="vh">Experience: </span>'
                         '<span class="xl" aria-hidden="true">Exp</span>${esc(BAND[b]||"")}</span><span class="c-id">'):
             self.assertIn(snippet, script, snippet)
-        self.assertIn(".tgl{display:flex;gap:6px}.tgl>.tgl{margin-left:6px}", style_of(doc))
+        self.assertIn(".tgl{display:flex;flex-wrap:wrap;gap:6px}.tbar>.tgl{column-gap:12px}", style_of(doc))
         self.assertIn(".nw{font-weight:700;color:hsl(var(--signal))}", style_of(doc))
         # The relative age is the freshness cue, so it takes the line's emphasis (600, steel) and the posting date
         # beside it stays muted; the two no longer read as one token.
